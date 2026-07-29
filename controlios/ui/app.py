@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import List
 
@@ -15,7 +16,8 @@ from PySide6.QtWidgets import (
     QPushButton, QSplitter, QStatusBar, QToolBar, QVBoxLayout, QWidget,
 )
 
-from ..config import DEFAULT_PORT, DEFAULT_REGISTRY, DeviceSpec, Registry
+from .. import script as script_lang
+from ..config import DEFAULT_PORT, DEFAULT_REGISTRY, PROJECT_ROOT, DeviceSpec, Registry
 from ..scan import arp_hosts, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import Frame, State, Tier
@@ -25,6 +27,21 @@ from .grid import DeviceGrid
 log = logging.getLogger(__name__)
 
 PAGE_SIZES = [("50 máy", 50), ("100 máy", 100), ("250 máy", 250), ("Tất cả", 0)]
+CAPTURES_DIR = PROJECT_ROOT / "captures"
+
+SAMPLE_SCRIPT = """\
+# Toạ độ là TỈ LỆ màn hình (0..1), không phải pixel,
+# nên cùng kịch bản chạy đúng trên mọi cỡ iPhone.
+
+shot truoc-khi-chay
+tap 0.5 0.85
+wait 1.5
+swipe 0.5 0.8 0.5 0.2 0.4
+repeat 3
+    swipe 0.5 0.75 0.5 0.25 0.3
+    wait 1
+shot sau-khi-chay
+"""
 
 
 class Bridge(QObject):
@@ -32,6 +49,8 @@ class Bridge(QObject):
 
     frame = Signal(object)
     status = Signal(str, object, str)
+    message = Signal(str)          # nhật ký từ luồng mạng -> luồng giao diện
+    script_done = Signal()
 
 
 class ScanWorker(QThread):
@@ -122,6 +141,127 @@ class ScanDialog(QDialog):
             self.accept()
 
 
+class ScriptDialog(QDialog):
+    """Soạn và chạy kịch bản trên các máy đang chọn."""
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Kịch bản tự động")
+        self.resize(720, 620)
+        self.running = False
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Lệnh: tap · swipe · text · key · wait · shot · repeat "
+            "(khối lặp viết thụt lề bên dưới)"
+        ))
+        self.editor = QPlainTextEdit(SAMPLE_SCRIPT)
+        self.editor.setStyleSheet("font-family: Consolas, monospace;")
+        layout.addWidget(self.editor, 3)
+
+        self.target_label = QLabel("")
+        layout.addWidget(self.target_label)
+
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setStyleSheet("font-family: Consolas, monospace;")
+        layout.addWidget(self.log, 2)
+
+        row = QHBoxLayout()
+        self.check_button = QPushButton("Kiểm tra")
+        self.check_button.clicked.connect(self._check)
+        row.addWidget(self.check_button)
+        self.open_button = QPushButton("Mở…")
+        self.open_button.clicked.connect(self._open)
+        row.addWidget(self.open_button)
+        self.save_button = QPushButton("Lưu…")
+        self.save_button.clicked.connect(self._save)
+        row.addWidget(self.save_button)
+        row.addStretch(1)
+        self.run_button = QPushButton("Chạy")
+        self.run_button.clicked.connect(self._run)
+        row.addWidget(self.run_button)
+        self.stop_button = QPushButton("Dừng")
+        self.stop_button.setEnabled(False)
+        self.stop_button.clicked.connect(self.window.pool.cancel_script)
+        row.addWidget(self.stop_button)
+        layout.addLayout(row)
+
+        self.refresh_targets()
+
+    def refresh_targets(self) -> None:
+        targets = self.window.script_targets()
+        self.target_label.setText(
+            f"Sẽ chạy song song trên {len(targets)} máy đang chọn."
+            if targets else
+            "Chưa chọn máy nào — hãy chọn ở lưới bên trái (hoặc Chọn tất cả)."
+        )
+        self.run_button.setEnabled(bool(targets) and not self.running)
+
+    def append(self, message: str) -> None:
+        self.log.appendPlainText(message)
+
+    # ------------------------------------------------------------------ actions
+
+    def _parse(self):
+        try:
+            return script_lang.parse(self.editor.toPlainText())
+        except script_lang.ScriptError as exc:
+            QMessageBox.warning(self, "Kịch bản sai cú pháp", str(exc))
+            return None
+
+    def _check(self) -> None:
+        steps = self._parse()
+        if steps is None:
+            return
+        total = script_lang.count_steps(steps)
+        self.log.clear()
+        self.append(f"Cú pháp hợp lệ · {total} lệnh sẽ chạy trên mỗi máy:")
+        for line in script_lang.describe(steps):
+            self.append("  " + line)
+
+    def _run(self) -> None:
+        steps = self._parse()
+        if steps is None:
+            return
+        targets = self.window.script_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy",
+                                    "Hãy chọn ít nhất một máy ở lưới.")
+            return
+        self.log.clear()
+        self.append(f"Chạy trên {len(targets)} máy…")
+        self.set_running(True)
+        self.window.start_script(steps, targets)
+
+    def set_running(self, running: bool) -> None:
+        self.running = running
+        self.run_button.setEnabled(not running and bool(self.window.script_targets()))
+        self.stop_button.setEnabled(running)
+        self.editor.setReadOnly(running)
+
+    def _open(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Mở kịch bản", str(CAPTURES_DIR.parent), "Kịch bản (*.txt);;All files (*)"
+        )
+        if path:
+            self.editor.setPlainText(Path(path).read_text(encoding="utf-8"))
+
+    def _save(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Lưu kịch bản", str(CAPTURES_DIR.parent / "kichban.txt"),
+            "Kịch bản (*.txt)"
+        )
+        if path:
+            Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
+
+    def closeEvent(self, event) -> None:
+        if self.running:
+            self.window.pool.cancel_script()
+        super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, registry_path: Path = DEFAULT_REGISTRY) -> None:
         super().__init__()
@@ -133,6 +273,8 @@ class MainWindow(QMainWindow):
         self.page_size = 100
         self.page = 0
         self.broadcast = False
+        self.script_dialog: ScriptDialog | None = None
+        self.recording_id: str | None = None
 
         self.bridge = Bridge()
         self.pool = DevicePool(
@@ -157,6 +299,8 @@ class MainWindow(QMainWindow):
 
         self.bridge.frame.connect(self._on_frame)
         self.bridge.status.connect(self._on_status)
+        self.bridge.message.connect(self._on_message)
+        self.bridge.script_done.connect(self._on_script_done)
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
@@ -219,6 +363,26 @@ class MainWindow(QMainWindow):
         self.broadcast_box = QCheckBox("Gửi thao tác tới các máy đã chọn")
         self.broadcast_box.toggled.connect(self._set_broadcast)
         bar.addWidget(self.broadcast_box)
+
+        bar.addSeparator()
+        shot = QAction("Chụp ảnh", self)
+        shot.setToolTip("Chụp full độ phân giải các máy đang chọn")
+        shot.triggered.connect(self._capture_selected)
+        bar.addAction(shot)
+
+        self.record_action = QAction("Ghi hình", self)
+        self.record_action.setCheckable(True)
+        self.record_action.setToolTip("Ghi chuỗi ảnh PNG của các máy đang chọn")
+        self.record_action.toggled.connect(self._toggle_recording)
+        bar.addAction(self.record_action)
+
+        script_action = QAction("Kịch bản…", self)
+        script_action.triggered.connect(self._open_script_dialog)
+        bar.addAction(script_action)
+
+        open_folder = QAction("Mở thư mục ảnh", self)
+        open_folder.triggered.connect(self._open_captures_folder)
+        bar.addAction(open_folder)
 
     # ------------------------------------------------------------------ paging
 
@@ -286,9 +450,93 @@ class MainWindow(QMainWindow):
 
     def _on_selection(self, keys: List[str]) -> None:
         self.statusBar().showMessage(f"Đã chọn {len(keys)} máy", 3000)
+        if self.script_dialog:
+            self.script_dialog.refresh_targets()
 
     def _set_broadcast(self, on: bool) -> None:
         self.broadcast = on
+
+    # ------------------------------------------- chụp ảnh / ghi hình / kịch bản
+
+    def script_targets(self) -> List[str]:
+        """Máy để chạy hàng loạt: đang chọn, không thì máy đang mở full."""
+
+        if self.grid.selection:
+            return list(self.grid.selection)
+        return [self.detail.key] if self.detail.key else []
+
+    def _capture_selected(self) -> None:
+        targets = self.script_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy",
+                                    "Hãy chọn máy ở lưới rồi bấm Chụp ảnh.")
+            return
+        folder = CAPTURES_DIR / "anh"
+        self.statusBar().showMessage(f"Đang chụp {len(targets)} máy…", 5000)
+        self.pool.capture(targets, folder, on_event=self._on_capture_event)
+
+    def _on_capture_event(self, key: str, path: str | None, error: str | None) -> None:
+        # Chạy trên luồng mạng — chỉ được phát signal, không đụng widget.
+        self.bridge.message.emit(
+            f"[chụp] {key}: {'LỖI ' + error if error else Path(path).name}"
+        )
+
+    def _toggle_recording(self, on: bool) -> None:
+        if on:
+            targets = self.script_targets()
+            if not targets:
+                self.record_action.setChecked(False)
+                QMessageBox.information(self, "Chưa chọn máy",
+                                        "Hãy chọn máy cần ghi hình.")
+                return
+            if len(targets) > 8 and QMessageBox.question(
+                self, "Ghi hình nhiều máy",
+                f"Bạn đang ghi {len(targets)} máy cùng lúc. Mỗi máy là một luồng "
+                "ảnh full độ phân giải — sẽ nặng CPU và ổ đĩa. Tiếp tục?",
+            ) != QMessageBox.Yes:
+                self.record_action.setChecked(False)
+                return
+            folder = CAPTURES_DIR / "ghihinh"
+            self.recording_id = self.pool.start_recording(
+                targets, folder, fps=2.0, on_event=self._on_capture_event
+            )
+            self.record_action.setText("■ Dừng ghi")
+            self.statusBar().showMessage(
+                f"Đang ghi {len(targets)} máy vào {folder}", 8000
+            )
+        else:
+            self.pool.stop_recording(self.recording_id)
+            self.recording_id = None
+            self.record_action.setText("Ghi hình")
+            self.statusBar().showMessage("Đã dừng ghi hình", 5000)
+
+    def _open_script_dialog(self) -> None:
+        if self.script_dialog is None:
+            self.script_dialog = ScriptDialog(self)
+        self.script_dialog.refresh_targets()
+        self.script_dialog.show()
+        self.script_dialog.raise_()
+
+    def start_script(self, steps, targets: List[str]) -> None:
+        self.pool.run_script(
+            targets, steps, CAPTURES_DIR / "kichban",
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=self.bridge.script_done.emit,
+        )
+
+    def _on_message(self, message: str) -> None:
+        if self.script_dialog and self.script_dialog.isVisible():
+            self.script_dialog.append(message)
+        self.statusBar().showMessage(message, 4000)
+
+    def _on_script_done(self) -> None:
+        if self.script_dialog:
+            self.script_dialog.set_running(False)
+            self.script_dialog.append("— Kết thúc —")
+
+    def _open_captures_folder(self) -> None:
+        CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
+        os.startfile(CAPTURES_DIR)  # noqa: S606 — Windows-only, đường dẫn nội bộ
 
     # ------------------------------------------------------------------- input
 
@@ -344,6 +592,9 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._stats_timer.stop()
+        if self.recording_id:
+            self.pool.stop_recording(self.recording_id)
+        self.pool.cancel_script()
         self.pool.stop()
         super().closeEvent(event)
 

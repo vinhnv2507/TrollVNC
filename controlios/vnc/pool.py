@@ -8,13 +8,39 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import threading
-from typing import Dict, Iterable, Mapping, Optional, Sequence
+import time
+from pathlib import Path
+from typing import Callable, Dict, Iterable, Mapping, Optional, Sequence
 
 from ..config import DeviceSpec, Settings
+from ..util.png import encode_png
 from .session import FrameSink, State, StatusSink, Tier, VncSession
 
 log = logging.getLogger(__name__)
+
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _slug(text: str) -> str:
+    """Tên máy -> tên thư mục/file an toàn trên Windows."""
+    return _UNSAFE.sub("-", text).strip("-") or "device"
+
+
+def _write_capture(folder: Path, spec: DeviceSpec, frame, label: str = "",
+                   stamped: bool = True) -> Path:
+    """Chạy trong thread riêng — nén PNG là việc nặng, không để nghẽn event loop."""
+
+    parts = [_slug(spec.name)]
+    if stamped:
+        parts.append(time.strftime("%Y%m%d-%H%M%S"))
+    if label:
+        parts.append(_slug(label))
+    path = folder / ("_".join(parts) + ".png")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(encode_png(frame.data, frame.width, frame.height))
+    return path
 
 
 class DevicePool:
@@ -28,6 +54,8 @@ class DevicePool:
         self._ready = threading.Event()
         self._sessions: Dict[str, VncSession] = {}
         self._sem: Optional[asyncio.Semaphore] = None
+        self._recordings: Dict[str, asyncio.Event] = {}
+        self._script_cancel: Optional[asyncio.Event] = None
 
     # --------------------------------------------------------------- lifecycle
 
@@ -164,6 +192,163 @@ class DevicePool:
             await asyncio.gather(*tasks, return_exceptions=True)
 
         self._call_coro(run())
+
+    # ----------------------------------------------------------------- capture
+
+    def capture(self, keys: Iterable[str], folder: Path | str,
+                suffix: str = "", on_event=None) -> None:
+        """Chụp ảnh full độ phân giải nhiều máy cùng lúc, ghi ra PNG.
+
+        on_event(key, path_or_None, error_or_None) chạy trên luồng mạng.
+        """
+
+        key_list = list(keys)
+        folder = Path(folder)
+
+        async def run() -> None:
+            await asyncio.gather(
+                *(self._capture_one(k, folder, suffix, on_event) for k in key_list),
+                return_exceptions=True,
+            )
+
+        self._call_coro(run())
+
+    async def _capture_one(self, key: str, folder: Path, suffix: str, on_event) -> None:
+        session = self._sessions.get(key)
+        if session is None:
+            if on_event:
+                on_event(key, None, "không có phiên")
+            return
+        try:
+            frame = await session.request_capture()
+            path = await asyncio.to_thread(
+                _write_capture, folder, session.spec, frame, suffix
+            )
+            if on_event:
+                on_event(key, str(path), None)
+        except Exception as exc:
+            if on_event:
+                on_event(key, None, f"{type(exc).__name__}: {exc}")
+
+    # --------------------------------------------------------------- recording
+
+    def start_recording(self, keys: Iterable[str], folder: Path | str,
+                        fps: float = 2.0, on_event=None) -> str:
+        """Ghi hình dạng chuỗi ảnh PNG. Trả về id để dừng."""
+
+        key_list = list(keys)
+        folder = Path(folder)
+        session_id = f"rec-{int(time.time())}"
+
+        async def run() -> None:
+            stop = asyncio.Event()
+            self._recordings[session_id] = stop
+            try:
+                await asyncio.gather(
+                    *(self._record_one(k, folder / session_id, fps, stop, on_event)
+                      for k in key_list),
+                    return_exceptions=True,
+                )
+            finally:
+                self._recordings.pop(session_id, None)
+                if on_event:
+                    on_event(session_id, None, "đã dừng")
+
+        self._call_coro(run())
+        return session_id
+
+    def stop_recording(self, session_id: Optional[str] = None) -> None:
+        def run() -> None:
+            targets = ([session_id] if session_id else list(self._recordings))
+            for name in targets:
+                stop = self._recordings.get(name)
+                if stop:
+                    stop.set()
+
+        self._call(run)
+
+    def is_recording(self) -> bool:
+        return bool(self._recordings)
+
+    async def _record_one(self, key: str, folder: Path, fps: float,
+                          stop: asyncio.Event, on_event) -> None:
+        session = self._sessions.get(key)
+        if session is None:
+            return
+        interval = 1.0 / max(fps, 0.1)
+        index = 0
+        while not stop.is_set():
+            started = time.monotonic()
+            try:
+                frame = await session.request_capture()
+                index += 1
+                await asyncio.to_thread(
+                    _write_capture, folder / _slug(session.spec.name),
+                    session.spec, frame, f"{index:06d}", stamped=False,
+                )
+            except Exception as exc:
+                if on_event:
+                    on_event(key, None, f"{type(exc).__name__}: {exc}")
+                await asyncio.sleep(1.0)
+                continue
+            remaining = interval - (time.monotonic() - started)
+            if remaining > 0:
+                try:
+                    await asyncio.wait_for(stop.wait(), timeout=remaining)
+                except asyncio.TimeoutError:
+                    pass
+
+    # ------------------------------------------------------------------ script
+
+    def run_script(self, keys: Iterable[str], steps, folder: Path | str,
+                   on_event=None, on_done=None) -> None:
+        """Chạy kịch bản song song trên các máy đã chọn."""
+
+        from ..script import run_on_session
+
+        key_list = list(keys)
+        folder = Path(folder)
+
+        async def run() -> None:
+            self._script_cancel = asyncio.Event()
+
+            async def shot_handler(spec, frame, label):
+                await asyncio.to_thread(_write_capture, folder, spec, frame, label)
+
+            async def one(key: str) -> None:
+                session = self._sessions.get(key)
+                if session is None or session.state is not State.ONLINE:
+                    if on_event:
+                        on_event(key, "bỏ qua: chưa kết nối")
+                    return
+                try:
+                    await run_on_session(
+                        session, steps,
+                        on_event or (lambda k, m: None),
+                        shot_handler, self._script_cancel,
+                    )
+                    if on_event:
+                        on_event(key, "xong")
+                except asyncio.CancelledError:
+                    if on_event:
+                        on_event(key, "đã huỷ")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI {type(exc).__name__}: {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+            self._script_cancel = None
+            if on_done:
+                on_done()
+
+        self._call_coro(run())
+
+    def cancel_script(self) -> None:
+        def run() -> None:
+            if self._script_cancel:
+                self._script_cancel.set()
+
+        self._call(run)
 
     # ------------------------------------------------------------------- utils
 

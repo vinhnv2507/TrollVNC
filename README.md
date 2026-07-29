@@ -75,6 +75,61 @@ Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầ
 - **Trang**: mặc định 100 máy/trang. Chọn "Tất cả" để nạp hết 250. Máy ngoài
   trang hiện tại không được kết nối — đây là cách "mở lần lượt" nếu muốn.
 
+## Chụp ảnh, ghi hình, kịch bản
+
+Ba nút này làm việc trên **các máy đang chọn** ở lưới (không chọn gì thì lấy máy
+đang mở ở khung bên phải). Mọi thứ ghi vào `captures/`.
+
+### Chụp ảnh
+
+Chụp **full độ phân giải** tất cả máy đang chọn cùng lúc, ra `captures/anh/`,
+tên file `<tên máy>_<ngày-giờ>.png`. Chụp được cả máy đang ở tier `IDLE` —
+yêu cầu chụp được xếp vào cùng một kết nối chứ không mở thêm phiên mới, nên
+chọn 250 máy rồi bấm Chụp ảnh vẫn an toàn. Nhiều lời gọi chụp cùng lúc trên
+một máy được gộp thành một lượt hỏi framebuffer.
+
+### Ghi hình
+
+Ghi thành **chuỗi ảnh PNG** (mặc định 2 fps) vào
+`captures/ghihinh/rec-<timestamp>/<tên máy>/<tên máy>_000001.png`. Bấm lại nút
+để dừng. Ghi quá 8 máy cùng lúc sẽ hỏi xác nhận vì mỗi máy là một luồng ảnh
+full độ phân giải — nặng CPU và ổ đĩa.
+
+Muốn ra video thì ghép bằng ffmpeg:
+
+```powershell
+ffmpeg -framerate 2 -i "captures\ghihinh\rec-123\iPhone-01\iPhone-01_%06d.png" -c:v libx264 -pix_fmt yuv420p iphone01.mp4
+```
+
+### Kịch bản tự động
+
+Bấm **Kịch bản…**, soạn rồi **Chạy** — kịch bản chạy **song song** trên mọi máy
+đang chọn. Toạ độ là **tỉ lệ 0..1**, không phải pixel, nên cùng một kịch bản
+chạy đúng trên các iPhone khác cỡ màn hình.
+
+```
+# Dòng trống và dòng bắt đầu bằng # bị bỏ qua
+
+tap 0.5 0.85                 # chạm giữa màn hình, 85% chiều cao
+swipe 0.5 0.8 0.5 0.2 0.4    # vuốt lên trong 0.4 giây
+text Xin chào                # gõ chữ
+key Return                   # nhấn phím (tên keysym X11)
+wait 1.5                     # chờ 1.5 giây
+shot ket-qua                 # chụp màn hình, file có hậu tố ket-qua
+repeat 3                     # lặp khối thụt lề bên dưới 3 lần
+    swipe 0.5 0.75 0.5 0.25 0.3
+    wait 1
+```
+
+- **Kiểm tra** — dò cú pháp và in lại kịch bản bằng tiếng Việt để soát trước khi
+  chạy. Lỗi báo kèm **số dòng**. Toạ độ ngoài khoảng 0..1 bị từ chối ngay, vì đó
+  gần như luôn là nhầm pixel với tỉ lệ.
+- **Dừng** — huỷ giữa chừng trên tất cả máy.
+- **Mở… / Lưu…** — kịch bản là file `.txt` thường.
+- Ảnh từ lệnh `shot` nằm ở `captures/kichban/`.
+- Máy nào chưa kết nối thì bị bỏ qua (có ghi trong nhật ký), không làm hỏng
+  cả mẻ; máy nào lỗi giữa chừng cũng chỉ dừng riêng máy đó.
+
 ## Cấu hình
 
 `config/devices.json` (xem `config/devices.example.json`):
@@ -106,15 +161,24 @@ main.py                  CLI + mở giao diện
 controlios/
   config.py              DeviceSpec, Settings, đọc/ghi registry
   scan.py                dò cổng VNC theo CIDR / dải / bảng ARP
-  vnc/session.py         một kết nối RFB: tier, vòng đọc, vòng nhịp, input
-  vnc/pool.py            chạy toàn bộ session trên 1 event loop ở thread riêng
+  script.py              ngôn ngữ kịch bản: parse, describe, runner
+  util/png.py            ghi PNG bằng thư viện chuẩn (không cần Pillow/Qt)
+  vnc/session.py         một kết nối RFB: tier, vòng đọc, vòng nhịp, input, chụp
+  vnc/pool.py            toàn bộ session trên 1 event loop ở thread riêng;
+                         chụp hàng loạt, ghi hình, chạy kịch bản
   ui/tile.py             một ô trong lưới
   ui/grid.py             lưới cuộn + ảo hoá (chỉ ô nhìn thấy mới lên tier GRID)
   ui/detail.py           khung điều khiển full độ phân giải
-  ui/app.py              cửa sổ chính, toolbar, phân trang, broadcast
+  ui/app.py              cửa sổ chính, toolbar, phân trang, broadcast, kịch bản
 tests/fake_vnc.py        server RFB 3.8 giả để test không cần iPhone
 tools/bench_scale.py     đo tải với N máy giả
+captures/                ảnh chụp, ghi hình, ảnh từ kịch bản (không vào git)
 ```
+
+Yêu cầu chụp ảnh không mở kết nối mới: nó xếp vào **cùng vòng nhịp** của phiên
+đang chạy, nên chụp một máy đang `IDLE` cũng chỉ tốn đúng một lượt round trip,
+và không giẫm chân lên luồng hình đang chạy ở tier `GRID`/`LIVE`. Nén PNG chạy
+trong thread riêng (`asyncio.to_thread`) để không nghẽn event loop mạng.
 
 Toàn bộ mạng chạy asyncio trên **một thread nền**; Qt ở thread chính. Khung
 hình và trạng thái đi qua `Bridge` (Qt signal) nên không có race giữa hai bên.
@@ -137,10 +201,15 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-11 test: tier IDLE thật sự im lặng, tier GRID stream và ảnh đúng kích thước,
-tier LIVE trả full res, thăng tier thì stream lại, chuột/phím tới được server,
-tự nối lại khi server chết và sống lại, pool kết nối nhiều máy, và lưới chỉ
-thăng tier những ô nhìn thấy.
+33 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
+được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
+· lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
+dòng · chụp full res ngay cả khi máy đang IDLE · nhiều lời gọi chụp gộp thành
+một round trip · chụp báo lỗi rõ khi máy rớt · ghi hình ra đúng chuỗi ảnh và
+dừng hẳn khi bấm dừng · kịch bản chạy đủ trên mọi máy đã chọn và huỷ được giữa
+chừng · cú pháp sai báo đúng số dòng · hộp thoại kịch bản không gửi gì khi chưa
+chọn máy.
 
 Đo tải:
 
@@ -158,6 +227,8 @@ thăng tier những ô nhìn thấy.
   **Raw** (vẫn chạy, chỉ tốn băng thông hơn).
 - Xoay màn hình làm đổi kích thước framebuffer sẽ khiến phiên đó ngắt rồi tự
   nối lại — không mất máy, chỉ chớp một nhịp.
-- Chưa có ghi hình / chụp ảnh hàng loạt / kịch bản tự động. Lớp `DevicePool`
-  đã có sẵn `broadcast_tap`, `broadcast_swipe`, `type_text` nên phần automation
-  cắm vào là được.
+- Ghi hình ra **chuỗi PNG**, chưa mã hoá thẳng thành video (dùng lệnh ffmpeg ở
+  trên để ghép). Đổi lại là không cần cài thêm gì và không mất khung hình nào.
+- Kịch bản chạy **mở vòng**: nó gửi thao tác theo đúng thời gian đã ghi, chứ
+  không đọc màn hình để chờ một nút hiện ra. Nếu máy phản ứng chậm, tăng `wait`.
+  Muốn kiểm chứng thì chèn `shot` ở các mốc rồi xem lại ảnh.

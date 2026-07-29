@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -86,6 +87,108 @@ class WindowTest(unittest.TestCase):
         finally:
             window.close()
             registry_path.unlink(missing_ok=True)
+
+
+class ScriptDialogTest(unittest.TestCase):
+    """Hộp thoại kịch bản không được đụng tới mạng khi chỉ soạn thảo."""
+
+    def setUp(self) -> None:
+        from controlios.ui.app import MainWindow
+
+        self.registry_path = Path(__file__).parent / "_script_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
+        registry.save(self.registry_path)
+        self.window = MainWindow(self.registry_path)
+
+    def tearDown(self) -> None:
+        self.window.close()
+        self.registry_path.unlink(missing_ok=True)
+
+    def test_check_reports_syntax_error_without_running(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        dialog = ScriptDialog(self.window)
+        dialog.editor.setPlainText("tap 375 667")      # pixel, không phải tỉ lệ
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.warning") as warn:
+            dialog._check()
+        warn.assert_called_once()
+        self.assertIn("0..1", warn.call_args[0][2])
+        self.assertFalse(dialog.running)
+
+    def test_check_describes_a_valid_script(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        dialog = ScriptDialog(self.window)
+        dialog.editor.setPlainText("repeat 2\n    tap 0.5 0.5\nwait 1\n")
+        dialog._check()
+        text = dialog.log.toPlainText()
+        self.assertIn("3 lệnh", text)                  # 2 lần tap + 1 wait
+        self.assertIn("lặp 2 lần", text)
+
+    def test_run_refuses_when_nothing_is_selected(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        dialog = ScriptDialog(self.window)
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        self.assertEqual(self.window.script_targets(), [])
+
+        called = []
+        self.window.pool.run_script = lambda *a, **k: called.append(a)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            dialog._run()
+        self.assertFalse(called, "không được gửi kịch bản khi chưa chọn máy")
+
+    def test_run_sends_parsed_steps_for_selected_devices(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        dialog = ScriptDialog(self.window)
+        dialog.editor.setPlainText("tap 0.5 0.5\nwait 0.1\n")
+        self.window.grid.select_all()
+        dialog.refresh_targets()
+
+        sent = []
+        self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(
+            (list(keys), steps)
+        )
+        dialog._run()
+
+        self.assertEqual(len(sent), 1)
+        keys, steps = sent[0]
+        self.assertEqual(len(keys), 2)
+        self.assertEqual([s.op for s in steps], ["tap", "wait"])
+        self.assertTrue(dialog.running)
+        self.assertTrue(dialog.stop_button.isEnabled())
+
+    def test_capture_needs_a_selection(self) -> None:
+        called = []
+        self.window.pool.capture = lambda *a, **k: called.append(a)
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window._capture_selected()
+        self.assertFalse(called)
+
+        self.window.grid.select_all()
+        self.window._capture_selected()
+        self.assertEqual(len(called), 1)
+        self.assertEqual(len(called[0][0]), 2)
+
+    def test_recording_toggle_starts_and_stops(self) -> None:
+        started, stopped = [], []
+        self.window.pool.start_recording = lambda *a, **k: (started.append(a) or "rec-1")
+        self.window.pool.stop_recording = lambda rec_id=None: stopped.append(rec_id)
+        self.window.grid.select_all()
+
+        self.window.record_action.setChecked(True)
+        self.assertEqual(len(started), 1)
+        self.assertEqual(self.window.recording_id, "rec-1")
+        self.assertIn("Dừng", self.window.record_action.text())
+
+        self.window.record_action.setChecked(False)
+        self.assertEqual(stopped, ["rec-1"])
+        self.assertIsNone(self.window.recording_id)
 
 
 if __name__ == "__main__":

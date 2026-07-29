@@ -87,6 +87,7 @@ class VncSession:
         self.frame_count = 0
 
         self._client: Optional[asyncvnc.Client] = None
+        self._capture_waiters: list[asyncio.Future] = []
         self._tier_changed = asyncio.Event()
         self._frame_ready = asyncio.Event()
         self._stop = asyncio.Event()
@@ -109,6 +110,7 @@ class VncSession:
             except (asyncio.CancelledError, Exception):
                 pass
             self._task = None
+        self._resolve_captures(ConnectionError(f"{self.spec.key} stopped"))
         self._set_state(State.OFFLINE, "stopped")
 
     def set_tier(self, tier: Tier) -> None:
@@ -116,6 +118,47 @@ class VncSession:
             return
         self.tier = tier
         self._tier_changed.set()
+
+    # ---------------------------------------------------------------- capture
+
+    def request_capture(self) -> asyncio.Future:
+        """Ask for one full-resolution frame, whatever the current tier.
+
+        Returns a future resolving to a :class:`Frame`. The pacer serves it on
+        its next cycle, so the capture shares the one connection instead of
+        racing it. Several callers asking at once share a single round trip.
+        """
+
+        future: asyncio.Future = asyncio.get_running_loop().create_future()
+        if self.state is not State.ONLINE:
+            future.set_exception(ConnectionError(f"{self.spec.key} is {self.state.value}"))
+            return future
+        self._capture_waiters.append(future)
+        self._tier_changed.set()   # wake the pacer if this session is idle
+        return future
+
+    def _resolve_captures(self, result) -> None:
+        waiters, self._capture_waiters = self._capture_waiters, []
+        for future in waiters:
+            if future.done():
+                continue
+            if isinstance(result, BaseException):
+                future.set_exception(result)
+            else:
+                future.set_result(result)
+
+    async def _serve_capture(self, client: asyncvnc.Client) -> None:
+        try:
+            await self._request(client, incremental=False)
+        except Exception as exc:
+            self._resolve_captures(exc)
+            raise
+        rgb = np.ascontiguousarray(client.video.as_rgba()[:, :, :3])
+        width, height = client.video.width, client.video.height
+        self._resolve_captures(
+            Frame(key=self.spec.key, width=width, height=height,
+                  data=rgb.tobytes(), full_width=width, full_height=height)
+        )
 
     # ------------------------------------------------------------------ input
 
@@ -188,6 +231,10 @@ class VncSession:
                     await self._session(client)
                 finally:
                     self._client = None
+                    # Never leave a capture caller waiting on a dead session.
+                    self._resolve_captures(
+                        ConnectionError(f"{self.spec.key} disconnected during capture")
+                    )
                     try:
                         await cm.__aexit__(None, None, None)
                     except Exception:
@@ -235,6 +282,11 @@ class VncSession:
     async def _pace_loop(self, client: asyncvnc.Client) -> None:
         first = True
         while not self._stop.is_set():
+            if self._capture_waiters:
+                first = False
+                await self._serve_capture(client)
+                continue
+
             tier = self.tier
 
             if tier <= Tier.IDLE:
@@ -246,8 +298,8 @@ class VncSession:
                     continue
                 client.video.data = None
                 self._tier_changed.clear()
-                if self.tier > Tier.IDLE:
-                    continue  # promoted while we were tidying up
+                if self.tier > Tier.IDLE or self._capture_waiters:
+                    continue  # promoted, or a capture landed while we tidied up
                 await self._tier_changed.wait()
                 continue
 

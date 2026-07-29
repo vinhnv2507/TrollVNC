@@ -2,4 +2,5 @@
 __pycache__/
 *.pyc
 config/devices.json
+captures/
 *.log
