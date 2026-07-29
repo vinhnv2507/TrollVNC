@@ -1,0 +1,160 @@
+"""Scrollable wall of tiles.
+
+Only tiles inside (or just outside) the viewport are promoted to the GRID
+tier — that is what keeps 250 connected phones from costing 250 video streams.
+"""
+
+from __future__ import annotations
+
+from typing import Dict, List, Optional
+
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import QGridLayout, QScrollArea, QWidget
+
+from ..config import DeviceSpec
+from ..vnc.session import Frame, State, Tier
+from .tile import DeviceTile
+
+# Rows of tiles kept warm above and below the viewport, so scrolling does not
+# show empty cells while the first frame arrives.
+PREFETCH_ROWS = 1
+
+
+class DeviceGrid(QScrollArea):
+    tiers_changed = Signal(dict)
+    selection_changed = Signal(list)
+    device_activated = Signal(str)
+
+    def __init__(self, tile_width: int = 150, parent=None) -> None:
+        super().__init__(parent)
+        self.tile_width = tile_width
+        self.tiles: Dict[str, DeviceTile] = {}
+        self.order: List[str] = []
+        self.selection: List[str] = []
+        self._focus_key: Optional[str] = None
+        self._columns = 0
+
+        self._body = QWidget()
+        self._layout = QGridLayout(self._body)
+        self._layout.setSpacing(8)
+        self._layout.setContentsMargins(8, 8, 8, 8)
+        self.setWidget(self._body)
+        self.setWidgetResizable(True)
+        self.setStyleSheet("QScrollArea { background: #0b0d11; border: none; }")
+
+        self._debounce = QTimer(self)
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(120)
+        self._debounce.timeout.connect(self._publish_tiers)
+        self.verticalScrollBar().valueChanged.connect(self._debounce.start)
+
+    # ---------------------------------------------------------------- contents
+
+    def set_devices(self, specs: List[DeviceSpec]) -> None:
+        for tile in self.tiles.values():
+            tile.setParent(None)
+            tile.deleteLater()
+        self.tiles.clear()
+        self.order = []
+        self.selection = []
+
+        for spec in specs:
+            tile = DeviceTile(spec, self.tile_width, self._body)
+            tile.clicked.connect(self._on_tile_clicked)
+            tile.activated.connect(self.device_activated)
+            self.tiles[spec.key] = tile
+            self.order.append(spec.key)
+
+        self._columns = 0
+        self._relayout()
+        self.selection_changed.emit(self.selection)
+
+    def on_frame(self, frame: Frame) -> None:
+        tile = self.tiles.get(frame.key)
+        if tile:
+            tile.set_frame(frame)
+
+    def on_status(self, key: str, state: State, detail: str) -> None:
+        tile = self.tiles.get(key)
+        if tile:
+            tile.set_state(state, detail)
+
+    # -------------------------------------------------------------- selection
+
+    def _on_tile_clicked(self, key: str, modifiers) -> None:
+        if modifiers & Qt.ControlModifier:
+            if key in self.selection:
+                self.selection.remove(key)
+            else:
+                self.selection.append(key)
+        elif modifiers & Qt.ShiftModifier and self.selection:
+            start = self.order.index(self.selection[-1])
+            end = self.order.index(key)
+            lo, hi = sorted((start, end))
+            for k in self.order[lo:hi + 1]:
+                if k not in self.selection:
+                    self.selection.append(k)
+        else:
+            self.selection = [key]
+
+        for k, tile in self.tiles.items():
+            tile.set_selected(k in self.selection)
+        self.selection_changed.emit(list(self.selection))
+
+    def select_all(self) -> None:
+        self.selection = list(self.order)
+        for tile in self.tiles.values():
+            tile.set_selected(True)
+        self.selection_changed.emit(list(self.selection))
+
+    def clear_selection(self) -> None:
+        self.selection = []
+        for tile in self.tiles.values():
+            tile.set_selected(False)
+        self.selection_changed.emit([])
+
+    # ------------------------------------------------------------------ layout
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._relayout()
+
+    def _relayout(self) -> None:
+        width = max(1, self.viewport().width() - 24)
+        columns = max(1, width // (self.tile_width + 8))
+        if columns == self._columns:
+            self._debounce.start()
+            return
+        self._columns = columns
+        while self._layout.count():
+            self._layout.takeAt(0)
+        for index, key in enumerate(self.order):
+            self._layout.addWidget(self.tiles[key], index // columns, index % columns)
+        self._debounce.start()
+
+    # ------------------------------------------------------------------- tiers
+
+    def set_focus_key(self, key: Optional[str]) -> None:
+        """The device shown in the detail pane gets the LIVE tier."""
+        self._focus_key = key
+        self._publish_tiers()
+
+    def _publish_tiers(self) -> None:
+        if not self.order:
+            return
+        columns = max(1, self._columns)
+        row_height = self.tiles[self.order[0]].height() + self._layout.spacing()
+        top = self.verticalScrollBar().value()
+        bottom = top + self.viewport().height()
+
+        first_row = max(0, top // row_height - PREFETCH_ROWS)
+        last_row = bottom // row_height + PREFETCH_ROWS
+        first = first_row * columns
+        last = (last_row + 1) * columns
+
+        tiers = {key: Tier.IDLE for key in self.order}
+        for key in self.order[first:last]:
+            tiers[key] = Tier.GRID
+        if self._focus_key in tiers:
+            tiers[self._focus_key] = Tier.LIVE
+        self.tiers_changed.emit(tiers)

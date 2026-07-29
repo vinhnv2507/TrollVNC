@@ -1,0 +1,94 @@
+"""One phone in the grid."""
+
+from __future__ import annotations
+
+from PySide6.QtCore import Qt, Signal, QRect
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import QWidget
+
+from ..config import DeviceSpec
+from ..vnc.session import Frame, State
+
+STATE_COLOUR = {
+    State.ONLINE: QColor("#3ddc84"),
+    State.CONNECTING: QColor("#f0b429"),
+    State.ERROR: QColor("#e5484d"),
+    State.OFFLINE: QColor("#6b7280"),
+}
+
+
+class DeviceTile(QWidget):
+    clicked = Signal(str, object)      # key, modifiers
+    activated = Signal(str)            # double click -> open detail
+
+    def __init__(self, spec: DeviceSpec, tile_width: int = 150, parent=None) -> None:
+        super().__init__(parent)
+        self.spec = spec
+        self.state = State.OFFLINE
+        self.detail = ""
+        self.selected = False
+        self._pixmap: QPixmap | None = None
+        self._tile_width = tile_width
+        self.setFixedSize(tile_width, int(tile_width * 16 / 9) + 22)
+        self.setToolTip(spec.key)
+
+    # ------------------------------------------------------------------ inputs
+
+    def set_frame(self, frame: Frame) -> None:
+        image = QImage(
+            frame.data, frame.width, frame.height, frame.width * 3, QImage.Format_RGB888
+        )
+        self._pixmap = QPixmap.fromImage(image.copy())
+        self.update()
+
+    def set_state(self, state: State, detail: str = "") -> None:
+        self.state = state
+        self.detail = detail
+        self.update()
+
+    def set_selected(self, selected: bool) -> None:
+        if selected != self.selected:
+            self.selected = selected
+            self.update()
+
+    # ------------------------------------------------------------------ events
+
+    def mousePressEvent(self, event) -> None:
+        self.clicked.emit(self.spec.key, event.modifiers())
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        self.activated.emit(self.spec.key)
+
+    # ----------------------------------------------------------------- painting
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        body = QRect(0, 0, self.width(), self.height() - 22)
+
+        painter.fillRect(body, QColor("#111318"))
+        if self._pixmap:
+            scaled = self._pixmap.scaled(
+                body.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            painter.drawPixmap(
+                body.x() + (body.width() - scaled.width()) // 2,
+                body.y() + (body.height() - scaled.height()) // 2,
+                scaled,
+            )
+
+        colour = STATE_COLOUR.get(self.state, QColor("#6b7280"))
+        painter.setPen(QPen(QColor("#4f8cff") if self.selected else colour,
+                            3 if self.selected else 1))
+        painter.drawRect(body.adjusted(1, 1, -2, -2))
+
+        label = QRect(0, self.height() - 22, self.width(), 22)
+        painter.fillRect(label, QColor("#1b1f27"))
+        painter.setPen(colour)
+        painter.drawEllipse(6, self.height() - 15, 8, 8)
+        painter.setPen(QColor("#d5d9e0"))
+        text = self.spec.name if self.spec.name != self.spec.host else self.spec.host
+        painter.drawText(
+            label.adjusted(20, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,
+            painter.fontMetrics().elidedText(text, Qt.ElideMiddle, label.width() - 26),
+        )
+        painter.end()

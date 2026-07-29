@@ -1,0 +1,3 @@
+asyncvnc>=1.1
+numpy>=1.26
+PySide6-Essentials>=6.6

@@ -1,0 +1,296 @@
+"""A single TrollVNC connection, with a tier that decides how much it costs.
+
+The scaling trick for hundreds of phones lives here: RFB only sends pixels the
+client asks for. A session in IDLE tier keeps its TCP connection and its input
+channel, but issues no FramebufferUpdateRequest at all, so it consumes ~no
+bandwidth and ~no CPU. Only tiles the user can actually see are promoted to
+GRID (a slow trickle of frames) or LIVE (interactive rate).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import enum
+import logging
+import time
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+import asyncvnc
+import numpy as np
+
+from ..config import DeviceSpec, Settings
+
+log = logging.getLogger(__name__)
+
+
+class Tier(enum.IntEnum):
+    OFF = 0     # disconnected on purpose
+    IDLE = 1    # connected, no pixels requested
+    GRID = 2    # thumbnail refresh at Settings.grid_fps
+    LIVE = 3    # full resolution at Settings.live_fps
+
+
+class State(enum.Enum):
+    OFFLINE = "offline"
+    CONNECTING = "connecting"
+    ONLINE = "online"
+    ERROR = "error"
+
+
+@dataclass
+class Frame:
+    """An RGB888 image ready to be wrapped in a QImage."""
+
+    key: str
+    width: int
+    height: int
+    data: bytes          # width * height * 3
+    full_width: int      # framebuffer size, for input coordinate mapping
+    full_height: int
+
+
+FrameSink = Callable[[Frame], None]
+StatusSink = Callable[[str, State, str], None]   # key, state, detail
+
+
+def _downscale_rgb(rgba: np.ndarray, long_edge: int) -> tuple[np.ndarray, int, int]:
+    """Nearest-neighbour downscale via strides — cheap enough to run 250x."""
+
+    height, width = rgba.shape[:2]
+    step = max(1, int(max(width, height) / max(1, long_edge)))
+    small = rgba[::step, ::step, :3]
+    return np.ascontiguousarray(small), small.shape[1], small.shape[0]
+
+
+class VncSession:
+    """Owns one connection. Every public method is safe to call from the
+    asyncio loop thread only; the pool provides thread-safe wrappers."""
+
+    def __init__(
+        self,
+        spec: DeviceSpec,
+        settings: Settings,
+        connect_sem: asyncio.Semaphore,
+        on_frame: FrameSink,
+        on_status: StatusSink,
+    ) -> None:
+        self.spec = spec
+        self.settings = settings
+        self._sem = connect_sem
+        self._on_frame = on_frame
+        self._on_status = on_status
+
+        self.state = State.OFFLINE
+        self.tier = Tier.IDLE
+        self.last_frame_at = 0.0
+        self.frame_count = 0
+
+        self._client: Optional[asyncvnc.Client] = None
+        self._tier_changed = asyncio.Event()
+        self._frame_ready = asyncio.Event()
+        self._stop = asyncio.Event()
+        self._task: Optional[asyncio.Task] = None
+
+    # ---------------------------------------------------------------- control
+
+    def start(self) -> None:
+        if self._task is None or self._task.done():
+            self._stop.clear()
+            self._task = asyncio.create_task(self._run(), name=f"vnc:{self.spec.key}")
+
+    async def stop(self) -> None:
+        self._stop.set()
+        self._tier_changed.set()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._task = None
+        self._set_state(State.OFFLINE, "stopped")
+
+    def set_tier(self, tier: Tier) -> None:
+        if tier == self.tier:
+            return
+        self.tier = tier
+        self._tier_changed.set()
+
+    # ------------------------------------------------------------------ input
+
+    def tap(self, x: int, y: int, button: int = 0) -> None:
+        if not self._client:
+            return
+        self._client.mouse.move(int(x), int(y))
+        self._client.mouse.click(button)
+
+    def mouse_down(self, x: int, y: int, button: int = 0) -> None:
+        if not self._client:
+            return
+        self._client.mouse.move(int(x), int(y))
+        self._client.mouse.buttons |= 1 << button
+        self._client.mouse._write()
+
+    def mouse_move(self, x: int, y: int) -> None:
+        if self._client:
+            self._client.mouse.move(int(x), int(y))
+
+    def mouse_up(self, x: int, y: int, button: int = 0) -> None:
+        if not self._client:
+            return
+        self._client.mouse.move(int(x), int(y))
+        self._client.mouse.buttons &= ~(1 << button)
+        self._client.mouse._write()
+
+    async def swipe(self, x1: int, y1: int, x2: int, y2: int, duration: float = 0.25,
+                    steps: int = 12) -> None:
+        if not self._client:
+            return
+        self.mouse_down(x1, y1)
+        for i in range(1, steps + 1):
+            t = i / steps
+            self.mouse_move(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t))
+            await asyncio.sleep(duration / steps)
+        self.mouse_up(x2, y2)
+
+    def type_text(self, text: str) -> None:
+        if self._client:
+            self._client.keyboard.write(text)
+
+    def press_keys(self, *keys: str) -> None:
+        if self._client:
+            self._client.keyboard.press(*keys)
+
+    # ------------------------------------------------------------------- loop
+
+    def _set_state(self, state: State, detail: str = "") -> None:
+        self.state = state
+        try:
+            self._on_status(self.spec.key, state, detail)
+        except Exception:  # a broken UI sink must not kill the session
+            log.exception("status sink failed for %s", self.spec.key)
+
+    async def _run(self) -> None:
+        delay = self.settings.reconnect_delay
+        while not self._stop.is_set():
+            try:
+                self._set_state(State.CONNECTING)
+                async with self._sem:
+                    cm = asyncvnc.connect(
+                        self.spec.host, self.spec.port, password=self.spec.password
+                    )
+                    client = await asyncio.wait_for(cm.__aenter__(), timeout=15)
+                try:
+                    self._client = client
+                    self._set_state(State.ONLINE)
+                    delay = self.settings.reconnect_delay
+                    await self._session(client)
+                finally:
+                    self._client = None
+                    try:
+                        await cm.__aexit__(None, None, None)
+                    except Exception:
+                        pass
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                self._set_state(State.ERROR, f"{type(exc).__name__}: {exc}")
+
+            if self._stop.is_set():
+                break
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, self.settings.reconnect_max)
+
+        self._set_state(State.OFFLINE)
+
+    async def _session(self, client: asyncvnc.Client) -> None:
+        """Reader and pacer run concurrently; either failing ends the session."""
+
+        reader = asyncio.create_task(self._read_loop(client))
+        pacer = asyncio.create_task(self._pace_loop(client))
+        tasks = {reader, pacer}
+        try:
+            done, pending = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+        finally:
+            # Also runs when _run itself is cancelled, so neither task leaks.
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        for task in done:
+            if not task.cancelled() and task.exception():
+                raise task.exception()
+
+    async def _read_loop(self, client: asyncvnc.Client) -> None:
+        while not self._stop.is_set():
+            update = await client.read()
+            if update is asyncvnc.UpdateType.VIDEO:
+                self.last_frame_at = time.monotonic()
+                self.frame_count += 1
+                self._emit(client)
+                self._frame_ready.set()
+
+    async def _pace_loop(self, client: asyncvnc.Client) -> None:
+        first = True
+        while not self._stop.is_set():
+            tier = self.tier
+
+            if tier <= Tier.IDLE:
+                if first:
+                    # One full frame so the tile has something to show, then
+                    # drop the framebuffer to keep 250 idle sessions cheap.
+                    first = False
+                    await self._request(client, incremental=False)
+                    continue
+                client.video.data = None
+                self._tier_changed.clear()
+                if self.tier > Tier.IDLE:
+                    continue  # promoted while we were tidying up
+                await self._tier_changed.wait()
+                continue
+
+            first = False
+            await self._request(client, incremental=client.video.data is not None)
+            fps = self.settings.live_fps if tier is Tier.LIVE else self.settings.grid_fps
+            await asyncio.sleep(max(0.0, 1.0 / max(fps, 0.05)))
+
+    async def _request(self, client: asyncvnc.Client, incremental: bool) -> None:
+        if not incremental:
+            client.video.data = None
+        self._frame_ready.clear()
+        client.video.refresh()
+        await client.drain()
+        # Wait for the answer instead of pipelining requests: a phone that
+        # stops painting must not accumulate an unbounded request queue.
+        try:
+            await asyncio.wait_for(
+                self._frame_ready.wait(), timeout=self.settings.stall_timeout
+            )
+        except asyncio.TimeoutError:
+            raise TimeoutError("no framebuffer update")
+
+    def _emit(self, client: asyncvnc.Client) -> None:
+        video = client.video
+        if video.data is None:
+            return
+        rgba = video.as_rgba()
+        if self.tier is Tier.LIVE:
+            rgb = np.ascontiguousarray(rgba[:, :, :3])
+            width, height = video.width, video.height
+        else:
+            rgb, width, height = _downscale_rgb(rgba, self.settings.thumb_long_edge)
+        try:
+            self._on_frame(
+                Frame(
+                    key=self.spec.key,
+                    width=width,
+                    height=height,
+                    data=rgb.tobytes(),
+                    full_width=video.width,
+                    full_height=video.height,
+                )
+            )
+        except Exception:
+            log.exception("frame sink failed for %s", self.spec.key)

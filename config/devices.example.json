@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "grid_fps": 1.0,
+    "live_fps": 12.0,
+    "thumb_long_edge": 320,
+    "connect_concurrency": 24,
+    "max_connected": 0,
+    "reconnect_delay": 3.0,
+    "reconnect_max": 60.0,
+    "stall_timeout": 20.0
+  },
+  "devices": [
+    { "host": "172.30.4.101", "port": 5901, "name": "iPhone-01", "group": "tang1" },
+    { "host": "172.30.4.102", "port": 5901, "name": "iPhone-02", "group": "tang1" }
+  ]
+}
