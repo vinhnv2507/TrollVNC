@@ -66,9 +66,13 @@ class ScriptParseTest(unittest.TestCase):
         self.assertEqual([s.op for s in steps],
                          ["tap", "swipe", "text", "key", "wait", "shot"])
         self.assertEqual(steps[0].args, (0.5, 0.85))
-        self.assertEqual(steps[1].args, (0.5, 0.8, 0.5, 0.2, 0.4))
+        self.assertEqual(steps[1].args, (0.5, 0.8, 0.5, 0.2, 0.4, 0.0))  # hold mặc định 0
         self.assertEqual(steps[2].args, ("Xin chào bạn",))
         self.assertEqual(steps[5].args, ("ket-qua",))
+
+    def test_swipe_accepts_an_explicit_hold(self) -> None:
+        steps = script.parse("swipe 0.5 0.99 0.5 0.45 0.35 0.7")
+        self.assertEqual(steps[0].args, (0.5, 0.99, 0.5, 0.45, 0.35, 0.7))
 
     def test_repeat_block_and_step_count(self) -> None:
         steps = script.parse(
@@ -98,6 +102,98 @@ class ScriptParseTest(unittest.TestCase):
     def test_describe_is_human_readable(self) -> None:
         lines = script.describe(script.parse("repeat 2\n    tap 0.5 0.25\n"))
         self.assertEqual(lines, ["lặp 2 lần:", "  chạm (50%, 25%)"])
+
+
+class GestureTest(unittest.TestCase):
+    def test_every_default_gesture_parses(self) -> None:
+        from controlios import gestures
+
+        for name in gestures.DEFAULT_GESTURES:
+            param = "3" if name == "closeall" else "Instagram"
+            with self.subTest(gesture=name):
+                steps = script.parse(f"{name} {param}".strip())
+                self.assertEqual(len(steps), 1)
+                self.assertEqual(steps[0].op, "macro")
+                self.assertTrue(steps[0].body, f"{name} khai triển ra rỗng")
+                self.assertGreater(script.count_steps(steps), 0)
+
+    def test_openapp_puts_the_name_into_a_text_step(self) -> None:
+        steps = script.parse("openapp Instagram")
+        flat = _flatten(steps)
+        typed = [s for s in flat if s.op == "text"]
+        self.assertEqual([s.args[0] for s in typed], ["Instagram"])
+        self.assertTrue([s for s in flat if s.op == "key" and s.args == ("Return",)])
+
+    def test_openapp_keeps_multi_word_names(self) -> None:
+        steps = script.parse("openapp Cài đặt")
+        typed = [s for s in _flatten(steps) if s.op == "text"]
+        self.assertEqual([s.args[0] for s in typed], ["Cài đặt"])
+
+    def test_switcher_holds_before_releasing(self) -> None:
+        """Không giữ thì iOS chỉ về Home — cử chỉ sẽ sai."""
+
+        swipes = [s for s in _flatten(script.parse("switcher")) if s.op == "swipe"]
+        self.assertTrue(swipes)
+        self.assertGreater(swipes[0].args[5], 0.0, "swipe mở switcher phải có thời gian giữ")
+
+    def test_closeall_expands_the_requested_number_of_flicks(self) -> None:
+        steps = script.parse("closeall 4")
+        repeats = [s for s in _flatten(steps) if s.op == "repeat"]
+        self.assertTrue(repeats)
+        self.assertEqual(repeats[0].args[0], 4)
+
+    def test_macro_needing_a_parameter_says_so(self) -> None:
+        with self.assertRaises(script.ScriptError) as ctx:
+            script.parse("openapp")
+        self.assertIn("openapp", str(ctx.exception))
+
+    def test_unknown_command_lists_the_gestures(self) -> None:
+        with self.assertRaises(script.ScriptError) as ctx:
+            script.parse("mokhoa")
+        self.assertIn("openapp", str(ctx.exception))
+
+    def test_custom_gestures_override_defaults(self) -> None:
+        import json
+        import tempfile
+        from controlios import gestures
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gestures.json"
+            path.write_text(json.dumps({"home": "key Home\nwait 0.5"}), encoding="utf-8")
+            custom = gestures.load_gestures(path)
+            steps = script.parse("home", custom)
+            keys = [s for s in _flatten(steps) if s.op == "key"]
+            self.assertEqual([s.args for s in keys], [("Home",)])
+
+    def test_custom_gesture_cannot_shadow_a_builtin(self) -> None:
+        import json
+        import tempfile
+        from controlios import gestures
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gestures.json"
+            path.write_text(json.dumps({"tap": "wait 1"}), encoding="utf-8")
+            with self.assertRaises(ValueError) as ctx:
+                gestures.load_gestures(path)
+            self.assertIn("lệnh có sẵn", str(ctx.exception))
+
+    def test_recursive_gesture_is_caught_not_hung(self) -> None:
+        custom = {"loop1": "loop2", "loop2": "loop1"}
+        with self.assertRaises(script.ScriptError) as ctx:
+            script.parse("loop1", custom)
+        self.assertIn("lồng nhau quá sâu", str(ctx.exception))
+
+    def test_describe_names_the_gesture(self) -> None:
+        lines = script.describe(script.parse("openapp Zalo"))
+        self.assertEqual(lines, ["mở app «Zalo»"])
+
+
+def _flatten(steps):
+    out = []
+    for step in steps:
+        out.append(step)
+        out.extend(_flatten(step.body))
+    return out
 
 
 def fast_settings() -> Settings:
@@ -288,6 +384,55 @@ class PoolFeatureTest(unittest.TestCase):
             shots = list(Path(tmp).glob("*.png"))
             self.assertEqual(len(shots), 3, "mỗi máy phải có 1 ảnh từ lệnh shot")
             self.assertTrue(all("cuoi" in s.name for s in shots))
+
+    def test_gesture_sends_a_real_press_hold_release(self) -> None:
+        """`switcher` phải là nhấn → kéo → GIỮ → nhả, đúng cử chỉ iOS."""
+
+        import tempfile
+
+        server = self.servers[0]
+        server.pointer_events.clear()
+        steps = script.parse("switcher")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            done = []
+            self.pool.run_script([self.specs[0].key], steps, tmp,
+                                 on_done=lambda: done.append(True))
+            self.assertTrue(self.wait_until(lambda: done, 20), "cử chỉ treo")
+
+        events = server.pointer_events
+        self.assertGreaterEqual(len(events), 4, events)
+
+        pressed = [e for e in events if e[0] == 1]
+        released = [e for e in events if e[0] == 0]
+        self.assertTrue(pressed, "không có sự kiện nhấn")
+        self.assertTrue(released, "không có sự kiện nhả")
+
+        # Nhấn ở sát đáy màn hình, nhả ở khoảng giữa: đúng chiều vuốt lên.
+        self.assertGreater(pressed[0][2], server.height * 0.9, f"điểm nhấn: {pressed[0]}")
+        self.assertLess(released[-1][2], server.height * 0.6, f"điểm nhả: {released[-1]}")
+        # Nút phải còn giữ suốt quá trình kéo.
+        self.assertGreaterEqual(len(pressed), 3, "chuột phải giữ trong lúc kéo")
+
+    def test_openapp_types_the_name_on_the_device(self) -> None:
+        import tempfile
+
+        server = self.servers[0]
+        server.key_events.clear()
+        steps = script.parse("openapp Zalo")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            done = []
+            self.pool.run_script([self.specs[0].key], steps, tmp,
+                                 on_done=lambda: done.append(True))
+            self.assertTrue(self.wait_until(lambda: done, 25), "openapp treo")
+
+        # Mỗi ký tự có nhấn (down=1) rồi nhả; ghép lại phải ra đúng "Zalo".
+        typed = "".join(chr(sym) for down, sym in server.key_events
+                        if down == 1 and 32 <= sym < 127)
+        self.assertIn("Zalo", typed, f"đã gõ: {typed!r}")
+        self.assertIn(0xFF0D, [sym for down, sym in server.key_events if down == 1],
+                      "thiếu phím Return để mở kết quả đầu tiên")
 
     def test_script_can_be_cancelled(self) -> None:
         import tempfile

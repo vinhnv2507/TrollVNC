@@ -12,8 +12,9 @@ from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QHBoxLayout, QLabel, QLineEdit, QMainWindow, QMessageBox, QPlainTextEdit,
-    QPushButton, QSplitter, QStatusBar, QToolBar, QVBoxLayout, QWidget,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
+    QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QToolBar, QToolButton,
+    QVBoxLayout, QWidget,
 )
 
 from .. import script as script_lang
@@ -33,15 +34,26 @@ SAMPLE_SCRIPT = """\
 # Toạ độ là TỈ LỆ màn hình (0..1), không phải pixel,
 # nên cùng kịch bản chạy đúng trên mọi cỡ iPhone.
 
-shot truoc-khi-chay
-tap 0.5 0.85
-wait 1.5
-swipe 0.5 0.8 0.5 0.2 0.4
+home
+openapp Zalo
+wait 2
+shot da-mo-app
 repeat 3
     swipe 0.5 0.75 0.5 0.25 0.3
     wait 1
-shot sau-khi-chay
+shot sau-khi-luot
+closeapp
 """
+
+# (nhãn, lệnh kịch bản, có cần nhập tên app không)
+QUICK_ACTIONS = [
+    ("Về màn hình chính", "home", False),
+    ("Mở app…", "openapp", True),
+    ("Đóng app đang mở", "closeapp", False),
+    ("Đóng 5 app gần đây", "closeall 5", False),
+    ("Mở App Library (xem app đã cài)", "applibrary", False),
+    ("Mở App Library + chụp ảnh", "applibrary\nshot app-library", False),
+]
 
 
 class Bridge(QObject):
@@ -153,8 +165,9 @@ class ScriptDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Lệnh: tap · swipe · text · key · wait · shot · repeat "
-            "(khối lặp viết thụt lề bên dưới)"
+            "Lệnh: tap · swipe · text · key · wait · shot · repeat\n"
+            "Cử chỉ iOS: home · switcher · spotlight · openapp <tên> · "
+            "closeapp · closeall <số> · applibrary"
         ))
         self.editor = QPlainTextEdit(SAMPLE_SCRIPT)
         self.editor.setStyleSheet("font-family: Consolas, monospace;")
@@ -376,6 +389,22 @@ class MainWindow(QMainWindow):
         self.record_action.toggled.connect(self._toggle_recording)
         bar.addAction(self.record_action)
 
+        self.quick_button = QToolButton()
+        self.quick_button.setText("Thao tác app ▾")
+        self.quick_button.setToolTip(
+            "Cử chỉ iOS dựng sẵn, chạy trên các máy đang chọn"
+        )
+        self.quick_button.setPopupMode(QToolButton.InstantPopup)
+        menu = QMenu(self.quick_button)
+        for label, source, needs_name in QUICK_ACTIONS:
+            action = menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, s=source, n=needs_name, l=label:
+                self._run_quick_action(l, s, n)
+            )
+        self.quick_button.setMenu(menu)
+        bar.addWidget(self.quick_button)
+
         script_action = QAction("Kịch bản…", self)
         script_action.triggered.connect(self._open_script_dialog)
         bar.addAction(script_action)
@@ -509,6 +538,33 @@ class MainWindow(QMainWindow):
             self.recording_id = None
             self.record_action.setText("Ghi hình")
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
+
+    def _run_quick_action(self, label: str, source: str, needs_name: bool) -> None:
+        targets = self.script_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy",
+                                    "Hãy chọn máy ở lưới trước khi chạy thao tác.")
+            return
+
+        if needs_name:
+            name, ok = QInputDialog.getText(
+                self, "Mở app",
+                "Tên app đúng như hiển thị trên iPhone\n"
+                "(tìm qua Spotlight, nên gõ đủ dấu):",
+            )
+            if not ok or not name.strip():
+                return
+            source = f"{source} {name.strip()}"
+
+        try:
+            steps = script_lang.parse(source)
+        except script_lang.ScriptError as exc:
+            QMessageBox.warning(self, "Cử chỉ hỏng",
+                                f"{exc}\n\nKiểm tra lại config/gestures.json.")
+            return
+
+        self.statusBar().showMessage(f"{label} · {len(targets)} máy", 5000)
+        self.start_script(steps, targets)
 
     def _open_script_dialog(self) -> None:
         if self.script_dialog is None:

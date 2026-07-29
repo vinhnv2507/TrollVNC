@@ -3,15 +3,21 @@
 Toạ độ luôn là **tỉ lệ 0..1** chứ không phải pixel, nên cùng một kịch bản chạy
 đúng trên các iPhone khác kích thước màn hình.
 
-    tap 0.5 0.85              # chạm giữa màn hình, 85% chiều cao
-    swipe 0.5 0.8 0.5 0.2 0.3 # vuốt lên trong 0.3 giây
+    tap 0.5 0.85                  # chạm giữa màn hình, 85% chiều cao
+    swipe 0.5 0.8 0.5 0.2 0.3     # vuốt lên trong 0.3 giây
+    swipe 0.5 0.99 0.5 0.45 0.35 0.7   # ... rồi giữ 0.7s trước khi nhả
     text Xin chào
     key Return
     wait 1.5
-    shot ket-qua              # chụp màn hình, tên file có hậu tố ket-qua
-    repeat 3                  # lặp lại khối thụt lề bên dưới
+    shot ket-qua                  # chụp màn hình, tên file có hậu tố ket-qua
+    repeat 3                      # lặp lại khối thụt lề bên dưới
         tap 0.5 0.9
         wait 1
+
+Ngoài ra còn các lệnh cử chỉ iOS dựng sẵn trong :mod:`controlios.gestures`:
+``home``, ``switcher``, ``spotlight``, ``openapp <tên>``, ``closeapp``,
+``closeall <số>``, ``applibrary``. Chúng được khai triển thành các lệnh nguyên
+thuỷ ở trên ngay lúc phân tích cú pháp.
 
 Dòng trống và dòng bắt đầu bằng # bị bỏ qua.
 """
@@ -19,11 +25,13 @@ Dòng trống và dòng bắt đầu bằng # bị bỏ qua.
 from __future__ import annotations
 
 import asyncio
-import re
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, Dict, List, Optional, Sequence
+
+from . import gestures as gesture_lib
 
 MAX_DEPTH = 5
+MAX_MACRO_DEPTH = 6
 
 
 class ScriptError(ValueError):
@@ -52,8 +60,16 @@ def _ratio(raw: str, line_no: int) -> float:
     return value
 
 
-def parse(source: str) -> List[Step]:
-    """Text -> danh sách Step. Khối lồng nhau xác định bằng thụt lề."""
+def parse(source: str, gestures: Optional[Dict[str, str]] = None,
+          _macro_depth: int = 0) -> List[Step]:
+    """Text -> danh sách Step. Khối lồng nhau xác định bằng thụt lề.
+
+    Macro cử chỉ được khai triển ngay tại đây, nên lỗi trong macro lộ ra lúc
+    bấm Kiểm tra chứ không phải giữa chừng khi đang chạy trên 250 máy.
+    """
+
+    if gestures is None:
+        gestures = gesture_lib.load_gestures()
 
     lines = []
     for line_no, raw in enumerate(source.splitlines(), start=1):
@@ -73,7 +89,7 @@ def parse(source: str) -> List[Step]:
                 break
             if line_indent > indent:
                 raise ScriptError(line_no, "thụt lề không khớp")
-            step, index = _statement(line_no, text, index + 1, depth)
+            step, index = _statement(line_no, text, index + 1, gestures, _macro_depth)
             steps.append(step)
             if step.op == "repeat":
                 if index < len(lines) and lines[index][1] > indent:
@@ -88,10 +104,14 @@ def parse(source: str) -> List[Step]:
     return steps
 
 
-def _statement(line_no: int, text: str, index: int, depth: int) -> tuple[Step, int]:
+def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
+               macro_depth: int) -> tuple[Step, int]:
     parts = text.split()
     op = parts[0].lower()
     args = parts[1:]
+
+    if op in gestures:
+        return _macro(line_no, text, op, args, gestures, macro_depth), index
 
     if op == "tap":
         if len(args) != 2:
@@ -99,11 +119,14 @@ def _statement(line_no: int, text: str, index: int, depth: int) -> tuple[Step, i
         return Step(op, (_ratio(args[0], line_no), _ratio(args[1], line_no)), line_no=line_no), index
 
     if op == "swipe":
-        if len(args) not in (4, 5):
-            raise ScriptError(line_no, "cú pháp: swipe <x1> <y1> <x2> <y2> [giây]")
+        if len(args) not in (4, 5, 6):
+            raise ScriptError(
+                line_no, "cú pháp: swipe <x1> <y1> <x2> <y2> [giây] [giữ]"
+            )
         coords = tuple(_ratio(a, line_no) for a in args[:4])
-        duration = float(args[4]) if len(args) == 5 else 0.3
-        return Step(op, coords + (duration,), line_no=line_no), index
+        duration = _seconds(args[4], line_no) if len(args) >= 5 else 0.3
+        hold = _seconds(args[5], line_no) if len(args) == 6 else 0.0
+        return Step(op, coords + (duration, hold), line_no=line_no), index
 
     if op == "text":
         payload = text[len(parts[0]):].strip()
@@ -119,13 +142,7 @@ def _statement(line_no: int, text: str, index: int, depth: int) -> tuple[Step, i
     if op == "wait":
         if len(args) != 1:
             raise ScriptError(line_no, "cú pháp: wait <giây>")
-        try:
-            seconds = float(args[0])
-        except ValueError:
-            raise ScriptError(line_no, f"{args[0]!r} không phải số giây") from None
-        if seconds < 0:
-            raise ScriptError(line_no, "thời gian chờ không được âm")
-        return Step(op, (seconds,), line_no=line_no), index
+        return Step(op, (_seconds(args[0], line_no),), line_no=line_no), index
 
     if op == "shot":
         return Step(op, (args[0] if args else "",), line_no=line_no), index
@@ -135,7 +152,55 @@ def _statement(line_no: int, text: str, index: int, depth: int) -> tuple[Step, i
             raise ScriptError(line_no, "cú pháp: repeat <số lần ≥ 1>")
         return Step(op, (int(args[0]),), line_no=line_no), index
 
-    raise ScriptError(line_no, f"lệnh không hiểu: {parts[0]!r}")
+    known = ", ".join(["tap", "swipe", "text", "key", "wait", "shot", "repeat"]
+                      + sorted(gestures))
+    raise ScriptError(line_no, f"lệnh không hiểu: {parts[0]!r}. Lệnh có: {known}")
+
+
+def _seconds(raw: str, line_no: int) -> float:
+    try:
+        value = float(raw)
+    except ValueError:
+        raise ScriptError(line_no, f"{raw!r} không phải số giây") from None
+    if value < 0:
+        raise ScriptError(line_no, "thời gian không được âm")
+    return value
+
+
+def _macro(line_no: int, text: str, name: str, args: List[str],
+           gestures: Dict[str, str], macro_depth: int) -> Step:
+    """Khai triển một cử chỉ dựng sẵn thành các lệnh nguyên thuỷ."""
+
+    if macro_depth >= MAX_MACRO_DEPTH:
+        raise ScriptError(line_no, f"macro {name!r} lồng nhau quá sâu (vòng lặp?)")
+
+    param = text[len(name):].strip()
+    if name in gesture_lib.GESTURE_PARAM and not param:
+        raise ScriptError(
+            line_no, f"cú pháp: {name} <{gesture_lib.GESTURE_PARAM[name]}>"
+        )
+
+    body_source = gesture_lib.body_for(name, param, gestures)
+    try:
+        body = parse(body_source, gestures, macro_depth + 1)
+    except ScriptError as exc:
+        raise ScriptError(
+            line_no, f"macro {name!r} hỏng ở dòng {exc.line_no} của nó: {exc}"
+        ) from None
+    if not body:
+        raise ScriptError(line_no, f"macro {name!r} rỗng")
+    return Step("macro", (name, param), body=body, line_no=line_no)
+
+
+_MACRO_LABELS = {
+    "home": "về màn hình chính",
+    "switcher": "mở trình chuyển app",
+    "spotlight": "mở tìm kiếm Spotlight",
+    "openapp": "mở app «{param}»",
+    "closeapp": "đóng app đang mở",
+    "closeall": "đóng {param} app gần đây",
+    "applibrary": "mở App Library",
+}
 
 
 def describe(steps: Sequence[Step]) -> List[str]:
@@ -148,12 +213,18 @@ def describe(steps: Sequence[Step]) -> List[str]:
             if step.op == "repeat":
                 out.append(f"{indent}lặp {step.args[0]} lần:")
                 walk(step.body, indent + "  ")
+            elif step.op == "macro":
+                name, param = step.args
+                label = _MACRO_LABELS.get(name, f"cử chỉ {name}")
+                out.append(f"{indent}{label.format(param=param)}")
             elif step.op == "tap":
                 out.append(f"{indent}chạm ({step.args[0]:.0%}, {step.args[1]:.0%})")
             elif step.op == "swipe":
-                x1, y1, x2, y2, duration = step.args
+                x1, y1, x2, y2, duration, hold = step.args
+                held = f", giữ {hold}s" if hold else ""
                 out.append(
-                    f"{indent}vuốt ({x1:.0%},{y1:.0%}) → ({x2:.0%},{y2:.0%}) trong {duration}s"
+                    f"{indent}vuốt ({x1:.0%},{y1:.0%}) → ({x2:.0%},{y2:.0%}) "
+                    f"trong {duration}s{held}"
                 )
             elif step.op == "text":
                 out.append(f"{indent}gõ {step.args[0]!r}")
@@ -175,6 +246,8 @@ def count_steps(steps: Sequence[Step]) -> int:
     for step in steps:
         if step.op == "repeat":
             total += step.args[0] * count_steps(step.body)
+        elif step.op == "macro":
+            total += count_steps(step.body)
         else:
             total += 1
     return total
@@ -205,9 +278,10 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 session.tap(int(x * width), int(y * height))
                 await asyncio.sleep(0.05)
             elif step.op == "swipe":
-                x1, y1, x2, y2, duration = step.args
+                x1, y1, x2, y2, duration, hold = step.args
                 await session.swipe(int(x1 * width), int(y1 * height),
-                                    int(x2 * width), int(y2 * height), duration)
+                                    int(x2 * width), int(y2 * height), duration,
+                                    hold=hold)
             elif step.op == "text":
                 session.type_text(step.args[0])
                 await asyncio.sleep(0.05)
@@ -223,6 +297,12 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
             elif step.op == "repeat":
                 for _ in range(step.args[0]):
                     await execute(step.body)
+                continue
+            elif step.op == "macro":
+                name, param = step.args
+                on_event(session.spec.key,
+                         f"dòng {step.line_no}: {name}{' ' + param if param else ''}")
+                await execute(step.body)
                 continue
 
             on_event(session.spec.key, f"dòng {step.line_no}: {step.op}")

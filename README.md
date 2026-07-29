@@ -101,6 +101,54 @@ Muốn ra video thì ghép bằng ffmpeg:
 ffmpeg -framerate 2 -i "captures\ghihinh\rec-123\iPhone-01\iPhone-01_%06d.png" -c:v libx264 -pix_fmt yuv420p iphone01.mp4
 ```
 
+### Thao tác app (home / mở app / đóng app)
+
+Nút **Thao tác app ▾** chạy các cử chỉ iOS dựng sẵn trên các máy đang chọn:
+về màn hình chính, mở app theo tên, đóng app đang mở, đóng 5 app gần đây, mở
+App Library. Dùng trong kịch bản thì viết thẳng tên lệnh:
+
+```
+home                  # về màn hình chính
+switcher              # mở trình chuyển app
+spotlight             # mở ô tìm kiếm
+openapp Zalo          # tìm trong Spotlight rồi Enter mở kết quả đầu
+closeapp              # vào switcher, hất thẻ đầu lên, về home
+closeall 5            # hất 5 thẻ liên tiếp
+applibrary            # sang trang App Library
+```
+
+#### Vì sao không có lệnh "liệt kê app đã cài"
+
+VNC **chỉ có màn hình và chuột/phím**. Không có kênh nào để hỏi iOS "máy này
+cài app gì" hay "mở bundle id `com.example.app`" — TrollVNC không mở cổng đó.
+Nên mọi lệnh app ở đây đều là **cử chỉ**, đúng như bạn tự thao tác tay:
+
+- `openapp` = mở Spotlight, gõ tên, nhấn Enter. Cần **tên hiển thị** trên máy
+  (gõ đủ dấu), không phải bundle id.
+- `applibrary` = sang trang App Library, nơi thấy hết app đã cài. Ghép với
+  `shot` thì được **ảnh chụp** các trang app — không phải danh sách chữ.
+
+Muốn danh sách app dạng text đúng nghĩa (và mở/đóng theo bundle id) thì phải
+có kênh khác ngoài VNC, ví dụ SSH trên máy. Xem "Giới hạn đã biết" bên dưới.
+
+#### Toạ độ cử chỉ chỉnh được
+
+Toạ độ mặc định nhắm iPhone **Face ID** (không nút Home), màn hình dọc. Máy
+khác đời hoặc iOS khác có thể lệch — nên toàn bộ cử chỉ nằm trong
+`config/gestures.json`, sửa được mà không đụng code (mẫu:
+`config/gestures.example.json`):
+
+```json
+{
+  "home": "key Home\nwait 0.5",
+  "closeapp": "switcher\nswipe 0.5 0.5 0.5 0.03 0.35\nwait 0.8\nhome"
+}
+```
+
+Mỗi macro chính là một đoạn kịch bản, gọi được macro khác, và `{name}` là tham
+số truyền vào. Cách dò toạ độ đúng cho máy của bạn: chạy cử chỉ trên **một**
+máy, chèn `shot` sau mỗi bước, xem ảnh trong `captures/` rồi chỉnh số.
+
 ### Kịch bản tự động
 
 Bấm **Kịch bản…**, soạn rồi **Chạy** — kịch bản chạy **song song** trên mọi máy
@@ -110,16 +158,21 @@ chạy đúng trên các iPhone khác cỡ màn hình.
 ```
 # Dòng trống và dòng bắt đầu bằng # bị bỏ qua
 
-tap 0.5 0.85                 # chạm giữa màn hình, 85% chiều cao
-swipe 0.5 0.8 0.5 0.2 0.4    # vuốt lên trong 0.4 giây
-text Xin chào                # gõ chữ
-key Return                   # nhấn phím (tên keysym X11)
-wait 1.5                     # chờ 1.5 giây
-shot ket-qua                 # chụp màn hình, file có hậu tố ket-qua
-repeat 3                     # lặp khối thụt lề bên dưới 3 lần
+tap 0.5 0.85                      # chạm giữa màn hình, 85% chiều cao
+swipe 0.5 0.8 0.5 0.2 0.4         # vuốt lên trong 0.4 giây
+swipe 0.5 0.99 0.5 0.45 0.35 0.7  # ... rồi GIỮ 0.7s trước khi nhả
+text Xin chào                     # gõ chữ
+key Return                        # nhấn phím (tên keysym X11)
+wait 1.5                          # chờ 1.5 giây
+shot ket-qua                      # chụp màn hình, file có hậu tố ket-qua
+repeat 3                          # lặp khối thụt lề bên dưới 3 lần
     swipe 0.5 0.75 0.5 0.25 0.3
     wait 1
+openapp Zalo                      # và mọi cử chỉ ở mục trên
 ```
+
+Tham số **giữ** của `swipe` không phải chi tiết vụn: vuốt lên từ mép dưới rồi
+nhả ngay thì iOS về màn hình chính, phải *giữ* lại mới ra trình chuyển app.
 
 - **Kiểm tra** — dò cú pháp và in lại kịch bản bằng tiếng Việt để soát trước khi
   chạy. Lỗi báo kèm **số dòng**. Toạ độ ngoài khoảng 0..1 bị từ chối ngay, vì đó
@@ -162,6 +215,7 @@ controlios/
   config.py              DeviceSpec, Settings, đọc/ghi registry
   scan.py                dò cổng VNC theo CIDR / dải / bảng ARP
   script.py              ngôn ngữ kịch bản: parse, describe, runner
+  gestures.py            cử chỉ iOS dựng sẵn, nạp đè từ config/gestures.json
   util/png.py            ghi PNG bằng thư viện chuẩn (không cần Pillow/Qt)
   vnc/session.py         một kết nối RFB: tier, vòng đọc, vòng nhịp, input, chụp
   vnc/pool.py            toàn bộ session trên 1 event loop ở thread riêng;
@@ -201,7 +255,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-33 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+51 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -209,7 +263,10 @@ dòng · chụp full res ngay cả khi máy đang IDLE · nhiều lời gọi ch
 một round trip · chụp báo lỗi rõ khi máy rớt · ghi hình ra đúng chuỗi ảnh và
 dừng hẳn khi bấm dừng · kịch bản chạy đủ trên mọi máy đã chọn và huỷ được giữa
 chừng · cú pháp sai báo đúng số dòng · hộp thoại kịch bản không gửi gì khi chưa
-chọn máy.
+chọn máy · mọi cử chỉ mặc định đều phân tích được · `switcher` thật sự gửi
+nhấn→kéo→giữ→nhả đúng thứ tự tới server · `openapp Zalo` gõ đúng chữ "Zalo" và
+phím Return tới máy · cử chỉ tự chỉnh đè được cử chỉ mặc định · macro gọi vòng
+tròn bị chặn thay vì treo.
 
 Đo tải:
 
@@ -232,3 +289,11 @@ chọn máy.
 - Kịch bản chạy **mở vòng**: nó gửi thao tác theo đúng thời gian đã ghi, chứ
   không đọc màn hình để chờ một nút hiện ra. Nếu máy phản ứng chậm, tăng `wait`.
   Muốn kiểm chứng thì chèn `shot` ở các mốc rồi xem lại ảnh.
+- **Không liệt kê được app đã cài dạng text**, và không mở/đóng app theo bundle
+  id — VNC không có kênh cho việc đó (xem mục "Thao tác app"). Nếu các iPhone
+  này có **SSH** (máy jailbreak thường có Dropbear/OpenSSH cổng 22), thì làm
+  được thật: `uicache -l` liệt kê bundle id, `open <bundle>` mở app,
+  `killall <tên>` đóng app. Đó sẽ là một kênh điều khiển thứ hai bên cạnh VNC,
+  chưa cài trong bản này.
+- Toạ độ cử chỉ mặc định nhắm iPhone Face ID dọc màn hình. Máy có nút Home vật
+  lý, hoặc iOS khác đời, cần chỉnh `config/gestures.json`.

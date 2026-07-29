@@ -1,0 +1,9 @@
+{
+  "home": "swipe 0.5 0.99 0.5 0.55 0.18\nwait 0.7",
+  "switcher": "swipe 0.5 0.99 0.5 0.45 0.35 0.7\nwait 1.0",
+  "spotlight": "home\nswipe 0.5 0.35 0.5 0.8 0.35\nwait 1.0",
+  "openapp": "spotlight\ntext {name}\nwait 1.5\nkey Return\nwait 2.0",
+  "closeapp": "switcher\nswipe 0.5 0.5 0.5 0.03 0.3\nwait 0.8\nhome",
+  "closeall": "switcher\nrepeat {name}\n    swipe 0.5 0.5 0.5 0.03 0.3\n    wait 0.7\nhome",
+  "applibrary": "home\nrepeat 8\n    swipe 0.85 0.5 0.15 0.5 0.2\n    wait 0.35\nwait 1.0"
+}

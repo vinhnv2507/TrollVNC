@@ -175,6 +175,53 @@ class ScriptDialogTest(unittest.TestCase):
         self.assertEqual(len(called), 1)
         self.assertEqual(len(called[0][0]), 2)
 
+    def test_quick_action_runs_the_gesture_on_selection(self) -> None:
+        sent = []
+        self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(
+            (list(keys), steps)
+        )
+        self.window.grid.select_all()
+        self.window._run_quick_action("Về màn hình chính", "home", False)
+
+        self.assertEqual(len(sent), 1)
+        keys, steps = sent[0]
+        self.assertEqual(len(keys), 2)
+        self.assertEqual(steps[0].op, "macro")
+        self.assertEqual(steps[0].args[0], "home")
+
+    def test_open_app_asks_for_a_name_and_uses_it(self) -> None:
+        sent = []
+        self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(steps)
+        self.window.grid.select_all()
+
+        with unittest.mock.patch(
+            "controlios.ui.app.QInputDialog.getText", return_value=("Zalo", True)
+        ):
+            self.window._run_quick_action("Mở app…", "openapp", True)
+
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(sent[0][0].args, ("openapp", "Zalo"))
+
+    def test_open_app_cancelled_sends_nothing(self) -> None:
+        sent = []
+        self.window.pool.run_script = lambda *a, **k: sent.append(a)
+        self.window.grid.select_all()
+
+        with unittest.mock.patch(
+            "controlios.ui.app.QInputDialog.getText", return_value=("", False)
+        ):
+            self.window._run_quick_action("Mở app…", "openapp", True)
+        self.assertFalse(sent)
+
+    def test_quick_action_needs_a_selection(self) -> None:
+        sent = []
+        self.window.pool.run_script = lambda *a, **k: sent.append(a)
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window._run_quick_action("Về màn hình chính", "home", False)
+        self.assertFalse(sent)
+
     def test_recording_toggle_starts_and_stops(self) -> None:
         started, stopped = [], []
         self.window.pool.start_recording = lambda *a, **k: (started.append(a) or "rec-1")

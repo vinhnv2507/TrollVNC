@@ -187,7 +187,13 @@ class VncSession:
         self._client.mouse._write()
 
     async def swipe(self, x1: int, y1: int, x2: int, y2: int, duration: float = 0.25,
-                    steps: int = 12) -> None:
+                    steps: int = 12, hold: float = 0.0) -> None:
+        """Vuốt từ (x1,y1) tới (x2,y2), rồi *giữ* nguyên `hold` giây trước khi nhả.
+
+        Phần giữ là bắt buộc với các cử chỉ như mở App Switcher trên iOS: vuốt
+        lên rồi nhả ngay chỉ về màn hình chính.
+        """
+
         if not self._client:
             return
         self.mouse_down(x1, y1)
@@ -195,6 +201,8 @@ class VncSession:
             t = i / steps
             self.mouse_move(int(x1 + (x2 - x1) * t), int(y1 + (y2 - y1) * t))
             await asyncio.sleep(duration / steps)
+        if hold > 0:
+            await asyncio.sleep(hold)
         self.mouse_up(x2, y2)
 
     def type_text(self, text: str) -> None:
