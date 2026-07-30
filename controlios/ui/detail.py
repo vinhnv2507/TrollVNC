@@ -58,6 +58,9 @@ MODIFIERS = [
 # Một "nấc" bánh xe của Qt là 120 đơn vị.
 WHEEL_STEP = 120
 
+# Tỉ lệ ngang/dọc dùng trước khi có khung hình đầu tiên.
+DEFAULT_ASPECT = 9 / 19.5
+
 
 class DetailView(QWidget):
     pointer_pressed = Signal(int, int, int)     # x, y, nút
@@ -85,6 +88,20 @@ class DetailView(QWidget):
     def fb_size(self) -> tuple[int, int]:
         """Framebuffer size of the focused phone (0, 0) before the first frame."""
         return self._fb
+
+    @property
+    def aspect(self) -> float:
+        width, height = self._fb
+        return width / height if width and height else DEFAULT_ASPECT
+
+    def preferred_width(self) -> int:
+        """Bề rộng vừa đúng một chiếc máy ở chiều cao hiện tại.
+
+        Không có nó thì khung này chiếm nửa cửa sổ để hiển thị hai dải đen hai
+        bên, còn lưới bị bóp lại.
+        """
+
+        return int(self.height() * self.aspect) + 2
 
     def set_device(self, key: Optional[str]) -> None:
         self.key = key

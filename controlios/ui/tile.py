@@ -17,6 +17,11 @@ STATE_COLOUR = {
 }
 
 
+LABEL_HEIGHT = 22
+# Tỉ lệ ngang/dọc trước khi có khung hình đầu tiên (iPhone màn hình dài).
+DEFAULT_ASPECT = 9 / 19.5
+
+
 class DeviceTile(QWidget):
     clicked = Signal(str, object)      # key, modifiers
     activated = Signal(str)            # double click -> open detail
@@ -29,12 +34,34 @@ class DeviceTile(QWidget):
         self.selected = False
         self._pixmap: QPixmap | None = None
         self._tile_width = tile_width
-        self.setFixedSize(tile_width, int(tile_width * 16 / 9) + 22)
+        self._aspect = DEFAULT_ASPECT
+        self._apply_size()
         self.setToolTip(spec.key)
+
+    # -------------------------------------------------------------------- size
+
+    def _apply_size(self) -> None:
+        width = max(60, int(self._tile_width))
+        height = int(width / self._aspect) + LABEL_HEIGHT
+        self.setFixedSize(width, height)
+
+    def set_tile_width(self, width: int) -> None:
+        if int(width) != self._tile_width:
+            self._tile_width = int(width)
+            self._apply_size()
+
+    def set_aspect(self, aspect: float) -> None:
+        """Tỉ lệ thật của máy, biết được sau khung hình đầu tiên."""
+
+        if aspect > 0 and abs(aspect - self._aspect) > 0.001:
+            self._aspect = aspect
+            self._apply_size()
 
     # ------------------------------------------------------------------ inputs
 
     def set_frame(self, frame: Frame) -> None:
+        if frame.full_width and frame.full_height:
+            self.set_aspect(frame.full_width / frame.full_height)
         image = QImage(
             frame.data, frame.width, frame.height, frame.width * 3, QImage.Format_RGB888
         )
@@ -63,7 +90,7 @@ class DeviceTile(QWidget):
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
-        body = QRect(0, 0, self.width(), self.height() - 22)
+        body = QRect(0, 0, self.width(), self.height() - LABEL_HEIGHT)
 
         painter.fillRect(body, QColor("#111318"))
         if self._pixmap:
@@ -81,7 +108,7 @@ class DeviceTile(QWidget):
                             3 if self.selected else 1))
         painter.drawRect(body.adjusted(1, 1, -2, -2))
 
-        label = QRect(0, self.height() - 22, self.width(), 22)
+        label = QRect(0, self.height() - LABEL_HEIGHT, self.width(), LABEL_HEIGHT)
         painter.fillRect(label, QColor("#1b1f27"))
         painter.setPen(colour)
         painter.drawEllipse(6, self.height() - 15, 8, 8)

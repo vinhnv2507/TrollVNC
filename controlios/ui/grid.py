@@ -25,6 +25,11 @@ class DeviceGrid(QScrollArea):
     selection_changed = Signal(list)
     device_activated = Signal(str)
 
+    # Bề rộng ô tối thiểu khi tự chia cột, và khoảng cách giữa các ô.
+    MIN_TILE_WIDTH = 120
+    SPACING = 8
+    MARGIN = 8
+
     def __init__(self, tile_width: int = 150, parent=None) -> None:
         super().__init__(parent)
         self.tile_width = tile_width
@@ -32,14 +37,21 @@ class DeviceGrid(QScrollArea):
         self.order: List[str] = []
         self.selection: List[str] = []
         self._focus_key: Optional[str] = None
-        self._columns = 0
+        self._columns = 0            # số cột đang dùng
+        self._forced_columns = 0     # 0 = tự động
+        self._laying_out = False
 
         self._body = QWidget()
         self._layout = QGridLayout(self._body)
-        self._layout.setSpacing(8)
-        self._layout.setContentsMargins(8, 8, 8, 8)
+        self._layout.setSpacing(self.SPACING)
+        self._layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
+        self._layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
         self.setWidget(self._body)
         self.setWidgetResizable(True)
+        # Ô luôn được chia vừa bề rộng nên không bao giờ cần cuộn ngang; để bật
+        # thì ô bị cắt mất một phần như trước.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setMinimumWidth(self.MIN_TILE_WIDTH * 2 + self.SPACING + self.MARGIN * 2 + 20)
         self.setStyleSheet("QScrollArea { background: #0b0d11; border: none; }")
 
         self._debounce = QTimer(self)
@@ -115,21 +127,50 @@ class DeviceGrid(QScrollArea):
 
     # ------------------------------------------------------------------ layout
 
+    def set_columns(self, columns: int) -> None:
+        """0 = tự chia theo bề rộng."""
+
+        if columns != self._forced_columns:
+            self._forced_columns = columns
+            self._columns = 0          # buộc xếp lại
+            self._relayout()
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._relayout()
 
     def _relayout(self) -> None:
-        width = max(1, self.viewport().width() - 24)
-        columns = max(1, width // (self.tile_width + 8))
-        if columns == self._columns:
-            self._debounce.start()
+        if self._laying_out or not self.order:
             return
-        self._columns = columns
-        while self._layout.count():
-            self._layout.takeAt(0)
-        for index, key in enumerate(self.order):
-            self._layout.addWidget(self.tiles[key], index // columns, index % columns)
+        self._laying_out = True
+        try:
+            available = max(
+                self.MIN_TILE_WIDTH,
+                self.viewport().width() - self.MARGIN * 2,
+            )
+            columns = self._forced_columns or max(
+                1, (available + self.SPACING) // (self.tile_width + self.SPACING)
+            )
+            columns = max(1, min(columns, len(self.order)))
+
+            # Chia đều bề rộng còn lại cho các cột: ô giãn cho vừa khít thay vì
+            # để trống một dải bên phải, và không bao giờ rộng hơn khung.
+            tile_width = (available - self.SPACING * (columns - 1)) // columns
+            tile_width = max(60, tile_width)
+
+            for tile in self.tiles.values():
+                tile.set_tile_width(tile_width)
+
+            if columns != self._columns:
+                self._columns = columns
+                while self._layout.count():
+                    self._layout.takeAt(0)
+                for index, key in enumerate(self.order):
+                    self._layout.addWidget(
+                        self.tiles[key], index // columns, index % columns
+                    )
+        finally:
+            self._laying_out = False
         self._debounce.start()
 
     # ------------------------------------------------------------------- tiers

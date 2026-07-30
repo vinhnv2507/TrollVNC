@@ -19,7 +19,10 @@ from PySide6.QtWidgets import (
 )
 
 from .. import script as script_lang
-from ..config import DEFAULT_PORT, DEFAULT_REGISTRY, PROJECT_ROOT, DeviceSpec, Registry
+from ..config import (
+    DEFAULT_PORT, DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
+    DeviceSpec, Registry,
+)
 from ..scan import arp_hosts, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import Frame, State, Tier
@@ -29,6 +32,9 @@ from .grid import DeviceGrid
 log = logging.getLogger(__name__)
 
 PAGE_SIZES = [("50 máy", 50), ("100 máy", 100), ("250 máy", 250), ("Tất cả", 0)]
+# 0 cột = tự chia theo bề rộng khung.
+COLUMN_CHOICES = [("Cột: tự động", 0), ("4 cột", 4), ("6 cột", 6), ("8 cột", 8),
+                  ("10 cột", 10), ("12 cột", 12)]
 CAPTURES_DIR = PROJECT_ROOT / "captures"
 
 SAMPLE_SCRIPT = """\
@@ -109,9 +115,9 @@ class ScanDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Dải quét (mỗi dòng một mục): 172.30.4.0/24, 172.30.4.10-90, hoặc IP đơn"
+            "Dải quét (mỗi dòng một mục): 172.30.3.0/24, 172.30.3.10-90, hoặc IP đơn"
         ))
-        self.targets = QPlainTextEdit("172.30.4.0/24")
+        self.targets = QPlainTextEdit(DEFAULT_SCAN_RANGE)
         layout.addWidget(self.targets)
 
         row = QHBoxLayout()
@@ -336,12 +342,20 @@ class MainWindow(QMainWindow):
 
         self.grid = DeviceGrid(tile_width=150)
         self.detail = DetailView()
-        splitter = QSplitter(Qt.Horizontal)
-        splitter.addWidget(self.grid)
-        splitter.addWidget(self.detail)
-        splitter.setStretchFactor(0, 3)
-        splitter.setStretchFactor(1, 1)
-        self.setCentralWidget(splitter)
+        self.splitter = QSplitter(Qt.Horizontal)
+        self.splitter.addWidget(self.grid)
+        self.splitter.addWidget(self.detail)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 0)
+        self.splitter.setChildrenCollapsible(False)
+        self.setCentralWidget(self.splitter)
+
+        # Khung một máy chỉ rộng đúng một chiếc iPhone; phần dư về cho lưới.
+        self._detail_aspect = self.detail.aspect
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(80)
+        self._fit_timer.timeout.connect(self._fit_detail_pane)
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
@@ -372,6 +386,7 @@ class MainWindow(QMainWindow):
 
         self.pool.start()
         self._apply_page()
+        self._fit_detail_pane()
 
         self._stats_timer = QTimer(self)
         self._stats_timer.timeout.connect(self._refresh_stats)
@@ -409,6 +424,17 @@ class MainWindow(QMainWindow):
         self.next_button = QPushButton("▶")
         self.next_button.clicked.connect(lambda: self._go_page(self.page + 1))
         bar.addWidget(self.next_button)
+
+        self.columns_combo = QComboBox()
+        for label, count in COLUMN_CHOICES:
+            self.columns_combo.addItem(label, count)
+        self.columns_combo.setToolTip(
+            "Số cột của lưới. Ô tự giãn cho vừa khít bề rộng."
+        )
+        self.columns_combo.currentIndexChanged.connect(
+            lambda index: self.grid.set_columns(self.columns_combo.itemData(index))
+        )
+        bar.addWidget(self.columns_combo)
 
         bar.addSeparator()
         select_all = QAction("Chọn tất cả", self)
@@ -538,6 +564,26 @@ class MainWindow(QMainWindow):
         self.detail.set_device(key)
         self.grid.set_focus_key(key)
         self.detail.setFocus()
+        self._fit_detail_pane()
+
+    # ------------------------------------------------------------------ bố cục
+
+    def _fit_detail_pane(self) -> None:
+        total = self.splitter.width()
+        if total <= 0:
+            return
+        if not self.detail.key:
+            # Chưa mở máy nào thì đừng giữ chỗ cho một khung trống.
+            want = self.detail.minimumWidth()
+        else:
+            want = self.detail.preferred_width()
+        # Không để khung một máy ăn quá nửa cửa sổ, cũng không hẹp đến vô dụng.
+        want = max(self.detail.minimumWidth(), min(want, int(total * 0.55)))
+        self.splitter.setSizes([max(1, total - want), want])
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_timer.start()
 
     def _on_selection(self, keys: List[str]) -> None:
         self.statusBar().showMessage(f"Đã chọn {len(keys)} máy", 3000)
@@ -771,6 +817,10 @@ class MainWindow(QMainWindow):
     def _on_frame(self, frame: Frame) -> None:
         self.grid.on_frame(frame)
         self.detail.on_frame(frame)
+        if frame.key == self.detail.key and self.detail.aspect != self._detail_aspect:
+            # Biết tỉ lệ thật của máy (kể cả khi máy xoay ngang) -> co lại cho khít.
+            self._detail_aspect = self.detail.aspect
+            self._fit_timer.start()
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)

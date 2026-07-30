@@ -11,6 +11,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from PySide6.QtCore import Qt                           # noqa: E402
 from PySide6.QtWidgets import QApplication              # noqa: E402
 
 from controlios.config import DeviceSpec, Registry      # noqa: E402
@@ -87,6 +88,151 @@ class WindowTest(unittest.TestCase):
         finally:
             window.close()
             registry_path.unlink(missing_ok=True)
+
+
+class LayoutTest(unittest.TestCase):
+    """Lưới phải chia hết bề rộng, không cắt ô, không cuộn ngang."""
+
+    def _grid(self, count: int, width: int, height: int = 700) -> DeviceGrid:
+        grid = DeviceGrid(tile_width=150)
+        grid.resize(width, height)
+        grid.set_devices([DeviceSpec(host=f"10.0.0.{i}") for i in range(1, count + 1)])
+        grid.show()
+        app.processEvents()
+        grid._relayout()
+        return grid
+
+    def test_tiles_never_exceed_the_viewport_width(self) -> None:
+        for width in (240, 400, 760, 1200):
+            with self.subTest(width=width):
+                grid = self._grid(40, width)
+                columns = grid._columns
+                tile = next(iter(grid.tiles.values()))
+                used = tile.width() * columns + grid.SPACING * (columns - 1)
+                self.assertLessEqual(
+                    used, grid.viewport().width() - grid.MARGIN * 2 + columns,
+                    f"ô bị tràn ra ngoài khung ở bề rộng {width}",
+                )
+                grid.close()
+
+    def test_horizontal_scrolling_is_off(self) -> None:
+        grid = self._grid(30, 500)
+        self.assertEqual(grid.horizontalScrollBarPolicy(), Qt.ScrollBarAlwaysOff)
+        grid.close()
+
+    def test_tiles_stretch_to_fill_instead_of_leaving_a_gap(self) -> None:
+        """Với 6 cột, ô phải rộng ra chia hết chỗ, không giữ nguyên 150 px."""
+
+        grid = self._grid(30, 1200)
+        grid.set_columns(6)
+        app.processEvents()
+        tile = next(iter(grid.tiles.values()))
+        available = grid.viewport().width() - grid.MARGIN * 2
+        expected = (available - grid.SPACING * 5) // 6
+        self.assertEqual(grid._columns, 6)
+        self.assertEqual(tile.width(), expected)
+        self.assertGreater(tile.width(), 150, "ô phải giãn ra, không giữ 150 px")
+        grid.close()
+
+    def test_forced_columns_beat_auto(self) -> None:
+        grid = self._grid(30, 1200)
+        auto_columns = grid._columns
+        grid.set_columns(4)
+        app.processEvents()
+        self.assertEqual(grid._columns, 4)
+        self.assertNotEqual(grid._columns, auto_columns)
+        grid.set_columns(0)
+        app.processEvents()
+        self.assertEqual(grid._columns, auto_columns, "về tự động phải như ban đầu")
+        grid.close()
+
+    def test_tile_height_follows_the_real_screen_aspect(self) -> None:
+        grid = self._grid(4, 600)
+        tile = grid.tiles["10.0.0.1:5901"]
+        before = tile.height()
+        # Máy thật 752x1338 -> ô phải cao theo tỉ lệ đó.
+        grid.on_frame(Frame(key="10.0.0.1:5901", width=40, height=71,
+                            data=bytes(40 * 71 * 3),
+                            full_width=752, full_height=1338))
+        app.processEvents()
+        expected = int(tile.width() / (752 / 1338)) + 22
+        self.assertEqual(tile.height(), expected)
+        self.assertNotEqual(tile.height(), before)
+        grid.close()
+
+    def test_detail_pane_is_only_as_wide_as_one_phone(self) -> None:
+        from controlios.ui.app import MainWindow
+
+        registry_path = Path(__file__).parent / "_layout_devices.json"
+        registry = Registry()
+        registry.merge_hosts([f"10.0.0.{i}" for i in range(1, 21)])
+        registry.save(registry_path)
+
+        window = MainWindow(registry_path)
+        try:
+            window.resize(1500, 900)
+            window.show()
+            app.processEvents()
+
+            # Chưa mở máy nào: khung phải thu về mức tối thiểu, nhường chỗ lưới.
+            window._fit_detail_pane()
+            app.processEvents()
+            self.assertEqual(window.splitter.sizes()[1], window.detail.minimumWidth())
+
+            window._focus_device("10.0.0.1:5901")
+            app.processEvents()
+
+            grid_width, detail_width = window.splitter.sizes()
+            self.assertGreater(grid_width, detail_width * 2,
+                               "lưới phải chiếm phần lớn cửa sổ")
+            # Vừa đúng một máy: rộng ~ cao * tỉ lệ, không phải nửa cửa sổ.
+            expected = int(window.detail.height() * window.detail.aspect) + 2
+            self.assertAlmostEqual(detail_width, expected, delta=6)
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_detail_pane_refits_when_the_phone_aspect_is_known(self) -> None:
+        from controlios.ui.app import MainWindow
+
+        registry_path = Path(__file__).parent / "_layout_devices2.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1"])
+        registry.save(registry_path)
+
+        window = MainWindow(registry_path)
+        try:
+            window.resize(1500, 900)
+            window.show()
+            app.processEvents()
+            window._focus_device("10.0.0.1:5901")
+            app.processEvents()
+            before = window.splitter.sizes()[1]
+
+            # Máy xoay ngang: tỉ lệ đảo, khung phải rộng ra.
+            window._on_frame(Frame(key="10.0.0.1:5901", width=40, height=22,
+                                   data=bytes(40 * 22 * 3),
+                                   full_width=1338, full_height=752))
+            window._fit_detail_pane()
+            app.processEvents()
+
+            self.assertGreater(window.splitter.sizes()[1], before)
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+
+class ScanDefaultsTest(unittest.TestCase):
+    def test_scan_dialog_defaults_to_the_right_subnet(self) -> None:
+        from controlios.ui.app import DEFAULT_SCAN_RANGE, ScanDialog
+
+        self.assertEqual(DEFAULT_SCAN_RANGE, "172.30.3.0/24")
+        dialog = ScanDialog(5901)
+        try:
+            self.assertEqual(dialog.targets.toPlainText(), "172.30.3.0/24")
+            self.assertEqual(dialog.port.text(), "5901")
+        finally:
+            dialog.close()
 
 
 class ScriptDialogTest(unittest.TestCase):

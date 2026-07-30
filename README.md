@@ -52,9 +52,12 @@ cần chỉnh gì.
 python main.py --scan-arp
 
 # Hoặc quét dải cụ thể
-python main.py --scan 172.30.4.0/24
-python main.py --scan 172.30.4.10-90 172.30.5.0/24
+python main.py --scan 172.30.3.0/24
+python main.py --scan 172.30.3.10-90 172.30.4.0/24
 ```
+
+Dải mặc định trong hộp thoại **Quét mạng** là `172.30.3.0/24` (đổi ở
+`DEFAULT_SCAN_RANGE` trong [config.py](controlios/config.py)).
 
 Kết quả ghi vào `config/devices.json`. Trong giao diện cũng có nút **Quét
 mạng** và **Nạp danh sách…** (file txt, mỗi dòng một IP hoặc `ip:port`).
@@ -64,7 +67,13 @@ Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầ
 ### 2. Dùng giao diện
 
 - **Lưới bên trái**: mỗi ô một máy, viền màu = trạng thái (xanh online, vàng
-  đang kết nối, đỏ lỗi, xám tắt).
+  đang kết nối, đỏ lỗi, xám tắt). Ô **tự giãn chia hết bề rộng** nên không bao
+  giờ bị cắt hay phải cuộn ngang; chiều cao ô theo **tỉ lệ màn hình thật** của
+  máy, biết được sau khung hình đầu tiên. Ô chọn **Cột** trên thanh công cụ đặt
+  số cột cố định (4/6/8/10/12) hoặc để tự động theo bề rộng cửa sổ.
+- **Khung một máy bên phải** chỉ rộng đúng bằng một chiếc iPhone ở chiều cao
+  hiện tại, không chiếm nửa cửa sổ để hiện hai dải đen. Chưa mở máy nào thì nó
+  thu về mức tối thiểu, nhường chỗ cho lưới. Máy xoay ngang thì khung tự nới ra.
 - **Double-click** một ô → mở khung điều khiển bên phải ở full độ phân giải.
   Kéo/thả chuột và gõ phím trên khung đó sẽ đi thẳng tới máy. Xem mục
   [Chuột và bàn phím](#chuột-và-bàn-phím) cho chi tiết.
@@ -286,6 +295,7 @@ controlios/
   ui/app.py              cửa sổ chính, toolbar, phân trang, broadcast, kịch bản
 tests/fake_vnc.py        server RFB 3.8 giả để test không cần iPhone
 tools/bench_scale.py     đo tải với N máy giả
+tools/ui_preview.py      chụp ảnh giao diện với máy giả để soi bố cục
 captures/                ảnh chụp, ghi hình, ảnh từ kịch bản (không vào git)
 ```
 
@@ -315,7 +325,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-75 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+83 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -331,7 +341,17 @@ chuột phải và giữa không bị gửi thành chuột trái · gõ "Xin ch�
 đúng từng ký tự có dấu · emoji bị bỏ qua mà phiên vẫn sống · `Ctrl+C` nhấn giữ
 rồi nhả theo thứ tự ngược · keysym không tồn tại bị từ chối chứ không làm chết
 phiên · bấm ra ngoài vùng ảnh không gửi gì · phát thao tác: kéo dài ra vuốt,
-bấm tại chỗ ra chạm, không lẫn nhau.
+bấm tại chỗ ra chạm, không lẫn nhau · ô lưới không bao giờ tràn khỏi khung ở
+mọi bề rộng · ô giãn chia hết chỗ thay vì để trống dải bên phải · số cột cố
+định thắng chế độ tự động và quay lại được · chiều cao ô đi theo tỉ lệ màn hình
+thật · khung một máy rộng đúng một máy, thu nhỏ khi chưa mở máy nào, nới ra khi
+máy xoay ngang · dải quét mặc định là 172.30.3.0/24.
+
+Soi bố cục bằng ảnh (không cần iPhone):
+
+```powershell
+.\.venv\Scripts\python.exe tools\ui_preview.py preview.png --devices 100 --columns 8 --focus
+```
 
 Đo tải:
 

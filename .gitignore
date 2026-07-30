@@ -3,4 +3,7 @@ __pycache__/
 *.pyc
 config/devices.json
 captures/
+preview-*.png
+ui-preview.png
+config/_preview_devices.json
 *.log
