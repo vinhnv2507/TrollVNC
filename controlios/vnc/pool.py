@@ -145,8 +145,25 @@ class DevicePool:
     def mouse_up(self, key: str, x: int, y: int, button: int = 0) -> None:
         self._call(lambda: self._with(key, lambda s: s.mouse_up(x, y, button)))
 
-    def type_text(self, keys: Iterable[str], text: str) -> None:
-        self._call(lambda: [self._with(k, lambda s: s.type_text(text)) for k in list(keys)])
+    def scroll(self, key: str, x: int, y: int, dx: int, dy: int) -> None:
+        self._call(lambda: self._with(key, lambda s: s.scroll(x, y, dx, dy)))
+
+    def type_text(self, keys: Iterable[str], text: str,
+                  on_skipped: Optional[Callable[[str, str], None]] = None) -> None:
+        """Gõ chữ vào nhiều máy. on_skipped(key, chars) khi có ký tự không gửi được."""
+
+        key_list = list(keys)
+
+        def run() -> None:
+            for key in key_list:
+                session = self._sessions.get(key)
+                if session is None:
+                    continue
+                skipped = session.type_text(text)
+                if skipped and on_skipped:
+                    on_skipped(key, skipped)
+
+        self._call(run)
 
     def press_keys(self, keys: Iterable[str], *names: str) -> None:
         self._call(lambda: [self._with(k, lambda s: s.press_keys(*names)) for k in list(keys)])
@@ -169,6 +186,20 @@ class DevicePool:
                 if not client:
                     continue
                 session.tap(int(client.video.width * rx), int(client.video.height * ry))
+
+        self._call(run)
+
+    def broadcast_scroll(self, keys: Iterable[str], rx: float, ry: float,
+                         dx: int, dy: int) -> None:
+        key_list = list(keys)
+
+        def run() -> None:
+            for key in key_list:
+                session = self._sessions.get(key)
+                if not session or not session._client:
+                    continue
+                video = session._client.video
+                session.scroll(int(video.width * rx), int(video.height * ry), dx, dy)
 
         self._call(run)
 

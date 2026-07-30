@@ -205,13 +205,49 @@ class VncSession:
             await asyncio.sleep(hold)
         self.mouse_up(x2, y2)
 
-    def type_text(self, text: str) -> None:
-        if self._client:
-            self._client.keyboard.write(text)
+    def scroll(self, x: int, y: int, dx: int = 0, dy: int = 0) -> None:
+        """Lăn chuột tại (x,y). dy > 0 là lăn lên, dx > 0 là lăn sang phải.
+
+        RFB không có sự kiện lăn riêng: nó là các nút 4..7 nhấn-rồi-nhả.
+        """
+
+        if not self._client:
+            return
+        mouse = self._client.mouse
+        mouse.move(int(x), int(y))
+        for _ in range(abs(int(dy))):
+            mouse.click(3 if dy > 0 else 4)
+        for _ in range(abs(int(dx))):
+            mouse.click(6 if dx > 0 else 5)
+
+    def type_text(self, text: str) -> str:
+        """Gõ chuỗi. Trả về các ký tự **không** gửi được (không có keysym).
+
+        Tiếng Việt đi qua được nhờ keysym Unicode (``ạ`` = 0x1001ea1), nhưng
+        emoji thì không. Trước đây một ký tự lạ làm cả kịch bản của máy đó chết
+        giữa chừng; giờ nó bị bỏ qua và báo lại cho người dùng.
+        """
+
+        if not self._client:
+            return text
+        supported = []
+        skipped = []
+        for char in text:
+            (supported if char in asyncvnc.key_codes else skipped).append(char)
+        if supported:
+            self._client.keyboard.write("".join(supported))
+        return "".join(skipped)
 
     def press_keys(self, *keys: str) -> None:
-        if self._client:
-            self._client.keyboard.press(*keys)
+        """Nhấn tổ hợp: giữ tất cả rồi nhả theo thứ tự ngược, ví dụ Ctrl+C."""
+
+        if not self._client:
+            return
+        unknown = [k for k in keys if k not in asyncvnc.key_codes]
+        if unknown:
+            log.warning("%s: không có keysym cho %s", self.spec.key, unknown)
+            return
+        self._client.keyboard.press(*keys)
 
     # ------------------------------------------------------------------- loop
 

@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
@@ -151,6 +152,43 @@ class ScanDialog(QDialog):
         self.scan_button.setEnabled(True)
         if hosts:
             self.accept()
+
+
+class SendTextDialog(QDialog):
+    """Gõ một đoạn chữ vào nhiều máy cùng lúc.
+
+    Tiện hơn hẳn việc gõ tay trong khung điều khiển khi cần nhập cùng một nội
+    dung cho hàng loạt máy, và dán được từ clipboard của PC.
+    """
+
+    def __init__(self, target_count: int, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Gõ chữ vào máy")
+        self.resize(520, 300)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Nội dung sẽ được gõ vào {target_count} máy:"))
+        self.editor = QPlainTextEdit()
+        layout.addWidget(self.editor)
+        layout.addWidget(QLabel(
+            "Gõ được tiếng Việt có dấu. Emoji thì không — ký tự nào không gửi "
+            "được sẽ bị bỏ qua và ghi vào nhật ký."
+        ))
+
+        self.press_enter = QCheckBox("Nhấn Enter sau khi gõ xong")
+        layout.addWidget(self.press_enter)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Gửi")
+        buttons.button(QDialogButtonBox.Cancel).setText("Huỷ")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.editor.setFocus()
+
+    def result_text(self) -> tuple[str, bool]:
+        return self.editor.toPlainText(), self.press_enter.isChecked()
 
 
 class ScriptDialog(QDialog):
@@ -307,6 +345,13 @@ class MainWindow(QMainWindow):
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
+        self.coords_label = QLabel("")
+        self.coords_label.setToolTip(
+            "Vị trí con trỏ: pixel và tỉ lệ. Số tỉ lệ dùng trực tiếp được cho "
+            "lệnh tap/swipe trong kịch bản."
+        )
+        self.coords_label.setStyleSheet("font-family: Consolas, monospace;")
+        self.statusBar().addPermanentWidget(self.coords_label)
         self.stats_label = QLabel("")
         self.statusBar().addPermanentWidget(self.stats_label)
 
@@ -318,11 +363,12 @@ class MainWindow(QMainWindow):
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
 
-        self.detail.drag_start.connect(lambda x, y: self._input("down", x, y))
-        self.detail.drag_move.connect(lambda x, y: self._input("move", x, y))
-        self.detail.drag_end.connect(lambda x, y: self._input("up", x, y))
+        self.detail.pointer_pressed.connect(self._on_pointer_pressed)
+        self.detail.pointer_moved.connect(self._on_pointer_moved)
+        self.detail.pointer_released.connect(self._on_pointer_released)
+        self.detail.scrolled.connect(self._on_scrolled)
         self.detail.text_typed.connect(self._type_text)
-        self.detail.key_pressed.connect(self._press_key)
+        self.detail.keys_pressed.connect(self._press_keys)
 
         self.pool.start()
         self._apply_page()
@@ -376,6 +422,22 @@ class MainWindow(QMainWindow):
         self.broadcast_box = QCheckBox("Gửi thao tác tới các máy đã chọn")
         self.broadcast_box.toggled.connect(self._set_broadcast)
         bar.addWidget(self.broadcast_box)
+
+        bar.addSeparator()
+        send_text = QAction("Gõ chữ…", self)
+        send_text.setToolTip("Gõ một đoạn chữ vào các máy đang chọn")
+        send_text.triggered.connect(self._send_text_dialog)
+        bar.addAction(send_text)
+
+        for label, keys, tip in [
+            ("⏎", ["Return"], "Nhấn Enter"),
+            ("⌫", ["BackSpace"], "Nhấn Backspace"),
+            ("Esc", ["Escape"], "Nhấn Escape"),
+        ]:
+            action = QAction(label, self)
+            action.setToolTip(f"{tip} trên các máy đang chọn")
+            action.triggered.connect(lambda _checked=False, k=keys: self._press_keys(k))
+            bar.addAction(action)
 
         bar.addSeparator()
         shot = QAction("Chụp ảnh", self)
@@ -601,33 +663,108 @@ class MainWindow(QMainWindow):
             return list(self.grid.selection)
         return [self.detail.key] if self.detail.key else []
 
-    def _input(self, kind: str, x: int, y: int) -> None:
+    # Kéo quá số pixel này thì tính là vuốt, không phải chạm.
+    DRAG_THRESHOLD = 12
+
+    def _ratios(self, x: int, y: int) -> Optional[tuple[float, float]]:
+        fb_w, fb_h = self.detail.fb_size
+        if not fb_w or not fb_h:
+            return None
+        return x / fb_w, y / fb_h
+
+    def _on_pointer_pressed(self, x: int, y: int, button: int) -> None:
         if not self.detail.key:
             return
-        if self.broadcast and self.grid.selection:
-            # Ratios, so phones with different screen sizes still match.
-            fb_w, fb_h = self.detail.fb_size
-            if not fb_w:
-                return
-            if kind == "up":
-                self.pool.broadcast_tap(self.grid.selection, x / fb_w, y / fb_h)
+        self._press_origin = (x, y)
+        self._press_time = time.monotonic()
+        if self._broadcasting():
+            return          # chờ tới lúc nhả mới biết là chạm hay vuốt
+        self.pool.mouse_down(self.detail.key, x, y, button)
+
+    def _on_pointer_moved(self, x: int, y: int) -> None:
+        ratios = self._ratios(x, y)
+        if ratios:
+            self.coords_label.setText(
+                f"x={x} y={y}  ·  {ratios[0]:.3f} {ratios[1]:.3f}"
+            )
+        if not self.detail.key or self._broadcasting():
             return
-        if kind == "down":
-            self.pool.mouse_down(self.detail.key, x, y)
-        elif kind == "move":
+        if self.detail._dragging:
             self.pool.mouse_move(self.detail.key, x, y)
-        else:
-            self.pool.mouse_up(self.detail.key, x, y)
+
+    def _on_pointer_released(self, x: int, y: int, button: int) -> None:
+        if not self.detail.key:
+            return
+        origin = getattr(self, "_press_origin", None)
+
+        if self._broadcasting():
+            start = self._ratios(*origin) if origin else None
+            end = self._ratios(x, y)
+            if end is None:
+                return
+            moved = origin and max(abs(x - origin[0]), abs(y - origin[1]))
+            if start and moved and moved > self.DRAG_THRESHOLD:
+                # Trước đây mọi cú kéo bị co lại thành một cú chạm ở điểm nhả,
+                # nên không thể vuốt hàng loạt. Giờ gửi đúng cử chỉ vuốt.
+                duration = max(0.1, min(1.5, time.monotonic() - self._press_time))
+                self.pool.broadcast_swipe(
+                    self.grid.selection, start, end, duration
+                )
+                self.statusBar().showMessage(
+                    f"Vuốt trên {len(self.grid.selection)} máy", 3000
+                )
+            else:
+                self.pool.broadcast_tap(self.grid.selection, *end)
+                self.statusBar().showMessage(
+                    f"Chạm trên {len(self.grid.selection)} máy", 3000
+                )
+            return
+
+        self.pool.mouse_up(self.detail.key, x, y, button)
+
+    def _on_scrolled(self, x: int, y: int, dx: int, dy: int) -> None:
+        if not self.detail.key:
+            return
+        if self._broadcasting():
+            ratios = self._ratios(x, y)
+            if ratios:
+                self.pool.broadcast_scroll(self.grid.selection, *ratios, dx, dy)
+            return
+        self.pool.scroll(self.detail.key, x, y, dx, dy)
+
+    def _broadcasting(self) -> bool:
+        return bool(self.broadcast and self.grid.selection)
 
     def _type_text(self, text: str) -> None:
         targets = self._targets()
         if targets:
-            self.pool.type_text(targets, text)
+            self.pool.type_text(targets, text, on_skipped=self._on_skipped_chars)
 
-    def _press_key(self, name: str) -> None:
+    def _press_keys(self, keys: List[str]) -> None:
         targets = self._targets()
         if targets:
-            self.pool.press_keys(targets, name)
+            self.pool.press_keys(targets, *keys)
+
+    def _on_skipped_chars(self, key: str, skipped: str) -> None:
+        self.bridge.message.emit(
+            f"[gõ] {key}: bỏ qua ký tự không gửi được: {skipped!r}"
+        )
+
+    def _send_text_dialog(self) -> None:
+        targets = self._targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy",
+                                    "Hãy chọn máy hoặc mở một máy ở khung bên phải.")
+            return
+        dialog = SendTextDialog(len(targets), self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        text, press_enter = dialog.result_text()
+        if text:
+            self.pool.type_text(targets, text, on_skipped=self._on_skipped_chars)
+        if press_enter:
+            self.pool.press_keys(targets, "Return")
+        self.statusBar().showMessage(f"Đã gửi chữ tới {len(targets)} máy", 4000)
 
     # ------------------------------------------------------------------ frames
 

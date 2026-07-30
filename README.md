@@ -66,7 +66,8 @@ Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầ
 - **Lưới bên trái**: mỗi ô một máy, viền màu = trạng thái (xanh online, vàng
   đang kết nối, đỏ lỗi, xám tắt).
 - **Double-click** một ô → mở khung điều khiển bên phải ở full độ phân giải.
-  Kéo/thả chuột và gõ phím trên khung đó sẽ đi thẳng tới máy.
+  Kéo/thả chuột và gõ phím trên khung đó sẽ đi thẳng tới máy. Xem mục
+  [Chuột và bàn phím](#chuột-và-bàn-phím) cho chi tiết.
 - **Chọn nhiều máy**: click, `Ctrl`+click, `Shift`+click, hoặc **Chọn tất cả**.
 - **Gửi thao tác tới các máy đã chọn**: bật ô này thì mỗi cú click trên khung
   điều khiển được phát cho toàn bộ máy đang chọn. Toạ độ gửi đi là **tỉ lệ**
@@ -74,6 +75,65 @@ Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầ
   chỗ.
 - **Trang**: mặc định 100 máy/trang. Chọn "Tất cả" để nạp hết 250. Máy ngoài
   trang hiện tại không được kết nối — đây là cách "mở lần lượt" nếu muốn.
+
+## Chuột và bàn phím
+
+Khung điều khiển bên phải là nơi thao tác trực tiếp. Mọi thứ gửi ở **toạ độ
+framebuffer** của đúng máy đó.
+
+### Chuột
+
+| Thao tác | Gửi tới máy |
+|---|---|
+| Bấm/kéo/nhả chuột trái | nhấn – di – nhả nút 1 |
+| Chuột **phải** / **giữa** | nút 3 / nút 2 (trước đây mọi nút đều thành trái) |
+| **Bánh xe** lên/xuống | nút 4 / nút 5 — RFB không có sự kiện lăn riêng |
+| Bánh xe ngang | nút 6 / nút 7 |
+| Bấm ra ngoài vùng ảnh | không gửi gì |
+
+Bánh xe nhích ít hơn một nấc vẫn cuộn một bước, nếu không cảm giác là kẹt.
+
+**Con trỏ có vòng ngắm**: TrollVNC không gửi hình con trỏ về, nên không vẽ thì
+bạn không biết mình vừa chạm vào đâu. Vòng xanh là đang di, đỏ là đang giữ nút.
+
+**Thanh trạng thái hiện toạ độ** dạng `x=188 y=901 · 0.500 0.675`. Hai số sau
+là **tỉ lệ, dùng dán trực tiếp vào lệnh `tap`/`swipe`** của kịch bản — đây là
+cách nhanh nhất để hiệu chỉnh toạ độ cử chỉ cho đúng đời máy của bạn: trỏ vào
+nút cần chạm rồi đọc số.
+
+### Bàn phím
+
+- Ký tự thường gõ trực tiếp, **có tiếng Việt đầy đủ dấu** (`ạ` đi qua keysym
+  Unicode `0x1001ea1`). Emoji thì không có keysym — ký tự nào không gửi được sẽ
+  bị **bỏ qua và ghi vào nhật ký**, chứ không làm chết cả kịch bản như trước.
+- **Tổ hợp bổ trợ**: Ctrl / Alt / Shift / Cmd (Super) + phím. `Ctrl+C` gửi đúng
+  tổ hợp thay vì ký tự điều khiển thô, và nhả theo thứ tự ngược đúng quy ước.
+- **Phím đặc biệt**: Enter, BackSpace, Delete, Esc, Tab, 4 mũi tên, Home, End,
+  PageUp/Down, Insert, Space, F1–F12.
+- Giữ phím thì máy nhận nhiều lần (không chặn auto-repeat).
+- Nút **⏎ ⌫ Esc** trên thanh công cụ bấm nhanh cho các máy đang chọn.
+
+### Gõ chữ cho nhiều máy cùng lúc
+
+Nút **Gõ chữ…** mở hộp soạn nhiều dòng, dán được từ clipboard của PC, tuỳ chọn
+nhấn Enter sau khi gõ. Tiện hơn hẳn gõ tay khi cần nhập cùng một nội dung cho
+hàng loạt máy.
+
+> Clipboard của RFB theo chuẩn chỉ nhận latin-1, nên **không** dùng đường
+> clipboard để đưa tiếng Việt sang máy được. Vì vậy phần mềm gõ từng ký tự qua
+> keysym — chậm hơn nhưng đúng dấu.
+
+### Phát thao tác cho nhiều máy
+
+Bật **Gửi thao tác tới các máy đã chọn** thì mọi thứ làm trên khung điều khiển
+được phát cho toàn bộ máy đang chọn, ở **toạ độ tỉ lệ** nên máy khác cỡ màn
+hình vẫn trúng chỗ:
+
+- Bấm nhả tại chỗ → **chạm** hàng loạt.
+- Kéo quá 12 px → **vuốt** hàng loạt, giữ đúng thời gian bạn kéo. (Trước đây
+  mọi cú kéo bị co lại thành một cú chạm ở điểm nhả, nên không vuốt hàng loạt
+  được.)
+- Bánh xe → **cuộn** hàng loạt.
 
 ## Chụp ảnh, ghi hình, kịch bản
 
@@ -255,7 +315,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-51 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+75 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -266,7 +326,12 @@ chừng · cú pháp sai báo đúng số dòng · hộp thoại kịch bản kh
 chọn máy · mọi cử chỉ mặc định đều phân tích được · `switcher` thật sự gửi
 nhấn→kéo→giữ→nhả đúng thứ tự tới server · `openapp Zalo` gõ đúng chữ "Zalo" và
 phím Return tới máy · cử chỉ tự chỉnh đè được cử chỉ mặc định · macro gọi vòng
-tròn bị chặn thay vì treo.
+tròn bị chặn thay vì treo · lăn lên/xuống/ngang dùng đúng nút RFB khác nhau ·
+chuột phải và giữa không bị gửi thành chuột trái · gõ "Xin chào bạn" tới máy ra
+đúng từng ký tự có dấu · emoji bị bỏ qua mà phiên vẫn sống · `Ctrl+C` nhấn giữ
+rồi nhả theo thứ tự ngược · keysym không tồn tại bị từ chối chứ không làm chết
+phiên · bấm ra ngoài vùng ảnh không gửi gì · phát thao tác: kéo dài ra vuốt,
+bấm tại chỗ ra chạm, không lẫn nhau.
 
 Đo tải:
 
@@ -280,6 +345,9 @@ tròn bị chặn thay vì treo.
   nào ở phía máy. Các phím thường, Enter, Backspace, mũi tên thì đi qua bình
   thường. Nếu TrollVNC của bạn có bảng map riêng, sửa `SPECIAL_KEYS` trong
   `controlios/ui/detail.py`.
+- **Lăn chuột** gửi đúng nút 4–7 theo chuẩn RFB, nhưng iOS có nhận thành cuộn
+  hay không thì tuỳ TrollVNC. Nếu không cuộn, dùng `swipe` thay thế — cử chỉ
+  vuốt luôn hoạt động vì nó chỉ là nhấn–di–nhả.
 - Client chỉ đăng ký encoding **ZLib**; nếu TrollVNC không hỗ trợ, nó rơi về
   **Raw** (vẫn chạy, chỉ tốn băng thông hơn).
 - Xoay màn hình làm đổi kích thước framebuffer sẽ khiến phiên đó ngắt rồi tự
