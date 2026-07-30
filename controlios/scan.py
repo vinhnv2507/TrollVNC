@@ -1,11 +1,14 @@
 """Find TrollVNC phones on the LAN.
 
-Two modes, because a /16 like 172.30.0.0/16 is 65k hosts and a blind sweep of
-that is slow:
+Ba cách, từ tốt nhất xuống:
 
-* ``scan_cidr``  — probe the VNC port on every address in a subnet.
-* ``arp_hosts``  — read the Windows ARP cache first, so only hosts that have
-  actually talked to this machine get probed. Much faster for a big /16.
+* ``discover_bonjour`` — TrollVNC tự quảng bá dịch vụ ``_rfb._tcp`` qua mDNS,
+  nên hỏi thẳng mạng thay vì dò từng địa chỉ. Nhanh nhất và không bỏ sót máy
+  đang bật, kể cả khi nó chưa từng liên lạc với PC này.
+* ``arp_hosts``  — đọc bảng ARP của Windows rồi chỉ dò những IP đã từng liên
+  lạc. Nhanh, nhưng bỏ sót máy chưa nói chuyện với PC.
+* ``scan_cidr``  — dò cổng VNC trên từng địa chỉ của một subnet. Chậm nhất
+  nhưng chắc chắn nhất; một /16 là 65k địa chỉ nên hãy quét /24.
 """
 
 from __future__ import annotations
@@ -14,6 +17,7 @@ import asyncio
 import ipaddress
 import re
 import subprocess
+import time
 from typing import Iterable, List, Sequence
 
 from .config import DEFAULT_PORT
@@ -36,6 +40,60 @@ def arp_hosts(prefix: str = "172.30.") -> List[str]:
         if m and m.group(1).startswith(prefix):
             hosts.append(m.group(1))
     return sorted(set(hosts), key=lambda h: tuple(int(p) for p in h.split(".")))
+
+
+BONJOUR_SERVICE = "_rfb._tcp.local."
+
+
+def discover_bonjour(timeout: float = 4.0, prefix: str = "") -> List[str]:
+    """Máy TrollVNC tự quảng bá qua mDNS. Trả về danh sách ``ip:port``.
+
+    Không cần biết subnet, không dò 254 địa chỉ. Cần cài ``zeroconf``; nếu
+    thiếu thì trả về danh sách rỗng để phần quét thường vẫn chạy được.
+    """
+
+    try:
+        from zeroconf import ServiceBrowser, ServiceListener, Zeroconf
+    except ImportError:
+        return []
+
+    found: dict[str, int] = {}
+
+    class Listener(ServiceListener):
+        def _record(self, zc, service_type: str, name: str) -> None:
+            info = zc.get_service_info(service_type, name, timeout=2000)
+            if not info:
+                return
+            for address in info.parsed_addresses():
+                if ":" in address:          # bỏ qua IPv6
+                    continue
+                if prefix and not address.startswith(prefix):
+                    continue
+                found[address] = info.port or DEFAULT_PORT
+
+        def add_service(self, zc, service_type, name) -> None:
+            self._record(zc, service_type, name)
+
+        def update_service(self, zc, service_type, name) -> None:
+            self._record(zc, service_type, name)
+
+        def remove_service(self, zc, service_type, name) -> None:
+            pass
+
+    zeroconf = Zeroconf()
+    try:
+        browser = ServiceBrowser(zeroconf, BONJOUR_SERVICE, Listener())
+        time.sleep(timeout)
+        browser.cancel()
+    finally:
+        zeroconf.close()
+
+    return [
+        f"{host}:{port}"
+        for host, port in sorted(
+            found.items(), key=lambda kv: tuple(int(p) for p in kv[0].split("."))
+        )
+    ]
 
 
 async def _probe(host: str, port: int, timeout: float) -> bool:

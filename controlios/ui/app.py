@@ -23,7 +23,7 @@ from ..config import (
     DEFAULT_PORT, DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
     DeviceSpec, Registry,
 )
-from ..scan import arp_hosts, probe_hosts
+from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import Frame, State, Tier
 from .detail import DetailView
@@ -54,7 +54,9 @@ closeapp
 
 # (nhãn, lệnh kịch bản, có cần nhập tên app không)
 QUICK_ACTIONS = [
-    ("Về màn hình chính", "home", False),
+    ("Về màn hình chính (nút Home)", "home", False),
+    ("Trình chuyển app (Home ×2)", "switcher", False),
+    ("Khoá máy (nút Power)", "lock", False),
     ("Mở app…", "openapp", True),
     ("Đóng app đang mở", "closeapp", False),
     ("Đóng 5 app gần đây", "closeall 5", False),
@@ -76,14 +78,20 @@ class ScanWorker(QThread):
     found = Signal(list)
     progress = Signal(int, int)
 
-    def __init__(self, targets: List[str], port: int, use_arp: bool, parent=None) -> None:
+    def __init__(self, targets: List[str], port: int, use_arp: bool,
+                 use_bonjour: bool = False, parent=None) -> None:
         super().__init__(parent)
         self.targets = targets
         self.port = port
         self.use_arp = use_arp
+        self.use_bonjour = use_bonjour
+        self.bonjour_found: List[str] = []
 
     def run(self) -> None:
         hosts: List[str] = []
+        if self.use_bonjour:
+            # Máy tự quảng bá thì không cần dò cổng nữa — nhận luôn.
+            self.bonjour_found = discover_bonjour(prefix="")
         if self.use_arp:
             hosts.extend(arp_hosts())
         for target in self.targets:
@@ -101,7 +109,12 @@ class ScanWorker(QThread):
 
         hosts = list(dict.fromkeys(hosts))
         emit_progress = lambda done, total, hit: self.progress.emit(done, total)
-        result = asyncio.run(probe_hosts(hosts, self.port, progress=emit_progress))
+        probed = asyncio.run(probe_hosts(hosts, self.port, progress=emit_progress))
+
+        # Bonjour trả về "ip:port"; gộp lại và bỏ trùng theo địa chỉ.
+        seen = {h.partition(":")[0] for h in self.bonjour_found}
+        result = list(self.bonjour_found)
+        result.extend(h for h in probed if h not in seen)
         self.found.emit(result)
 
 
@@ -131,6 +144,16 @@ class ScanDialog(QDialog):
         row.addStretch(1)
         layout.addLayout(row)
 
+        self.use_bonjour = QCheckBox(
+            "Tìm qua Bonjour — TrollVNC tự quảng bá _rfb._tcp (khuyên dùng)"
+        )
+        self.use_bonjour.setChecked(True)
+        self.use_bonjour.setToolTip(
+            "Hỏi thẳng mạng thay vì dò từng địa chỉ. Thấy được cả máy chưa từng "
+            "liên lạc với PC này, và lấy đúng cổng máy đang mở."
+        )
+        layout.addWidget(self.use_bonjour)
+
         self.status = QLabel("")
         layout.addWidget(self.status)
 
@@ -144,8 +167,11 @@ class ScanDialog(QDialog):
     def _start(self) -> None:
         targets = [l.strip() for l in self.targets.toPlainText().splitlines() if l.strip()]
         self.scan_button.setEnabled(False)
-        self.status.setText("Đang quét...")
-        self._worker = ScanWorker(targets, int(self.port.text()), self.use_arp.isChecked())
+        self.status.setText(
+            "Đang tìm qua Bonjour..." if self.use_bonjour.isChecked() else "Đang quét..."
+        )
+        self._worker = ScanWorker(targets, int(self.port.text()),
+                                  self.use_arp.isChecked(), self.use_bonjour.isChecked())
         self._worker.progress.connect(
             lambda done, total: self.status.setText(f"Đã dò {done}/{total}")
         )

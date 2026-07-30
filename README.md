@@ -47,8 +47,14 @@ cần chỉnh gì.
 
 ### 1. Tìm máy
 
+TrollVNC **tự quảng bá dịch vụ `_rfb._tcp` qua Bonjour/mDNS**, nên cách tốt
+nhất là hỏi thẳng mạng thay vì dò từng địa chỉ:
+
 ```powershell
-# Nhanh nhất: lấy IP từ bảng ARP rồi dò cổng VNC
+# Khuyên dùng: không cần biết subnet, không dò 254 địa chỉ
+python main.py --bonjour
+
+# Lấy IP từ bảng ARP rồi dò cổng VNC
 python main.py --scan-arp
 
 # Hoặc quét dải cụ thể
@@ -56,8 +62,13 @@ python main.py --scan 172.30.3.0/24
 python main.py --scan 172.30.3.10-90 172.30.4.0/24
 ```
 
-Dải mặc định trong hộp thoại **Quét mạng** là `172.30.3.0/24` (đổi ở
-`DEFAULT_SCAN_RANGE` trong [config.py](controlios/config.py)).
+Bonjour hơn hẳn ở hai điểm: thấy được cả máy **chưa từng liên lạc** với PC này
+(bảng ARP thì không), và lấy **đúng cổng** mà từng máy đang mở thay vì đoán
+5901. Cần gói `zeroconf`; thiếu thì phần Bonjour tự tắt, quét thường vẫn chạy.
+
+Dải mặc định cho chế độ quét là `172.30.3.0/24` (đổi ở `DEFAULT_SCAN_RANGE`
+trong [config.py](controlios/config.py)). Trong giao diện, hộp **Quét mạng** có
+sẵn cả ba cách; Bonjour bật mặc định.
 
 Kết quả ghi vào `config/devices.json`. Trong giao diện cũng có nút **Quét
 mạng** và **Nạp danh sách…** (file txt, mỗi dòng một IP hoặc `ip:port`).
@@ -92,15 +103,20 @@ framebuffer** của đúng máy đó.
 
 ### Chuột
 
-| Thao tác | Gửi tới máy |
+Theo [mã nguồn TrollVNC](https://github.com/OwnGoalStudio/TrollVNC) (GPLv2), nút
+chuột được map thành **nút cứng của iPhone**:
+
+| Thao tác | iPhone nhận được |
 |---|---|
-| Bấm/kéo/nhả chuột trái | nhấn – di – nhả nút 1 |
-| Chuột **phải** / **giữa** | nút 3 / nút 2 (trước đây mọi nút đều thành trái) |
-| **Bánh xe** lên/xuống | nút 4 / nút 5 — RFB không có sự kiện lăn riêng |
-| Bánh xe ngang | nút 6 / nút 7 |
+| Chuột trái, bấm/kéo/nhả | một ngón chạm; giữ để kéo |
+| **Chuột phải** | **nút Home/Menu** |
+| **Chuột giữa** | **nút Power** |
+| **Bánh xe** | vuốt ngắn (TrollVNC quy đổi, mặc định 48 px mỗi nấc, đổi bằng `-W`) |
 | Bấm ra ngoài vùng ảnh | không gửi gì |
 
-Bánh xe nhích ít hơn một nấc vẫn cuộn một bước, nếu không cảm giác là kẹt.
+Nên **chuột phải là về màn hình chính, chuột giữa là khoá máy** — nhớ điều này
+trước khi bấm bừa. Bánh xe nhích ít hơn một nấc vẫn cuộn một bước, nếu không
+cảm giác là kẹt.
 
 **Con trỏ có vòng ngắm**: TrollVNC không gửi hình con trỏ về, nên không vẽ thì
 bạn không biết mình vừa chạm vào đâu. Vòng xanh là đang di, đỏ là đang giữ nút.
@@ -117,8 +133,9 @@ nút cần chạm rồi đọc số.
   bị **bỏ qua và ghi vào nhật ký**, chứ không làm chết cả kịch bản như trước.
 - **Tổ hợp bổ trợ**: Ctrl / Alt / Shift / Cmd (Super) + phím. `Ctrl+C` gửi đúng
   tổ hợp thay vì ký tự điều khiển thô, và nhả theo thứ tự ngược đúng quy ước.
+  Phía TrollVNC map `Alt → Option`, `Meta/Super → Command` (đổi được bằng `-M`).
 - **Phím đặc biệt**: Enter, BackSpace, Delete, Esc, Tab, 4 mũi tên, Home, End,
-  PageUp/Down, Insert, Space, F1–F12.
+  PageUp/Down, Insert, Space, F1–F12. TrollVNC nhận tới F24 nếu bạn cần thêm.
 - Giữ phím thì máy nhận nhiều lần (không chặn auto-repeat).
 - Nút **⏎ ⌫ Esc** trên thanh công cụ bấm nhanh cho các máy đang chọn.
 
@@ -128,9 +145,11 @@ Nút **Gõ chữ…** mở hộp soạn nhiều dòng, dán được từ clipbo
 nhấn Enter sau khi gõ. Tiện hơn hẳn gõ tay khi cần nhập cùng một nội dung cho
 hàng loạt máy.
 
-> Clipboard của RFB theo chuẩn chỉ nhận latin-1, nên **không** dùng đường
-> clipboard để đưa tiếng Việt sang máy được. Vì vậy phần mềm gõ từng ký tự qua
-> keysym — chậm hơn nhưng đúng dấu.
+> Phần mềm gõ **từng ký tự qua keysym** — chậm hơn nhưng đúng dấu. Bản thân
+> TrollVNC *có* hỗ trợ clipboard UTF-8 (extension của UltraVNC), nhưng thư viện
+> client `asyncvnc` chỉ hiện thực `ClientCutText` chuẩn (latin-1), nên đường
+> clipboard chưa dùng được cho tiếng Việt. Đây là chỗ có thể nâng cấp nếu cần
+> dán khối chữ dài cho nhiều máy.
 
 ### Phát thao tác cho nhiều máy
 
@@ -177,13 +196,30 @@ về màn hình chính, mở app theo tên, đóng app đang mở, đóng 5 app 
 App Library. Dùng trong kịch bản thì viết thẳng tên lệnh:
 
 ```
-home                  # về màn hình chính
-switcher              # mở trình chuyển app
-spotlight             # mở ô tìm kiếm
+home                  # nhấn nút Home (= chuột phải)
+switcher              # nhấn Home hai lần nhanh
+lock                  # nhấn nút Power (= chuột giữa)
+spotlight             # về home rồi vuốt xuống mở ô tìm kiếm
 openapp Zalo          # tìm trong Spotlight rồi Enter mở kết quả đầu
 closeapp              # vào switcher, hất thẻ đầu lên, về home
 closeall 5            # hất 5 thẻ liên tiếp
 applibrary            # sang trang App Library
+home_swipe            # dự phòng: về home bằng cử chỉ vuốt
+switcher_swipe        # dự phòng: mở switcher bằng vuốt-và-giữ
+```
+
+**`home`, `switcher`, `lock` không phụ thuộc toạ độ** — chúng bấm nút cứng qua
+map nút chuột của TrollVNC, nên chạy đúng trên mọi đời máy mà không cần hiệu
+chỉnh gì. Chỉ các cử chỉ còn lại (`spotlight`, `closeapp`, `applibrary`) mới
+dùng toạ độ và có thể cần chỉnh. Máy nào bấm nút không ăn thì còn `home_swipe`
+và `switcher_swipe`.
+
+Lệnh nguyên thuỷ đằng sau là `button`:
+
+```
+button home           # = chuột phải ở giữa màn hình
+button power          # = chuột giữa
+button left 0.5 0.9   # chuột trái tại toạ độ chỉ định
 ```
 
 #### Vì sao không có lệnh "liệt kê app đã cài"
@@ -202,10 +238,9 @@ có kênh khác ngoài VNC, ví dụ SSH trên máy. Xem "Giới hạn đã bi�
 
 #### Toạ độ cử chỉ chỉnh được
 
-Toạ độ mặc định nhắm iPhone **Face ID** (không nút Home), màn hình dọc. Máy
-khác đời hoặc iOS khác có thể lệch — nên toàn bộ cử chỉ nằm trong
-`config/gestures.json`, sửa được mà không đụng code (mẫu:
-`config/gestures.example.json`):
+Các cử chỉ còn dùng toạ độ nhắm màn hình **dọc**. Máy khác đời hoặc iOS khác có
+thể lệch — nên toàn bộ cử chỉ nằm trong `config/gestures.json`, sửa được mà
+không đụng code (mẫu: `config/gestures.example.json`):
 
 ```json
 {
@@ -282,7 +317,7 @@ nhả ngay thì iOS về màn hình chính, phải *giữ* lại mới ra trình
 main.py                  CLI + mở giao diện
 controlios/
   config.py              DeviceSpec, Settings, đọc/ghi registry
-  scan.py                dò cổng VNC theo CIDR / dải / bảng ARP
+  scan.py                tìm máy qua Bonjour _rfb._tcp, bảng ARP, hoặc CIDR
   script.py              ngôn ngữ kịch bản: parse, describe, runner
   gestures.py            cử chỉ iOS dựng sẵn, nạp đè từ config/gestures.json
   util/png.py            ghi PNG bằng thư viện chuẩn (không cần Pillow/Qt)
@@ -325,7 +360,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-83 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+99 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -345,7 +380,10 @@ bấm tại chỗ ra chạm, không lẫn nhau · ô lưới không bao giờ tr
 mọi bề rộng · ô giãn chia hết chỗ thay vì để trống dải bên phải · số cột cố
 định thắng chế độ tự động và quay lại được · chiều cao ô đi theo tỉ lệ màn hình
 thật · khung một máy rộng đúng một máy, thu nhỏ khi chưa mở máy nào, nới ra khi
-máy xoay ngang · dải quét mặc định là 172.30.3.0/24.
+máy xoay ngang · dải quét mặc định là 172.30.3.0/24 · `home` bấm nút cứng chứ
+không vuốt và tới server đúng nút chuột phải · `switcher` là hai lần Home sát
+nhau · `lock` dùng nút Power · Bonjour lấy đúng cổng máy quảng bá, bỏ qua IPv6,
+lọc theo subnet, và thiếu thư viện `zeroconf` thì không làm sập gì.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 
@@ -361,17 +399,19 @@ Soi bố cục bằng ảnh (không cần iPhone):
 
 ## Giới hạn đã biết
 
-- **Phím đặc biệt tới iOS** (Home, khoá máy…) phụ thuộc TrollVNC map keysym thế
-  nào ở phía máy. Các phím thường, Enter, Backspace, mũi tên thì đi qua bình
-  thường. Nếu TrollVNC của bạn có bảng map riêng, sửa `SPECIAL_KEYS` trong
-  `controlios/ui/detail.py`.
-- **Lăn chuột** gửi đúng nút 4–7 theo chuẩn RFB, nhưng iOS có nhận thành cuộn
-  hay không thì tuỳ TrollVNC. Nếu không cuộn, dùng `swipe` thay thế — cử chỉ
-  vuốt luôn hoạt động vì nó chỉ là nhấn–di–nhả.
+- Nếu TrollVNC bản của bạn có bảng map phím khác, sửa `SPECIAL_KEYS` trong
+  `controlios/ui/detail.py` và `config/gestures.json`.
+- **Clipboard UTF-8** của TrollVNC chưa dùng được vì client `asyncvnc` chỉ có
+  `ClientCutText` latin-1 (xem mục Gõ chữ).
+- **Encoding**: client chỉ đăng ký ZLib, rơi về Raw nếu server không có. Không
+  yêu cầu Tight/ZRLE dù TrollVNC có thể hỗ trợ — chỗ này còn dư địa tối ưu băng
+  thông cho 250 máy.
 - Client chỉ đăng ký encoding **ZLib**; nếu TrollVNC không hỗ trợ, nó rơi về
   **Raw** (vẫn chạy, chỉ tốn băng thông hơn).
-- Xoay màn hình làm đổi kích thước framebuffer sẽ khiến phiên đó ngắt rồi tự
-  nối lại — không mất máy, chỉ chớp một nhịp.
+- TrollVNC tự **xoay framebuffer** theo hướng máy (0/90/180/270°). Khi kích
+  thước đổi (dọc ↔ ngang), client này không đăng ký pseudo-encoding DesktopSize
+  nên phiên đó ngắt rồi tự nối lại — không mất máy, chỉ chớp một nhịp, và khung
+  điều khiển tự nới ra theo tỉ lệ mới.
 - Ghi hình ra **chuỗi PNG**, chưa mã hoá thẳng thành video (dùng lệnh ffmpeg ở
   trên để ghép). Đổi lại là không cần cài thêm gì và không mất khung hình nào.
 - Kịch bản chạy **mở vòng**: nó gửi thao tác theo đúng thời gian đã ghi, chứ

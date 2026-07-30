@@ -29,17 +29,35 @@ GESTURES_PATH = PROJECT_ROOT / "config" / "gestures.json"
 
 # Lệnh nguyên thuỷ của kịch bản — macro không được trùng tên, nếu không người
 # dùng sẽ vô tình định nghĩa đè lên `tap` rồi không hiểu vì sao kịch bản sai.
-RESERVED = frozenset({"tap", "swipe", "text", "key", "wait", "shot", "repeat", "macro"})
+RESERVED = frozenset({"tap", "button", "swipe", "text", "key", "wait", "shot",
+                      "repeat", "macro"})
 
 # Mỗi macro là kịch bản con; {name} là tham số truyền vào.
 DEFAULT_GESTURES: Dict[str, str] = {
-    # Vuốt từ mép dưới lên rồi nhả ngay -> về màn hình chính.
+    # TrollVNC map chuột phải thành nút Home, nên đây là một cú bấm nút thật —
+    # không phụ thuộc toạ độ, chạy đúng trên mọi đời máy.
     "home": (
+        "button home\n"
+        "wait 0.7"
+    ),
+    # Bấm Home hai lần nhanh -> trình chuyển app.
+    "switcher": (
+        "button home\n"
+        "wait 0.12\n"
+        "button home\n"
+        "wait 1.0"
+    ),
+    # Chuột giữa là nút Power.
+    "lock": (
+        "button power\n"
+        "wait 0.5"
+    ),
+    # Phương án dự phòng bằng cử chỉ, cho máy nào bấm nút không ăn.
+    "home_swipe": (
         "swipe 0.5 0.99 0.5 0.55 0.18\n"
         "wait 0.7"
     ),
-    # Vuốt lên rồi *giữ* -> trình chuyển app. Không giữ thì chỉ về Home.
-    "switcher": (
+    "switcher_swipe": (
         "swipe 0.5 0.99 0.5 0.45 0.35 0.7\n"
         "wait 1.0"
     ),
@@ -87,6 +105,9 @@ GESTURE_PARAM: Dict[str, str] = {
     "openapp": "tên app hiển thị trên máy",
     "closeall": "số thẻ cần đóng",
 }
+
+# Macro nào chỉ dùng nút cứng -> không phụ thuộc toạ độ, không cần hiệu chỉnh.
+COORDINATE_FREE = frozenset({"home", "switcher", "lock"})
 
 
 def load_gestures(path: Path | str = GESTURES_PATH) -> Dict[str, str]:

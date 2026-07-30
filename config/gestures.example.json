@@ -1,6 +1,9 @@
 {
-  "home": "swipe 0.5 0.99 0.5 0.55 0.18\nwait 0.7",
-  "switcher": "swipe 0.5 0.99 0.5 0.45 0.35 0.7\nwait 1.0",
+  "home": "button home\nwait 0.7",
+  "switcher": "button home\nwait 0.12\nbutton home\nwait 1.0",
+  "lock": "button power\nwait 0.5",
+  "home_swipe": "swipe 0.5 0.99 0.5 0.55 0.18\nwait 0.7",
+  "switcher_swipe": "swipe 0.5 0.99 0.5 0.45 0.35 0.7\nwait 1.0",
   "spotlight": "home\nswipe 0.5 0.35 0.5 0.8 0.35\nwait 1.0",
   "openapp": "spotlight\ntext {name}\nwait 1.5\nkey Return\nwait 2.0",
   "closeapp": "switcher\nswipe 0.5 0.5 0.5 0.03 0.3\nwait 0.8\nhome",

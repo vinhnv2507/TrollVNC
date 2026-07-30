@@ -33,6 +33,18 @@ from . import gestures as gesture_lib
 MAX_DEPTH = 5
 MAX_MACRO_DEPTH = 6
 
+# TrollVNC map nút chuột thành nút cứng của máy (theo README của nó):
+#   chuột phải  -> nút Home/Menu
+#   chuột giữa  -> nút Power
+# Nên `button home` là một cú chuột phải, chắc chắn hơn vuốt mò toạ độ.
+BUTTON_NAMES = {
+    "left": 0,
+    "middle": 1,
+    "right": 2,
+    "home": 2,
+    "power": 1,
+}
+
 
 class ScriptError(ValueError):
     """Lỗi cú pháp, kèm số dòng."""
@@ -128,6 +140,21 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
         hold = _seconds(args[5], line_no) if len(args) == 6 else 0.0
         return Step(op, coords + (duration, hold), line_no=line_no), index
 
+    if op == "button":
+        if not args or args[0].lower() not in BUTTON_NAMES:
+            raise ScriptError(
+                line_no,
+                f"cú pháp: button <{'|'.join(BUTTON_NAMES)}> [x] [y]",
+            )
+        number = BUTTON_NAMES[args[0].lower()]
+        if len(args) == 3:
+            x, y = _ratio(args[1], line_no), _ratio(args[2], line_no)
+        elif len(args) == 1:
+            x, y = 0.5, 0.5
+        else:
+            raise ScriptError(line_no, "cú pháp: button <tên> [x] [y]")
+        return Step(op, (number, x, y, args[0].lower()), line_no=line_no), index
+
     if op == "text":
         payload = text[len(parts[0]):].strip()
         if not payload:
@@ -152,7 +179,7 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             raise ScriptError(line_no, "cú pháp: repeat <số lần ≥ 1>")
         return Step(op, (int(args[0]),), line_no=line_no), index
 
-    known = ", ".join(["tap", "swipe", "text", "key", "wait", "shot", "repeat"]
+    known = ", ".join(["tap", "button", "swipe", "text", "key", "wait", "shot", "repeat"]
                       + sorted(gestures))
     raise ScriptError(line_no, f"lệnh không hiểu: {parts[0]!r}. Lệnh có: {known}")
 
@@ -219,6 +246,8 @@ def describe(steps: Sequence[Step]) -> List[str]:
                 out.append(f"{indent}{label.format(param=param)}")
             elif step.op == "tap":
                 out.append(f"{indent}chạm ({step.args[0]:.0%}, {step.args[1]:.0%})")
+            elif step.op == "button":
+                out.append(f"{indent}nhấn nút {step.args[3]}")
             elif step.op == "swipe":
                 x1, y1, x2, y2, duration, hold = step.args
                 held = f", giữ {hold}s" if hold else ""
@@ -276,6 +305,10 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
             if step.op == "tap":
                 x, y = step.args
                 session.tap(int(x * width), int(y * height))
+                await asyncio.sleep(0.05)
+            elif step.op == "button":
+                number, x, y, _name = step.args
+                session.tap(int(x * width), int(y * height), number)
                 await asyncio.sleep(0.05)
             elif step.op == "swipe":
                 x1, y1, x2, y2, duration, hold = step.args

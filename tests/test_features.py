@@ -129,12 +129,45 @@ class GestureTest(unittest.TestCase):
         typed = [s for s in _flatten(steps) if s.op == "text"]
         self.assertEqual([s.args[0] for s in typed], ["Cài đặt"])
 
-    def test_switcher_holds_before_releasing(self) -> None:
-        """Không giữ thì iOS chỉ về Home — cử chỉ sẽ sai."""
+    def test_home_uses_the_hardware_button_not_a_swipe(self) -> None:
+        """TrollVNC map chuột phải thành nút Home: chắc chắn hơn vuốt mò toạ độ."""
 
-        swipes = [s for s in _flatten(script.parse("switcher")) if s.op == "swipe"]
+        steps = _flatten(script.parse("home"))
+        buttons = [s for s in steps if s.op == "button"]
+        self.assertTrue(buttons, "home phải bấm nút, không vuốt")
+        self.assertEqual(buttons[0].args[0], 2, "nút Home là chuột phải (2)")
+        self.assertFalse([s for s in steps if s.op == "swipe"])
+
+    def test_switcher_is_a_double_home_press(self) -> None:
+        steps = _flatten(script.parse("switcher"))
+        buttons = [s for s in steps if s.op == "button"]
+        self.assertEqual([b.args[0] for b in buttons], [2, 2])
+        waits = [s for s in steps if s.op == "wait"]
+        self.assertLess(waits[0].args[0], 0.3, "hai lần bấm phải sát nhau")
+
+    def test_lock_uses_the_power_button(self) -> None:
+        buttons = [s for s in _flatten(script.parse("lock")) if s.op == "button"]
+        self.assertEqual(buttons[0].args[0], 1, "nút Power là chuột giữa (1)")
+
+    def test_swipe_fallbacks_still_exist_and_hold(self) -> None:
+        """Máy nào bấm nút không ăn thì vẫn còn đường vuốt."""
+
+        swipes = [s for s in _flatten(script.parse("switcher_swipe")) if s.op == "swipe"]
         self.assertTrue(swipes)
-        self.assertGreater(swipes[0].args[5], 0.0, "swipe mở switcher phải có thời gian giữ")
+        self.assertGreater(swipes[0].args[5], 0.0, "vuốt mở switcher phải có giữ")
+
+    def test_button_accepts_explicit_coordinates(self) -> None:
+        steps = script.parse("button left 0.25 0.75")
+        self.assertEqual(steps[0].args, (0, 0.25, 0.75, "left"))
+
+    def test_button_rejects_unknown_names(self) -> None:
+        with self.assertRaises(script.ScriptError) as ctx:
+            script.parse("button volumeup")
+        self.assertIn("home", str(ctx.exception))
+
+    def test_describe_names_the_button(self) -> None:
+        self.assertEqual(script.describe(script.parse("button power")),
+                         ["nhấn nút power"])
 
     def test_closeall_expands_the_requested_number_of_flicks(self) -> None:
         steps = script.parse("closeall 4")
@@ -385,14 +418,32 @@ class PoolFeatureTest(unittest.TestCase):
             self.assertEqual(len(shots), 3, "mỗi máy phải có 1 ảnh từ lệnh shot")
             self.assertTrue(all("cuoi" in s.name for s in shots))
 
-    def test_gesture_sends_a_real_press_hold_release(self) -> None:
-        """`switcher` phải là nhấn → kéo → GIỮ → nhả, đúng cử chỉ iOS."""
+    def test_home_button_reaches_the_server_as_a_right_click(self) -> None:
+        """Nút Home của iOS = chuột phải theo TrollVNC, phải tới đúng nút 3."""
 
         import tempfile
 
         server = self.servers[0]
         server.pointer_events.clear()
-        steps = script.parse("switcher")
+        steps = script.parse("home")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            done = []
+            self.pool.run_script([self.specs[0].key], steps, tmp,
+                                 on_done=lambda: done.append(True))
+            self.assertTrue(self.wait_until(lambda: done, 20), "nút Home treo")
+
+        masks = {e[0] for e in server.pointer_events if e[0]}
+        self.assertEqual(masks, {1 << 2}, f"phải là chuột phải: {server.pointer_events}")
+
+    def test_gesture_sends_a_real_press_hold_release(self) -> None:
+        """Vuốt dự phòng phải là nhấn → kéo → GIỮ → nhả, đúng cử chỉ iOS."""
+
+        import tempfile
+
+        server = self.servers[0]
+        server.pointer_events.clear()
+        steps = script.parse("switcher_swipe")
 
         with tempfile.TemporaryDirectory() as tmp:
             done = []
