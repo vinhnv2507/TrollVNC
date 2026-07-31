@@ -1,4 +1,4 @@
-"""Control IOS — main window."""
+﻿"""Control IOS — main window."""
 
 from __future__ import annotations
 
@@ -12,10 +12,10 @@ from typing import List, Optional
 from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
-    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu, QMessageBox,
-    QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QToolBar, QToolButton,
-    QVBoxLayout, QWidget,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
+    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
+    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QToolBar,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from .. import script as script_lang
@@ -26,6 +26,7 @@ from ..config import (
 from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import Frame, State, Tier
+from .apps_panel import AppsPanel
 from .detail import DetailView
 from .grid import DeviceGrid
 
@@ -72,6 +73,7 @@ class Bridge(QObject):
     status = Signal(str, object, str)
     message = Signal(str)          # nhật ký từ luồng mạng -> luồng giao diện
     script_done = Signal()
+    apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
 
 
 class ScanWorker(QThread):
@@ -274,7 +276,7 @@ class ScriptDialog(QDialog):
         self.refresh_targets()
 
     def refresh_targets(self) -> None:
-        targets = self.window.script_targets()
+        targets = self.window.action_targets()
         self.target_label.setText(
             f"Sẽ chạy song song trên {len(targets)} máy đang chọn."
             if targets else
@@ -308,7 +310,7 @@ class ScriptDialog(QDialog):
         steps = self._parse()
         if steps is None:
             return
-        targets = self.window.script_targets()
+        targets = self.window.action_targets()
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy",
                                     "Hãy chọn ít nhất một máy ở lưới.")
@@ -320,7 +322,7 @@ class ScriptDialog(QDialog):
 
     def set_running(self, running: bool) -> None:
         self.running = running
-        self.run_button.setEnabled(not running and bool(self.window.script_targets()))
+        self.run_button.setEnabled(not running and bool(self.window.action_targets()))
         self.stop_button.setEnabled(running)
         self.editor.setReadOnly(running)
 
@@ -383,6 +385,16 @@ class MainWindow(QMainWindow):
         self._fit_timer.setInterval(80)
         self._fit_timer.timeout.connect(self._fit_detail_pane)
 
+        self.apps_panel = AppsPanel()
+        self.apps_dock = QDockWidget("Ứng dụng trên máy", self)
+        self.apps_dock.setWidget(self.apps_panel)
+        self.apps_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.apps_dock)
+        self.apps_dock.hide()
+        self.apps_panel.refresh_requested.connect(self._reload_apps)
+        self.apps_panel.launch_requested.connect(self._launch_app)
+        self.apps_panel.terminate_requested.connect(self._terminate_app)
+
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
         self.coords_label = QLabel("")
@@ -399,6 +411,7 @@ class MainWindow(QMainWindow):
         self.bridge.status.connect(self._on_status)
         self.bridge.message.connect(self._on_message)
         self.bridge.script_done.connect(self._on_script_done)
+        self.bridge.apps_loaded.connect(self._apply_apps)
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
@@ -519,6 +532,13 @@ class MainWindow(QMainWindow):
         self.quick_button.setMenu(menu)
         bar.addWidget(self.quick_button)
 
+        self.apps_action = self.apps_dock.toggleViewAction()
+        self.apps_action.setText("Ứng dụng")
+        self.apps_action.setToolTip(
+            "Danh sách app đã cài — cần TrollVNC đã vá và control_token trong cấu hình"
+        )
+        bar.addAction(self.apps_action)
+
         script_action = QAction("Kịch bản…", self)
         script_action.triggered.connect(self._open_script_dialog)
         bar.addAction(script_action)
@@ -621,7 +641,7 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------- chụp ảnh / ghi hình / kịch bản
 
-    def script_targets(self) -> List[str]:
+    def action_targets(self) -> List[str]:
         """Máy để chạy hàng loạt: đang chọn, không thì máy đang mở full."""
 
         if self.grid.selection:
@@ -629,7 +649,7 @@ class MainWindow(QMainWindow):
         return [self.detail.key] if self.detail.key else []
 
     def _capture_selected(self) -> None:
-        targets = self.script_targets()
+        targets = self.action_targets()
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy",
                                     "Hãy chọn máy ở lưới rồi bấm Chụp ảnh.")
@@ -646,7 +666,7 @@ class MainWindow(QMainWindow):
 
     def _toggle_recording(self, on: bool) -> None:
         if on:
-            targets = self.script_targets()
+            targets = self.action_targets()
             if not targets:
                 self.record_action.setChecked(False)
                 QMessageBox.information(self, "Chưa chọn máy",
@@ -674,7 +694,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
 
     def _run_quick_action(self, label: str, source: str, needs_name: bool) -> None:
-        targets = self.script_targets()
+        targets = self.action_targets()
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy",
                                     "Hãy chọn máy ở lưới trước khi chạy thao tác.")
@@ -699,6 +719,55 @@ class MainWindow(QMainWindow):
 
         self.statusBar().showMessage(f"{label} · {len(targets)} máy", 5000)
         self.start_script(steps, targets)
+
+    # ------------------------------------------------------- bảng ứng dụng
+
+    def _reload_apps(self) -> None:
+        key = self.detail.key or (self.grid.selection[0] if self.grid.selection else None)
+        if not key:
+            self.apps_panel.set_error(
+                "Chưa chọn máy nào. Double-click một ô ở lưới rồi bấm lại."
+            )
+            return
+        if not self.registry.settings.control_token:
+            self.apps_panel.set_error(
+                "Chưa đặt control_token trong config/devices.json — không có nó thì "
+                "không hỏi được máy. Xem docs/trollvnc-patch.md."
+            )
+            return
+        self.apps_panel.set_loading()
+        self.pool.list_apps(key, on_done=self._on_apps_loaded)
+
+    def _on_apps_loaded(self, key: str, apps, error) -> None:
+        # Chạy trên luồng mạng — chuyển sang luồng giao diện.
+        self.bridge.apps_loaded.emit(key, apps, error or "")
+
+    def _apply_apps(self, key: str, apps, error: str) -> None:
+        if error:
+            self.apps_panel.set_error(f"{key}: {error}")
+            return
+        self.apps_panel.set_apps(apps)
+        self.apps_panel.set_targets(len(self.action_targets()))
+        self.statusBar().showMessage(f"{key}: {len(apps)} app", 4000)
+
+    def _launch_app(self, bundle_id: str) -> None:
+        # Dùng máy đang CHỌN, không phải _targets() vốn chỉ trả về gì đó khi
+        # bật chế độ phát thao tác.
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        self.pool.launch_app(targets, bundle_id,
+                             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"))
+        self.statusBar().showMessage(f"Mở {bundle_id} trên {len(targets)} máy", 4000)
+
+    def _terminate_app(self, bundle_id: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            return
+        self.pool.terminate_app(targets, bundle_id,
+                                on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"))
+        self.statusBar().showMessage(f"Đóng {bundle_id} trên {len(targets)} máy", 4000)
 
     def _open_script_dialog(self) -> None:
         if self.script_dialog is None:

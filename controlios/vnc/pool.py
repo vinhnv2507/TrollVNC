@@ -329,6 +329,64 @@ class DevicePool:
                 except asyncio.TimeoutError:
                     pass
 
+    # ------------------------------------------------------- kênh điều khiển
+
+    def _channel(self, key: str):
+        from ..control_channel import ControlChannel
+
+        session = self._sessions.get(key)
+        host = session.spec.host if session else key.partition(":")[0]
+        return ControlChannel(
+            host, self.settings.control_port, self.settings.control_token
+        )
+
+    def list_apps(self, key: str, on_done, user_only: bool = False) -> None:
+        """on_done(key, apps, error) — chạy trên luồng mạng."""
+
+        async def run() -> None:
+            try:
+                apps = await self._channel(key).list_apps(user_only=user_only)
+                on_done(key, apps, None)
+            except Exception as exc:
+                on_done(key, [], str(exc))
+
+        self._call_coro(run())
+
+    def launch_app(self, keys: Iterable[str], bundle_id: str, on_event=None) -> None:
+        key_list = list(keys)
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    await self._channel(key).launch(bundle_id)
+                    if on_event:
+                        on_event(key, f"đã mở {bundle_id}")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
+    def terminate_app(self, keys: Iterable[str], bundle_id: str, on_event=None) -> None:
+        key_list = list(keys)
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    closed = await self._channel(key).terminate(bundle_id)
+                    if on_event:
+                        on_event(key, f"đã đóng {bundle_id}" if closed
+                                 else f"{bundle_id} vốn không chạy")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
     # ------------------------------------------------------------------ script
 
     def run_script(self, keys: Iterable[str], steps, folder: Path | str,
@@ -357,6 +415,7 @@ class DevicePool:
                         session, steps,
                         on_event or (lambda k, m: None),
                         shot_handler, self._script_cancel,
+                        control=self._channel(key) if self.settings.control_token else None,
                     )
                     if on_event:
                         on_event(key, "xong")

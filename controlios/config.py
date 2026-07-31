@@ -63,6 +63,11 @@ class Settings:
     # Seconds without a frame before a session is considered stalled.
     stall_timeout: float = 20.0
 
+    # Kênh điều khiển của TrollVNC đã vá (liệt kê/mở/đóng app). Token rỗng =
+    # tắt hẳn, và mọi lệnh app sẽ báo lỗi rõ ràng thay vì treo.
+    control_port: int = 46752
+    control_token: str = ""
+
 
 @dataclass
 class Registry:

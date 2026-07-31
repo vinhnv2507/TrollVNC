@@ -1,4 +1,4 @@
-"""Offscreen smoke test: the window builds, tiles paint, tiers get published."""
+﻿"""Offscreen smoke test: the window builds, tiles paint, tiers get published."""
 
 from __future__ import annotations
 
@@ -278,7 +278,7 @@ class ScriptDialogTest(unittest.TestCase):
         dialog = ScriptDialog(self.window)
         self.window.grid.clear_selection()
         self.window.detail.set_device(None)
-        self.assertEqual(self.window.script_targets(), [])
+        self.assertEqual(self.window.action_targets(), [])
 
         called = []
         self.window.pool.run_script = lambda *a, **k: called.append(a)

@@ -172,11 +172,13 @@ class PoolTest(unittest.TestCase):
         pool.set_devices(specs)
         pool.set_tiers({specs[0].key: Tier.GRID})
 
-        deadline = time.monotonic() + 15
+        # Rộng tay: khi chạy cùng cả bộ test, máy bận hơn nhiều so với lúc chạy
+        # riêng. Đây là test về "có kết nối đủ không", không phải test tốc độ.
+        deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
             if pool.stats()["online"] == len(specs) and len(frames) >= len(specs):
                 break
-            time.sleep(0.1)
+            time.sleep(0.05)
 
         stats = pool.stats()
         keys_with_frames = {f.key for f in frames}

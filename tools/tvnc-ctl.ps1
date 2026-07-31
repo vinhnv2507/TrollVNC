@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Gửi lệnh tới control socket của TrollVNC (bản đã vá).
 

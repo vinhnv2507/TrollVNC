@@ -163,6 +163,47 @@ hình vẫn trúng chỗ:
   được.)
 - Bánh xe → **cuộn** hàng loạt.
 
+## Bảng ứng dụng (cần TrollVNC đã vá)
+
+Nút **Ứng dụng** mở bảng bên phải: danh sách app đã cài trên máy đang mở, mỗi
+app một biểu tượng màu. **Bấm để mở app**, **chuột phải để đóng**. Thao tác áp
+cho **tất cả máy đang chọn** ở lưới — mở một app trên 50 máy là một cú bấm.
+
+Có ô lọc theo tên hoặc bundle id, và mặc định ẩn app hệ thống.
+
+Trong kịch bản thì dùng bundle id:
+
+```
+launchapp com.zing.zalo     # mở theo bundle id, không qua Spotlight
+killapp com.golike.app      # đóng ngay, không phải mò App Switcher
+```
+
+Khác với `openapp <tên>` (cử chỉ Spotlight), hai lệnh này **không phụ thuộc tên
+hiển thị, ngôn ngữ máy, hay bàn phím** — với 250 máy đây là khác biệt giữa
+"chạy được" và "chạy được 90%".
+
+### Điều kiện
+
+Tính năng này đi qua **kênh điều khiển thứ hai**, song song với VNC. Cần:
+
+1. Máy chạy **bản TrollVNC đã vá** — xem [docs/trollvnc-patch.md](docs/trollvnc-patch.md)
+2. Khai `control_token` trong `config/devices.json`, đúng token đã dùng lúc build
+
+Thiếu một trong hai thì bảng báo lỗi rõ ràng chứ không treo. Máy chạy bản gốc
+sẽ báo "chưa cài bản đã vá".
+
+```json
+{
+  "settings": {
+    "control_port": 46752,
+    "control_token": "…token của bạn…"
+  }
+}
+```
+
+Kênh này chỉ mở một socket ngắn cho mỗi lệnh, không giữ kết nối, nên không ảnh
+hưởng gì tới luồng hình VNC.
+
 ## Chụp ảnh, ghi hình, kịch bản
 
 Ba nút này làm việc trên **các máy đang chọn** ở lưới (không chọn gì thì lấy máy
@@ -320,6 +361,7 @@ controlios/
   scan.py                tìm máy qua Bonjour _rfb._tcp, bảng ARP, hoặc CIDR
   script.py              ngôn ngữ kịch bản: parse, describe, runner
   gestures.py            cử chỉ iOS dựng sẵn, nạp đè từ config/gestures.json
+  control_channel.py     kênh thứ hai: liệt kê/mở/đóng app (TrollVNC đã vá)
   util/png.py            ghi PNG bằng thư viện chuẩn (không cần Pillow/Qt)
   vnc/session.py         một kết nối RFB: tier, vòng đọc, vòng nhịp, input, chụp
   vnc/pool.py            toàn bộ session trên 1 event loop ở thread riêng;
@@ -327,6 +369,7 @@ controlios/
   ui/tile.py             một ô trong lưới
   ui/grid.py             lưới cuộn + ảo hoá (chỉ ô nhìn thấy mới lên tier GRID)
   ui/detail.py           khung điều khiển full độ phân giải
+  ui/apps_panel.py       bảng ứng dụng: danh sách, lọc, bấm mở, chuột phải đóng
   ui/app.py              cửa sổ chính, toolbar, phân trang, broadcast, kịch bản
 tests/fake_vnc.py        server RFB 3.8 giả để test không cần iPhone
 tools/bench_scale.py     đo tải với N máy giả
@@ -360,7 +403,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-99 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+142 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -383,7 +426,12 @@ thật · khung một máy rộng đúng một máy, thu nhỏ khi chưa mở m�
 máy xoay ngang · dải quét mặc định là 172.30.3.0/24 · `home` bấm nút cứng chứ
 không vuốt và tới server đúng nút chuột phải · `switcher` là hai lần Home sát
 nhau · `lock` dùng nút Power · Bonjour lấy đúng cổng máy quảng bá, bỏ qua IPv6,
-lọc theo subnet, và thiếu thư viện `zeroconf` thì không làm sập gì.
+lọc theo subnet, và thiếu thư viện `zeroconf` thì không làm sập gì · kênh điều
+khiển đọc đúng bốn cột của danh sách app, bỏ qua dòng hỏng thay vì làm hỏng cả
+mẻ, phân biệt được ba loại lỗi (sai token / máy chưa vá / máy không phản hồi) ·
+`launchapp` từ chối tên hiển thị và chỉ thẳng sang `openapp` · bảng ứng dụng
+lọc theo tên lẫn bundle id, không gọi ra mạng khi chưa cấu hình · màu biểu
+tượng cố định theo bundle id giữa các lần chạy.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 

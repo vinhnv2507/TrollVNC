@@ -155,6 +155,20 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             raise ScriptError(line_no, "cú pháp: button <tên> [x] [y]")
         return Step(op, (number, x, y, args[0].lower()), line_no=line_no), index
 
+    if op in ("launchapp", "killapp"):
+        bundle = text[len(parts[0]):].strip()
+        if not bundle:
+            raise ScriptError(line_no, f"cú pháp: {op} <bundle id>, ví dụ com.zing.zalo")
+        if " " in bundle:
+            raise ScriptError(line_no, f"bundle id không được có dấu cách: {bundle!r}")
+        if "." not in bundle:
+            raise ScriptError(
+                line_no,
+                f"{bundle!r} không giống bundle id. Đây là lệnh dùng kênh điều khiển; "
+                f"muốn mở theo tên hiển thị thì dùng: openapp {bundle}",
+            )
+        return Step(op, (bundle,), line_no=line_no), index
+
     if op == "text":
         payload = text[len(parts[0]):].strip()
         if not payload:
@@ -255,6 +269,10 @@ def describe(steps: Sequence[Step]) -> List[str]:
                     f"{indent}vuốt ({x1:.0%},{y1:.0%}) → ({x2:.0%},{y2:.0%}) "
                     f"trong {duration}s{held}"
                 )
+            elif step.op == "launchapp":
+                out.append(f"{indent}mở app {step.args[0]} (qua kênh điều khiển)")
+            elif step.op == "killapp":
+                out.append(f"{indent}đóng app {step.args[0]} (qua kênh điều khiển)")
             elif step.op == "text":
                 out.append(f"{indent}gõ {step.args[0]!r}")
             elif step.op == "key":
@@ -289,8 +307,13 @@ ScriptEvent = Callable[[str, str], None]     # key, message
 
 async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                          shot_handler: Optional[Callable] = None,
-                         cancel: Optional[asyncio.Event] = None) -> None:
-    """Chạy kịch bản trên một phiên. Toạ độ tỉ lệ đổi sang pixel theo máy đó."""
+                         cancel: Optional[asyncio.Event] = None,
+                         control=None) -> None:
+    """Chạy kịch bản trên một phiên. Toạ độ tỉ lệ đổi sang pixel theo máy đó.
+
+    ``control`` là :class:`~controlios.control_channel.ControlChannel` của đúng
+    máy đó, chỉ cần cho ``launchapp``/``killapp``.
+    """
 
     client = session._client
     if client is None:
@@ -315,6 +338,16 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 await session.swipe(int(x1 * width), int(y1 * height),
                                     int(x2 * width), int(y2 * height), duration,
                                     hold=hold)
+            elif step.op in ("launchapp", "killapp"):
+                if control is None:
+                    raise ConnectionError(
+                        f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
+                        "trong config/devices.json và dùng TrollVNC đã vá"
+                    )
+                if step.op == "launchapp":
+                    await control.launch(step.args[0])
+                else:
+                    await control.terminate(step.args[0])
             elif step.op == "text":
                 session.type_text(step.args[0])
                 await asyncio.sleep(0.05)
