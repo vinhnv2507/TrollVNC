@@ -3981,6 +3981,12 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     tv.tv_usec = 0;
     setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(cfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    // On Darwin an accepted socket inherits O_NONBLOCK from the listener, so
+    // the first recv() can return EAGAIN before the client's line arrives and
+    // the command is read as empty. SO_RCVTIMEO above already bounds the wait.
+    int ctlFlags = fcntl(cfd, F_GETFL, 0);
+    if (ctlFlags >= 0)
+        fcntl(cfd, F_SETFL, ctlFlags & ~O_NONBLOCK);
 
     // Read a single line command
     uint8_t buf[1024];
@@ -4011,7 +4017,7 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // coming from outside the device must present the token. Loopback keeps
     // working without one so the on-device TrollVNC app is unaffected.
     BOOL isLoopback = (caddr.sin_addr.s_addr == htonl(INADDR_LOOPBACK));
-    if (!isLoopback) {
+    if (!isLoopback && cmd.length > 0) {
         NSString *prefix =
             gTvCtlToken.length > 0 ? [NSString stringWithFormat:@"auth %@ ", gTvCtlToken] : nil;
         if (prefix && [cmd hasPrefix:prefix]) {
@@ -4025,7 +4031,7 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
             return;
         }
     }
-    
+
     NSData *resp = nil;
     BOOL keepOpen = NO;
     if (cmd.length == 0) {
