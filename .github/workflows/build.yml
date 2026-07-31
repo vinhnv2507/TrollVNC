@@ -136,6 +136,7 @@ jobs:
           # Optional secrets (empty when not defined)
           TVNC_FULL_PASSWORD: ${{ secrets.TVNC_FULL_PASSWORD }}
           TVNC_VIEWONLY_PASSWORD: ${{ secrets.TVNC_VIEWONLY_PASSWORD }}
+          TVNC_CTL_TOKEN: ${{ secrets.TVNC_CTL_TOKEN }}
         run: |
           bash devkit/gen-managed-plist.sh
 
