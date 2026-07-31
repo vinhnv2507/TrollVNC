@@ -28,6 +28,7 @@
 #import <cstdio>
 #import <cstdlib>
 #import <cstring>
+#import <dlfcn.h>
 #import <errno.h>
 #import <fcntl.h>
 #import <mach-o/dyld.h>
@@ -36,6 +37,7 @@
 #import <pthread.h>
 #import <rfb/keysym.h>
 #import <rfb/rfb.h>
+#import <signal.h>
 #import <string>
 #import <sys/socket.h>
 #import <sys/sysctl.h>
@@ -67,6 +69,22 @@ int gOrientationFixQuad = 0; // 0=0°, 1=90°CW, 2=180°, 3=270°CW
 static BOOL gEnabled = YES;
 static int gPort = 5901;
 static int gTvCtlPort = 0;        // port for control connections (0 = disabled)
+static NSString *gTvCtlToken = nil; // token bắt buộc cho kết nối không phải loopback
+static BOOL gTvCtlBindAll = NO;     // YES khi có token: nghe trên mọi giao diện mạng
+
+// SPI để liệt kê/mở app. Dùng NSClassFromString khi gọi nên không phải link
+// thêm framework nào, và cũng không phải sửa Makefile.
+@interface LSApplicationProxy : NSObject
+@property(nonatomic, readonly) NSString *applicationIdentifier;
+@property(nonatomic, readonly) NSString *localizedName;
+@property(nonatomic, readonly) NSString *applicationType;
+@property(nonatomic, readonly) NSString *shortVersionString;
+@end
+@interface LSApplicationWorkspace : NSObject
++ (instancetype)defaultWorkspace;
+- (NSArray<LSApplicationProxy *> *)allApplications;
+- (BOOL)openApplicationWithBundleID:(NSString *)bundleID;
+@end
 static NSString *gBindHost = nil; // optional bind address from CLI/config
 static NSString *gDesktopName = @"TrollVNC";
 static BOOL gViewOnly = NO;
@@ -890,7 +908,14 @@ static void parseDaemonOptions(void) {
         setenv("TROLLVNC_VIEWONLY_PASSWORD", trunc.UTF8String ?: "", 1);
         hasViewPwd = (trunc.length > 0);
     }
-
+    // Token cho control socket. Có token thì mới mở ra LAN; không có thì giữ
+    // nguyên hành vi gốc là chỉ nghe 127.0.0.1.
+    NSString *ctlToken = [prefs objectForKey:@"CtlToken"];
+    if ([ctlToken isKindOfClass:[NSString class]] && ctlToken.length > 0) {
+        gTvCtlToken = [ctlToken copy];
+        gTvCtlBindAll = YES;
+        TVLog(@"-daemon: control token set, control socket will listen on all interfaces");
+    }
     // Single-line summary using NSMutableString; include reverse-connection fields and new options
     NSMutableString *cfg = [NSMutableString stringWithFormat:@"-daemon: cfg "];
     [cfg appendFormat:@"name='%@' ", gDesktopName];
@@ -3568,7 +3593,7 @@ static void tvStartControlSocketIfNeeded(void) {
     addr.sin_len = sizeof(addr);
     addr.sin_family = AF_INET;
     addr.sin_port = htons((uint16_t)gTvCtlPort);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK); // 127.0.0.1
+    addr.sin_addr.s_addr = htonl(gTvCtlBindAll ? INADDR_ANY : INADDR_LOOPBACK);
 
     if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
         TVPrintError("Control socket: bind 127.0.0.1:%d failed: %s", gTvCtlPort, strerror(errno));
@@ -3857,6 +3882,94 @@ static BOOL tvDisconnectAllClients(void) {
     return YES;
 }
 
+#pragma mark - App management
+
+static LSApplicationWorkspace *tvAppWorkspace(void) {
+    Class cls = NSClassFromString(@"LSApplicationWorkspace");
+    if (!cls) {
+        TVLog(@"LSApplicationWorkspace unavailable");
+        return nil;
+    }
+    return [cls defaultWorkspace];
+}
+
+/// TSV: bundleId \t ten hien thi \t loai (User/System) \t phien ban
+static NSData *tvCtlTSVForApps(void) {
+    LSApplicationWorkspace *ws = tvAppWorkspace();
+    if (!ws)
+        return [@"ERR Unavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSMutableString *out = [NSMutableString string];
+    NSArray<LSApplicationProxy *> *apps = [ws allApplications];
+    for (LSApplicationProxy *app in apps) {
+        NSString *bid = app.applicationIdentifier ?: @"";
+        if (bid.length == 0)
+            continue;
+        NSString *name = app.localizedName ?: @"";
+        NSString *type = app.applicationType ?: @"";
+        NSString *ver = app.shortVersionString ?: @"";
+        // A tab inside the name would break the TSV layout.
+        name = [name stringByReplacingOccurrencesOfString:@"\t" withString:@" "];
+        [out appendFormat:@"%@\t%@\t%@\t%@\n", bid, name, type, ver];
+    }
+    TVLog(@"Control socket: listed %lu applications", (unsigned long)apps.count);
+    return [out dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+static NSData *tvCtlLaunchApp(NSString *bundleId) {
+    if (bundleId.length == 0)
+        return [@"ERR MissingBundleID\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    BOOL ok = NO;
+    LSApplicationWorkspace *ws = tvAppWorkspace();
+    if ([ws respondsToSelector:@selector(openApplicationWithBundleID:)])
+        ok = [ws openApplicationWithBundleID:bundleId];
+
+    if (!ok) {
+        // Fallback: SpringBoardServices. The launchapplications entitlement is
+        // already present in TrollVNC.entitlements.
+        void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                         "SpringBoardServices",
+                         RTLD_LAZY);
+        if (h) {
+            int (*sbsLaunch)(CFStringRef, Boolean) =
+                (int (*)(CFStringRef, Boolean))dlsym(h, "SBSLaunchApplicationWithIdentifier");
+            if (sbsLaunch)
+                ok = (sbsLaunch((__bridge CFStringRef)bundleId, false) == 0);
+        }
+    }
+
+    TVLog(@"Control socket: launch %@ -> %@", bundleId, ok ? @"OK" : @"FAIL");
+    const char *raw = ok ? "OK\n" : "ERR LaunchFailed\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
+static NSData *tvCtlTerminateApp(NSString *bundleId) {
+    if (bundleId.length == 0)
+        return [@"ERR MissingBundleID\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    pid_t pid = 0;
+    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                     "SpringBoardServices",
+                     RTLD_LAZY);
+    if (h) {
+        int (*sbsPid)(CFStringRef, pid_t *) =
+            (int (*)(CFStringRef, pid_t *))dlsym(h, "SBSProcessIDForDisplayIdentifier");
+        if (sbsPid)
+            sbsPid((__bridge CFStringRef)bundleId, &pid);
+    }
+
+    if (pid <= 0) {
+        TVLog(@"Control socket: terminate %@ -> not running", bundleId);
+        return [@"NOT_RUNNING\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
+    BOOL ok = (kill(pid, SIGKILL) == 0);
+    TVLog(@"Control socket: terminate %@ (pid %d) -> %@", bundleId, pid, ok ? @"OK" : @"FAIL");
+    const char *raw = ok ? "OK\n" : "ERR KillFailed\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
 void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // Log peer and set short timeouts
     char ipbuf[INET_ADDRSTRLEN] = {0};
@@ -3894,6 +4007,25 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         cmd = @"";
     cmd = [cmd stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 
+    // This port can disconnect every client and launch apps, so anything
+    // coming from outside the device must present the token. Loopback keeps
+    // working without one so the on-device TrollVNC app is unaffected.
+    BOOL isLoopback = (caddr.sin_addr.s_addr == htonl(INADDR_LOOPBACK));
+    if (!isLoopback) {
+        NSString *prefix =
+            gTvCtlToken.length > 0 ? [NSString stringWithFormat:@"auth %@ ", gTvCtlToken] : nil;
+        if (prefix && [cmd hasPrefix:prefix]) {
+            cmd = [[cmd substringFromIndex:prefix.length]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        } else {
+            TVLog(@"Control socket: unauthorized command from %s", ip ? ip : "?");
+            const char *deny = "ERR Unauthorized\n";
+              tvCtlWriteAll(cfd, deny, strlen(deny));
+            close(cfd);
+            return;
+        }
+    }
+    
     NSData *resp = nil;
     BOOL keepOpen = NO;
     if (cmd.length == 0) {
@@ -3924,10 +4056,17 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
             BOOL shouldBlock = [cmd hasPrefix:@"block "];
             resp = tvCtlTextForKick(cid, shouldBlock);
         }
+    } else if ([cmd isEqualToString:@"apps"]) {
+        resp = tvCtlTSVForApps();
+    } else if ([cmd hasPrefix:@"launch "]) {
+        resp = tvCtlLaunchApp([[cmd substringFromIndex:7]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd hasPrefix:@"terminate "]) {
+        resp = tvCtlTerminateApp([[cmd substringFromIndex:10]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else {
         resp = [@"ERR Unknown\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
-
     if (resp)
         tvCtlWriteAll(cfd, resp.bytes, resp.length);
 
