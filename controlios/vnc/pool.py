@@ -387,6 +387,90 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def push_file(self, keys: Iterable[str], local: Path | str, remote: str,
+                  on_event=None) -> None:
+        """Đẩy một file lên nhiều máy."""
+
+        key_list = list(keys)
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    written = await self._channel(key).put_file(local, remote)
+                    if on_event:
+                        on_event(key, f"đã ghi {written} byte vào {remote}")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
+    def install_ipa(self, keys: Iterable[str], ipa: Path | str,
+                    on_event=None, on_done=None, serve_seconds: float = 300) -> None:
+        """Cài .ipa lên nhiều máy: phục vụ file từ PC rồi nhờ TrollStore tải về.
+
+        Web server sống thêm ``serve_seconds`` sau khi gửi lệnh, vì máy còn phải
+        tải file — tắt ngay thì việc cài hỏng giữa chừng.
+        """
+
+        key_list = list(keys)
+        ipa = Path(ipa)
+
+        async def run() -> None:
+            from ..fileserver import FileServer, local_ip
+
+            server = FileServer()
+            await server.start()
+            name = server.add(ipa)
+            url = server.url_for(name, local_ip())
+            if on_event:
+                on_event("", f"phục vụ {name} tại {url}")
+
+            async def one(key: str) -> None:
+                try:
+                    await self._channel(key).install_ipa(url)
+                    if on_event:
+                        on_event(key, "đã gửi lệnh cài, chờ TrollStore trên máy")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+            deadline = time.monotonic() + serve_seconds
+            while time.monotonic() < deadline:
+                await asyncio.sleep(2)
+                if server.hits.get(name, 0) >= len(key_list):
+                    break
+
+            downloads = server.hits.get(name, 0)
+            await server.stop()
+            if on_event:
+                on_event("", f"{downloads}/{len(key_list)} máy đã tải xong file")
+            if on_done:
+                on_done()
+
+        self._call_coro(run())
+
+    def open_url(self, keys: Iterable[str], url: str, on_event=None) -> None:
+        key_list = list(keys)
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    await self._channel(key).open_url(url)
+                    if on_event:
+                        on_event(key, f"đã mở {url}")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
     # ------------------------------------------------------------------ script
 
     def run_script(self, keys: Iterable[str], steps, folder: Path | str,

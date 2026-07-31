@@ -387,6 +387,8 @@ class MainWindow(QMainWindow):
         self.apps_panel.launch_requested.connect(self._launch_app)
         self.apps_panel.terminate_requested.connect(self._terminate_app)
         self.apps_panel.gesture_requested.connect(self._run_device_gesture)
+        self.apps_panel.install_ipa_requested.connect(self._install_ipa)
+        self.apps_panel.push_file_requested.connect(self._push_file)
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
@@ -670,6 +672,62 @@ class MainWindow(QMainWindow):
             self.recording_id = None
             self.record_action.setText("Ghi hình")
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
+
+    def _install_ipa(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn file .ipa để cài", "", "iOS app (*.ipa *.tipa);;All files (*)"
+        )
+        if not path:
+            return
+
+        ipa = Path(path)
+        answer = QMessageBox.question(
+            self, "Cài app hàng loạt",
+            f"Cài <b>{ipa.name}</b> ({ipa.stat().st_size // 1024} KB) lên "
+            f"<b>{len(targets)} máy</b>?<br><br>"
+            "PC sẽ mở một web server tạm để máy tải file về. TrollStore trên "
+            "từng máy có thể hỏi xác nhận — lúc đó bấm OK qua màn hình VNC.",
+        )
+        if answer != QMessageBox.Yes:
+            return
+
+        self.apps_dock.show()
+        self.pool.install_ipa(
+            targets, ipa,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k or 'PC'}] {m}"),
+        )
+        self.statusBar().showMessage(f"Đang cài {ipa.name} lên {len(targets)} máy", 8000)
+
+    def _push_file(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+
+        path, _ = QFileDialog.getOpenFileName(self, "Chọn file cần đẩy sang máy")
+        if not path:
+            return
+
+        remote, ok = QInputDialog.getText(
+            self, "Đường dẫn trên máy",
+            "Đường dẫn tuyệt đối trên iPhone:",
+            text=f"/var/mobile/Documents/{Path(path).name}",
+        )
+        if not ok or not remote.strip():
+            return
+
+        self.pool.push_file(
+            targets, Path(path), remote.strip(),
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+        )
+        self.statusBar().showMessage(
+            f"Đang đẩy {Path(path).name} tới {len(targets)} máy", 6000
+        )
 
     def _run_device_gesture(self, gesture: str) -> None:
         """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.

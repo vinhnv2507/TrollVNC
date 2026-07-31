@@ -77,6 +77,8 @@ class AppsPanel(QWidget):
     terminate_requested = Signal(str)
     refresh_requested = Signal()
     gesture_requested = Signal(str)      # tên cử chỉ: home / switcher / lock
+    install_ipa_requested = Signal()
+    push_file_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -128,6 +130,21 @@ class AppsPanel(QWidget):
         self.list.itemActivated.connect(self._on_activated)
         self.list.itemClicked.connect(self._on_activated)
         layout.addWidget(self.list, 1)
+
+        transfer_row = QHBoxLayout()
+        transfer_row.setSpacing(4)
+        self.install_button = QPushButton("⤓ Cài .ipa…")
+        self.install_button.setToolTip(
+            "Phục vụ file .ipa từ PC rồi nhờ TrollStore trên máy tải về và cài"
+        )
+        self.install_button.clicked.connect(self.install_ipa_requested)
+        transfer_row.addWidget(self.install_button)
+
+        self.push_button = QPushButton("⬆ Đẩy file…")
+        self.push_button.setToolTip("Chép một file từ PC sang máy")
+        self.push_button.clicked.connect(self.push_file_requested)
+        transfer_row.addWidget(self.push_button)
+        layout.addLayout(transfer_row)
 
         self.status = QLabel("Chọn một máy rồi bấm Nạp danh sách.")
         self.status.setWordWrap(True)

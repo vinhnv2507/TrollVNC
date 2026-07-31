@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import Qt                           # noqa: E402
-from PySide6.QtWidgets import QApplication              # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from controlios.config import Registry                  # noqa: E402
 from controlios.control_channel import AppInfo          # noqa: E402
@@ -242,6 +242,70 @@ class WindowIntegrationTest(unittest.TestCase):
         self.assertFalse(hasattr(self.window, "quick_button"))
         labels = [a.text() for a in self.window.findChildren(type(self.window.apps_action))]
         self.assertNotIn("Thao tác app ▾", labels)
+
+    def test_install_ipa_needs_a_selection(self) -> None:
+        sent = []
+        self.window.pool.install_ipa = lambda *a, **k: sent.append(a)
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window.apps_panel.install_button.click()
+        self.assertFalse(sent)
+
+    def test_install_ipa_asks_before_touching_every_device(self) -> None:
+        """Cài app hàng loạt là việc nặng — không được làm khi chưa xác nhận."""
+
+        sent = []
+        self.window.pool.install_ipa = lambda keys, ipa, **k: sent.append((list(keys), ipa))
+        self.window.grid.select_all()
+
+        ipa = Path(self.path.parent) / "_fake.ipa"
+        ipa.write_bytes(b"PK\x03\x04fake")
+        try:
+            with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
+                                     return_value=(str(ipa), "")), \
+                 unittest.mock.patch("controlios.ui.app.QMessageBox.question",
+                                     return_value=unittest.mock.sentinel.no):
+                self.window.apps_panel.install_button.click()
+            self.assertFalse(sent, "từ chối xác nhận thì không được cài")
+
+            with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
+                                     return_value=(str(ipa), "")), \
+                 unittest.mock.patch("controlios.ui.app.QMessageBox.question",
+                                     return_value=QMessageBox.Yes):
+                self.window.apps_panel.install_button.click()
+            self.assertEqual(len(sent), 1)
+            keys, chosen = sent[0]
+            self.assertEqual(len(keys), 2)
+            self.assertEqual(Path(chosen).name, "_fake.ipa")
+        finally:
+            ipa.unlink(missing_ok=True)
+
+    def test_push_file_sends_local_and_remote_paths(self) -> None:
+        sent = []
+        self.window.pool.push_file = lambda keys, local, remote, **k: sent.append(
+            (list(keys), Path(local).name, remote)
+        )
+        self.window.grid.select_all()
+
+        with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
+                                 return_value=(r"C:\tmp\anh.jpg", "")), \
+             unittest.mock.patch("controlios.ui.app.QInputDialog.getText",
+                                 return_value=("/var/mobile/Documents/anh.jpg", True)):
+            self.window.apps_panel.push_button.click()
+
+        self.assertEqual(sent, [(sent[0][0], "anh.jpg", "/var/mobile/Documents/anh.jpg")])
+        self.assertEqual(len(sent[0][0]), 2)
+
+    def test_push_file_cancelled_sends_nothing(self) -> None:
+        sent = []
+        self.window.pool.push_file = lambda *a, **k: sent.append(a)
+        self.window.grid.select_all()
+
+        with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
+                                 return_value=("", "")):
+            self.window.apps_panel.push_button.click()
+        self.assertFalse(sent)
 
     def test_error_from_the_network_thread_reaches_the_panel(self) -> None:
         self.window._apply_apps("10.0.0.1:5901", [], "máy không phản hồi")

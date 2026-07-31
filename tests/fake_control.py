@@ -30,6 +30,9 @@ class FakeControlServer:
 
     launched: List[str] = field(default_factory=list)
     terminated: List[str] = field(default_factory=list)
+    opened_urls: List[str] = field(default_factory=list)
+    #: đường dẫn -> nội dung đã nhận
+    received: Dict[str, bytes] = field(default_factory=dict)
     unauthorized: int = 0
     #: Đặt True để giả lập bản TrollVNC gốc (chưa vá).
     unpatched: bool = False
@@ -66,12 +69,34 @@ class FakeControlServer:
                 await writer.drain()
                 return
 
-            writer.write(self._respond(cmd))
+            if cmd.startswith("put "):
+                writer.write(await self._receive(reader, cmd[len("put "):]))
+            else:
+                writer.write(self._respond(cmd))
             await writer.drain()
         except (ConnectionError, asyncio.CancelledError):
             pass
         finally:
             writer.close()
+
+    async def _receive(self, reader: asyncio.StreamReader, spec: str) -> bytes:
+        """`put <size> <path>` — đọc đúng size byte rồi ghi nhớ lại."""
+
+        if self.unpatched:
+            return b"ERR Unknown\n"
+        size_text, _, path = spec.strip().partition(" ")
+        try:
+            size = int(size_text)
+        except ValueError:
+            return b"ERR Usage put <size> <path>\n"
+        if not path.startswith("/") or ".." in path:
+            return b"ERR BadPath\n"
+        try:
+            data = await asyncio.wait_for(reader.readexactly(size), timeout=10)
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError):
+            return b"ERR Incomplete\n"
+        self.received[path] = data
+        return f"OK {len(data)}\n".encode()
 
     def _respond(self, cmd: str) -> bytes:
         if cmd == "count":
@@ -93,6 +118,10 @@ class FakeControlServer:
                 return b"ERR LaunchFailed\n"
             self.launched.append(bundle)
             self.running.add(bundle)
+            return b"OK\n"
+
+        if cmd.startswith("openurl "):
+            self.opened_urls.append(cmd[len("openurl "):].strip())
             return b"OK\n"
 
         if cmd.startswith("terminate "):

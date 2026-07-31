@@ -16,7 +16,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Optional
+from urllib.parse import quote
 
 DEFAULT_CONTROL_PORT = 46752
 
@@ -141,6 +143,75 @@ class ControlChannel:
         if head.startswith("NOT_RUNNING"):
             return False
         raise ControlError(f"Không đóng được {bundle_id}: {head}")
+
+    async def put_file(self, local: Path | str, remote: str,
+                       progress=None) -> int:
+        """Đẩy một file lên máy. Trả về số byte máy xác nhận đã ghi.
+
+        Gửi dòng tiêu đề ``put <size> <path>`` rồi đổ thẳng nội dung file, nên
+        không tốn RAM cho file lớn và không phải mã hoá base64.
+        """
+
+        local = Path(local)
+        size = local.stat().st_size
+
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), timeout=self.timeout
+            )
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ControlError(f"{self.host}:{self.port} không phản hồi ({exc})") from None
+
+        try:
+            header = f"auth {self.token} put {size} {remote}\n" if self.token \
+                else f"put {size} {remote}\n"
+            writer.write(header.encode("utf-8"))
+            await writer.drain()
+
+            sent = 0
+            with local.open("rb") as handle:
+                while True:
+                    chunk = handle.read(64 * 1024)
+                    if not chunk:
+                        break
+                    writer.write(chunk)
+                    await writer.drain()
+                    sent += len(chunk)
+                    if progress:
+                        progress(sent, size)
+
+            # Máy chỉ trả lời sau khi nhận đủ, nên chờ rộng tay hơn lệnh thường.
+            data = await asyncio.wait_for(reader.read(), timeout=max(self.timeout, 60))
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ControlError(f"{self.host}: đứt khi truyền file ({exc})") from None
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+        text = data.decode("utf-8", errors="replace")
+        self._raise_for_error(text, "put")
+        head = text.strip()
+        if not head.startswith("OK"):
+            raise ControlError(f"Máy từ chối file: {head}")
+        parts = head.split()
+        return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else size
+
+    async def open_url(self, url: str) -> None:
+        text = await self.command(f"openurl {url}")
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không mở được URL: {text.strip()}")
+
+    async def install_ipa(self, url: str) -> None:
+        """Nhờ TrollStore trên máy tải và cài .ipa từ URL.
+
+        Tự cài bằng installd cần bộ quyền mà TrollVNC không có; TrollStore mới
+        là thứ làm việc này đúng cách, nên ta chỉ đưa URL cho nó.
+        """
+
+        await self.open_url(f"apple-magnifier://install?url={quote(url, safe=':/?=&')}")
 
     async def client_count(self) -> int:
         """Số client VNC đang nối vào máy — lệnh có sẵn của TrollVNC gốc."""

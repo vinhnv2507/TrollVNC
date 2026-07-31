@@ -192,11 +192,50 @@ Khác với `openapp <tên>` (cử chỉ Spotlight), hai lệnh này **không ph
 hiển thị, ngôn ngữ máy, hay bàn phím** — với 250 máy đây là khác biệt giữa
 "chạy được" và "chạy được 90%".
 
+### Cài .ipa hàng loạt
+
+Nút **⤓ Cài .ipa…** trong bảng Ứng dụng. Cách hoạt động:
+
+1. Control IOS mở một **web server tạm** trên PC, phục vụ đúng file `.ipa` đó
+2. Gửi cho từng máy: `openurl apple-magnifier://install?url=http://<ip-pc>:<cổng>/<file>`
+3. **TrollStore** trên từng máy tự tải về và cài
+
+Cố ý không tự cài bằng `installd`: việc đó cần bộ quyền TrollVNC không có, còn
+TrollStore vốn làm đúng. Phần code trên máy vì thế chỉ là một lệnh mở URL.
+
+Web server sống thêm 5 phút sau khi gửi lệnh (máy còn phải tải), tự tắt sớm khi
+đủ số máy đã tải xong. TrollStore có thể hỏi xác nhận trên máy — lúc đó bấm OK
+qua màn hình VNC, hoặc phát thao tác cho nhiều máy cùng lúc.
+
+Từ dòng lệnh:
+
+```powershell
+.\.venv\Scripts\python.exe -m controlios.filepush 172.30.0.221 app.ipa --install
+```
+
+### Đẩy file lên máy
+
+Nút **⬆ Đẩy file…**, hoặc:
+
+```powershell
+.\.venv\Scripts\python.exe -m controlios.filepush 172.30.0.221 anh.jpg /var/mobile/Documents/anh.jpg
+```
+
+File đi thẳng qua kênh điều khiển (`put <size> <path>`), không mã hoá base64
+nên không phình dung lượng và không tốn RAM với file lớn.
+
+> **Chép ảnh vào `/var/mobile/Media/DCIM/` KHÔNG làm ảnh hiện trong app Ảnh.**
+> iOS không quét thư mục, nó quản ảnh bằng cơ sở dữ liệu riêng. Muốn ảnh dùng
+> được trong Shopee/TikTok thì phải nạp qua `PHPhotoLibrary` — chưa làm, xem
+> "Giới hạn đã biết".
+
 ### Điều kiện
 
 Tính năng này đi qua **kênh điều khiển thứ hai**, song song với VNC. Cần:
 
-1. Máy chạy **bản TrollVNC đã vá** — xem [docs/trollvnc-patch.md](docs/trollvnc-patch.md)
+1. Máy chạy **bản TrollVNC đã vá**:
+   - [docs/trollvnc-patch.md](docs/trollvnc-patch.md) — vòng 1: `apps`, `launch`, `terminate`
+   - [docs/trollvnc-patch-2.md](docs/trollvnc-patch-2.md) — vòng 2: `put`, `openurl`
 2. Khai `control_token` trong `config/devices.json`, đúng token đã dùng lúc build
 
 Thiếu một trong hai thì bảng báo lỗi rõ ràng chứ không treo. Máy chạy bản gốc
@@ -371,7 +410,9 @@ controlios/
   scan.py                tìm máy qua Bonjour _rfb._tcp, bảng ARP, hoặc CIDR
   script.py              ngôn ngữ kịch bản: parse, describe, runner
   gestures.py            cử chỉ iOS dựng sẵn, nạp đè từ config/gestures.json
-  control_channel.py     kênh thứ hai: liệt kê/mở/đóng app (TrollVNC đã vá)
+  control_channel.py     kênh thứ hai: app, truyền file, mở URL (TrollVNC đã vá)
+  fileserver.py          web server tí hon để iPhone tải .ipa từ PC
+  filepush.py            đẩy file / cài .ipa từ dòng lệnh
   util/png.py            ghi PNG bằng thư viện chuẩn (không cần Pillow/Qt)
   vnc/session.py         một kết nối RFB: tier, vòng đọc, vòng nhịp, input, chụp
   vnc/pool.py            toàn bộ session trên 1 event loop ở thread riêng;
@@ -413,7 +454,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-147 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+167 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -441,7 +482,11 @@ khiển đọc đúng bốn cột của danh sách app, bỏ qua dòng hỏng th
 mẻ, phân biệt được ba loại lỗi (sai token / máy chưa vá / máy không phản hồi) ·
 `launchapp` từ chối tên hiển thị và chỉ thẳng sang `openapp` · bảng ứng dụng
 lọc theo tên lẫn bundle id, không gọi ra mạng khi chưa cấu hình · màu biểu
-tượng cố định theo bundle id giữa các lần chạy.
+tượng cố định theo bundle id giữa các lần chạy · file 512 KB chứa đủ 256 giá
+trị byte đi qua nguyên vẹn không lệch một byte · file rỗng vẫn gửi được · đường
+dẫn tương đối và `..` bị từ chối · web server chỉ phục vụ file đã đăng ký, mọi
+đường dẫn khác trả 404 · `HEAD` không tính là một lượt tải · URL cài app mã hoá
+dấu cách nhưng giữ nguyên `://` · cài `.ipa` phải qua hộp xác nhận mới chạy.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 
@@ -483,3 +528,10 @@ Soi bố cục bằng ảnh (không cần iPhone):
   chưa cài trong bản này.
 - Toạ độ cử chỉ mặc định nhắm iPhone Face ID dọc màn hình. Máy có nút Home vật
   lý, hoặc iOS khác đời, cần chỉnh `config/gestures.json`.
+- **Chưa đưa được ảnh vào Thư viện Ảnh.** Đẩy file vào máy thì được, nhưng chép
+  vào `DCIM` không làm ảnh hiện trong app Ảnh — iOS quản ảnh bằng cơ sở dữ liệu
+  riêng, phải nạp qua `PHPhotoLibrary`. Vướng ở chỗ `trollvncserver` là tiến
+  trình nền nên xin quyền Thư viện Ảnh (TCC) không chắc được; có thể phải
+  chuyển việc nạp ảnh sang chính app TrollVNC. Đây là việc còn để lại.
+- Cài `.ipa` phụ thuộc TrollStore trên máy nhận URL `apple-magnifier://`. Nếu
+  TrollStore hỏi xác nhận thì phải bấm OK qua VNC — chưa tự động hoá bước đó.
