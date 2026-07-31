@@ -13,9 +13,9 @@ from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
-    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow, QMenu,
+    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QToolBar,
-    QToolButton, QVBoxLayout, QWidget,
+    QVBoxLayout, QWidget,
 )
 
 from .. import script as script_lang
@@ -53,17 +53,9 @@ shot sau-khi-luot
 closeapp
 """
 
-# (nhãn, lệnh kịch bản, có cần nhập tên app không)
-QUICK_ACTIONS = [
-    ("Về màn hình chính (nút Home)", "home", False),
-    ("Trình chuyển app (Home ×2)", "switcher", False),
-    ("Khoá máy (nút Power)", "lock", False),
-    ("Mở app…", "openapp", True),
-    ("Đóng app đang mở", "closeapp", False),
-    ("Đóng 5 app gần đây", "closeall 5", False),
-    ("Mở App Library (xem app đã cài)", "applibrary", False),
-    ("Mở App Library + chụp ảnh", "applibrary\nshot app-library", False),
-]
+# Các cử chỉ `openapp` / `closeapp` / `applibrary` không còn nút riêng: bảng
+# Ứng dụng làm việc đó tốt hơn nhiều qua bundle id. Chúng vẫn dùng được trong
+# kịch bản, làm phương án dự phòng cho máy chưa cài bản TrollVNC đã vá.
 
 
 class Bridge(QObject):
@@ -394,6 +386,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.refresh_requested.connect(self._reload_apps)
         self.apps_panel.launch_requested.connect(self._launch_app)
         self.apps_panel.terminate_requested.connect(self._terminate_app)
+        self.apps_panel.gesture_requested.connect(self._run_device_gesture)
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
@@ -516,26 +509,11 @@ class MainWindow(QMainWindow):
         self.record_action.toggled.connect(self._toggle_recording)
         bar.addAction(self.record_action)
 
-        self.quick_button = QToolButton()
-        self.quick_button.setText("Thao tác app ▾")
-        self.quick_button.setToolTip(
-            "Cử chỉ iOS dựng sẵn, chạy trên các máy đang chọn"
-        )
-        self.quick_button.setPopupMode(QToolButton.InstantPopup)
-        menu = QMenu(self.quick_button)
-        for label, source, needs_name in QUICK_ACTIONS:
-            action = menu.addAction(label)
-            action.triggered.connect(
-                lambda _checked=False, s=source, n=needs_name, l=label:
-                self._run_quick_action(l, s, n)
-            )
-        self.quick_button.setMenu(menu)
-        bar.addWidget(self.quick_button)
-
         self.apps_action = self.apps_dock.toggleViewAction()
         self.apps_action.setText("Ứng dụng")
         self.apps_action.setToolTip(
-            "Danh sách app đã cài — cần TrollVNC đã vá và control_token trong cấu hình"
+            "Danh sách app đã cài và các thao tác trên máy — cần TrollVNC đã vá "
+            "và control_token trong cấu hình"
         )
         bar.addAction(self.apps_action)
 
@@ -692,6 +670,17 @@ class MainWindow(QMainWindow):
             self.recording_id = None
             self.record_action.setText("Ghi hình")
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
+
+    def _run_device_gesture(self, gesture: str) -> None:
+        """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.
+
+        Đây là thao tác mức thiết bị nên vẫn đi bằng cử chỉ (nút cứng qua map
+        nút chuột của TrollVNC), không qua kênh điều khiển.
+        """
+
+        labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
+                  "lock": "Khoá máy"}
+        self._run_quick_action(labels.get(gesture, gesture), gesture, False)
 
     def _run_quick_action(self, label: str, source: str, needs_name: bool) -> None:
         targets = self.action_targets()

@@ -101,6 +101,23 @@ class AppsPanelTest(unittest.TestCase):
         self.panel.set_targets(42)
         self.assertIn("42", self.panel.target_label.text())
 
+    def test_device_buttons_emit_their_gesture(self) -> None:
+        """Home/Chuyển app/Khoá gộp từ menu 'Thao tác app' cũ về bảng này."""
+
+        seen = []
+        self.panel.gesture_requested.connect(seen.append)
+        for gesture in ("home", "switcher", "lock"):
+            self.panel.device_buttons[gesture].click()
+        self.assertEqual(seen, ["home", "switcher", "lock"])
+
+    def test_device_buttons_exist_even_before_a_list_loads(self) -> None:
+        panel = AppsPanel()
+        try:
+            self.assertEqual(set(panel.device_buttons), {"home", "switcher", "lock"})
+            self.assertEqual(panel.list.count(), 0)
+        finally:
+            panel.close()
+
     def test_icon_is_identical_for_the_same_app(self) -> None:
         first = letter_icon(SAMPLE[0]).pixmap(34, 34).toImage()
         again = letter_icon(SAMPLE[0]).pixmap(34, 34).toImage()
@@ -198,6 +215,33 @@ class WindowIntegrationTest(unittest.TestCase):
         with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
             self.window._launch_app("com.golike.app")
         self.assertFalse(sent)
+
+    def test_device_gesture_from_the_panel_runs_a_script(self) -> None:
+        sent = []
+        self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(
+            (list(keys), steps)
+        )
+        self.window.grid.select_all()
+        self.window.apps_panel.device_buttons["home"].click()
+
+        self.assertEqual(len(sent), 1)
+        keys, steps = sent[0]
+        self.assertEqual(len(keys), 2, "cử chỉ phải chạy trên mọi máy đang chọn")
+        self.assertEqual(steps[0].args[0], "home")
+
+    def test_lock_button_uses_the_power_gesture(self) -> None:
+        sent = []
+        self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(steps)
+        self.window.grid.select_all()
+        self.window.apps_panel.device_buttons["lock"].click()
+        self.assertEqual(sent[0][0].args[0], "lock")
+
+    def test_old_quick_action_toolbar_button_is_gone(self) -> None:
+        """Thao tác app đã gộp vào bảng Ứng dụng, không còn nút riêng."""
+
+        self.assertFalse(hasattr(self.window, "quick_button"))
+        labels = [a.text() for a in self.window.findChildren(type(self.window.apps_action))]
+        self.assertNotIn("Thao tác app ▾", labels)
 
     def test_error_from_the_network_thread_reaches_the_panel(self) -> None:
         self.window._apply_apps("10.0.0.1:5901", [], "máy không phản hồi")

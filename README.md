@@ -165,11 +165,21 @@ hình vẫn trúng chỗ:
 
 ## Bảng ứng dụng (cần TrollVNC đã vá)
 
-Nút **Ứng dụng** mở bảng bên phải: danh sách app đã cài trên máy đang mở, mỗi
-app một biểu tượng màu. **Bấm để mở app**, **chuột phải để đóng**. Thao tác áp
-cho **tất cả máy đang chọn** ở lưới — mở một app trên 50 máy là một cú bấm.
+Nút **Ứng dụng** mở bảng bên phải — đây là nơi gom **mọi thao tác với app và
+máy**:
 
-Có ô lọc theo tên hoặc bundle id, và mặc định ẩn app hệ thống.
+- Hàng trên cùng: **⌂ Home**, **⇄ Chuyển app**, **⏻ Khoá máy**. Đây là thao tác
+  mức thiết bị, đi bằng nút cứng (chuột phải/giữa theo map của TrollVNC).
+- Danh sách app đã cài, mỗi app một biểu tượng màu: **bấm để mở**, **chuột phải
+  để đóng**. Có ô lọc theo tên hoặc bundle id, mặc định ẩn app hệ thống.
+
+Thao tác áp cho **tất cả máy đang chọn** ở lưới — mở một app trên 50 máy là một
+cú bấm.
+
+Menu "Thao tác app" cũ trên thanh công cụ đã bỏ: mở/đóng app qua bundle id ở
+bảng này chính xác hơn hẳn cử chỉ Spotlight. Các cử chỉ `openapp <tên>`,
+`closeapp`, `applibrary` vẫn dùng được **trong kịch bản**, làm phương án dự
+phòng cho máy chưa cài bản TrollVNC đã vá.
 
 Trong kịch bản thì dùng bundle id:
 
@@ -403,7 +413,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-142 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+147 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
