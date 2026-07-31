@@ -7,3 +7,4 @@ preview-*.png
 ui-preview.png
 config/_preview_devices.json
 *.log
+_upstream/
