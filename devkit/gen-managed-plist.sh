@@ -81,6 +81,7 @@ add_str ReverseSocket          "${TVNC_REVERSE_SOCKET:-}"
 # Auth passwords
 add_str FullPassword           "${TVNC_FULL_PASSWORD:-}"
 add_str ViewOnlyPassword       "${TVNC_VIEWONLY_PASSWORD:-}"
+add_str CtlToken               "${TVNC_CTL_TOKEN:-}"
 # Modifier map
 add_str ModifierMap            "${TVNC_MODIFIER_MAP:-}"
 
