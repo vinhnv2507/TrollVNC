@@ -25,10 +25,12 @@ Dòng trống và dòng bắt đầu bằng # bị bỏ qua.
 from __future__ import annotations
 
 import asyncio
+import random
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
 from . import gestures as gesture_lib
+from .vnc.session import BRIGHTNESS_STEPS
 
 MAX_DEPTH = 5
 MAX_MACRO_DEPTH = 6
@@ -182,8 +184,11 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
 
     if op == "wait":
         if len(args) != 1:
-            raise ScriptError(line_no, "cú pháp: wait <giây>")
-        return Step(op, (_seconds(args[0], line_no),), line_no=line_no), index
+            raise ScriptError(line_no, "cú pháp: wait <giây> hoặc wait <từ>-<đến>")
+        return Step(op, _wait_range(args[0], line_no), line_no=line_no), index
+
+    if op in ("brightness", "volume"):
+        return _media(line_no, op, args), index
 
     if op == "shot":
         return Step(op, (args[0] if args else "",), line_no=line_no), index
@@ -193,9 +198,68 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             raise ScriptError(line_no, "cú pháp: repeat <số lần ≥ 1>")
         return Step(op, (int(args[0]),), line_no=line_no), index
 
-    known = ", ".join(["tap", "button", "swipe", "text", "key", "wait", "shot", "repeat"]
+    known = ", ".join(["tap", "button", "swipe", "text", "key", "wait", "shot",
+                       "repeat", "brightness", "volume", "launchapp", "killapp"]
                       + sorted(gestures))
     raise ScriptError(line_no, f"lệnh không hiểu: {parts[0]!r}. Lệnh có: {known}")
+
+
+def _wait_range(raw: str, line_no: int) -> tuple:
+    """``5`` -> (5, 5); ``5-10`` -> (5, 10), chờ ngẫu nhiên trong khoảng.
+
+    Chờ ngẫu nhiên là thứ đáng dùng khi chạy trên nhiều máy: mỗi máy bốc một
+    con số riêng nên chúng không thao tác đồng loạt cùng một nhịp.
+    """
+
+    if "-" in raw[1:]:                       # bỏ qua dấu trừ ở đầu (số âm)
+        low_text, _, high_text = raw.partition("-")
+        low = _seconds(low_text, line_no)
+        high = _seconds(high_text, line_no)
+        if high < low:
+            raise ScriptError(line_no, f"khoảng chờ ngược: {raw}")
+        return (low, high)
+    value = _seconds(raw, line_no)
+    return (value, value)
+
+
+# Tên lệnh -> (tên keysym khi tăng, khi giảm)
+_MEDIA_DIRECTIONS = {
+    "brightness": ("brightness_up", "brightness_down"),
+    "volume": ("volume_up", "volume_down"),
+}
+
+
+def _media(line_no: int, op: str, args: List[str]) -> Step:
+    """``brightness down 4`` / ``brightness min`` / ``volume mute``."""
+
+    up_key, down_key = _MEDIA_DIRECTIONS[op]
+    if not args:
+        raise ScriptError(line_no, f"cú pháp: {op} up|down|min|max [số nấc]")
+
+    action = args[0].lower()
+    steps_text = args[1] if len(args) > 1 else None
+
+    if op == "volume" and action == "mute":
+        return Step(op, ("mute", 1, "mute"), line_no=line_no)
+
+    if action in ("min", "max"):
+        if steps_text:
+            raise ScriptError(line_no, f"{op} {action} không nhận thêm số nấc")
+        key = down_key if action == "min" else up_key
+        return Step(op, (key, BRIGHTNESS_STEPS, action), line_no=line_no)
+
+    if action not in ("up", "down"):
+        allowed = "up|down|min|max" + ("|mute" if op == "volume" else "")
+        raise ScriptError(line_no, f"cú pháp: {op} {allowed} [số nấc]")
+
+    repeat = 1
+    if steps_text is not None:
+        if not steps_text.isdigit() or int(steps_text) < 1:
+            raise ScriptError(line_no, f"số nấc phải là số nguyên ≥ 1: {steps_text!r}")
+        repeat = int(steps_text)
+
+    return Step(op, (up_key if action == "up" else down_key, repeat, action),
+                line_no=line_no)
 
 
 def _seconds(raw: str, line_no: int) -> float:
@@ -278,7 +342,16 @@ def describe(steps: Sequence[Step]) -> List[str]:
             elif step.op == "key":
                 out.append(f"{indent}nhấn {' '.join(step.args)}")
             elif step.op == "wait":
-                out.append(f"{indent}chờ {step.args[0]}s")
+                low, high = step.args
+                out.append(f"{indent}chờ {low}s" if high <= low
+                           else f"{indent}chờ ngẫu nhiên {low}–{high}s")
+            elif step.op in ("brightness", "volume"):
+                _key, repeat, action = step.args
+                label = {"brightness": "độ sáng", "volume": "âm lượng"}[step.op]
+                words = {"up": "tăng", "down": "giảm", "min": "xuống thấp nhất",
+                         "max": "lên cao nhất", "mute": "tắt tiếng"}
+                suffix = f" {repeat} nấc" if action in ("up", "down") and repeat > 1 else ""
+                out.append(f"{indent}{words[action]} {label}{suffix}")
             elif step.op == "shot":
                 out.append(f"{indent}chụp màn hình")
 
@@ -355,7 +428,13 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 session.press_keys(*step.args)
                 await asyncio.sleep(0.05)
             elif step.op == "wait":
-                await asyncio.sleep(step.args[0])
+                low, high = step.args
+                # Mỗi máy bốc số riêng nên chúng không chạy đồng loạt cùng nhịp.
+                await asyncio.sleep(random.uniform(low, high) if high > low else low)
+            elif step.op in ("brightness", "volume"):
+                key, repeat, _action = step.args
+                session.media_key(key, repeat)
+                await asyncio.sleep(0.05 * repeat)
             elif step.op == "shot":
                 frame = await session.request_capture()
                 if shot_handler:

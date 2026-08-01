@@ -23,6 +23,22 @@ from ..config import DeviceSpec, Settings
 
 log = logging.getLogger(__name__)
 
+# Keysym XF86 mà TrollVNC dịch thành phím cứng của iPhone. Không có trong bảng
+# tên của asyncvnc nên phải gửi bằng mã số.
+MEDIA_KEYSYMS = {
+    "brightness_up": 0x1008FF02,
+    "brightness_down": 0x1008FF03,
+    "volume_up": 0x1008FF13,
+    "volume_down": 0x1008FF11,
+    "mute": 0x1008FF12,
+    "play": 0x1008FF14,
+    "prev": 0x1008FF3E,
+    "next": 0x1008FF97,
+}
+
+# iOS chia độ sáng thành 16 nấc, nên bấy nhiêu lần là chạm đáy hoặc chạm đỉnh.
+BRIGHTNESS_STEPS = 16
+
 
 class Tier(enum.IntEnum):
     OFF = 0     # disconnected on purpose
@@ -237,6 +253,30 @@ class VncSession:
         if supported:
             self._client.keyboard.write("".join(supported))
         return "".join(skipped)
+
+    def press_keysym(self, keysym: int, repeat: int = 1) -> None:
+        """Gửi thẳng một keysym theo mã số.
+
+        Cần cho các phím XF86 (độ sáng, âm lượng): `asyncvnc` không có tên cho
+        chúng nên không gọi qua `press_keys` được.
+        """
+
+        if not self._client:
+            return
+        data = int(keysym).to_bytes(4, "big")
+        writer = self._client.writer
+        for _ in range(max(1, int(repeat))):
+            writer.write(b"\x04\x01\x00\x00" + data)   # nhấn
+            writer.write(b"\x04\x00\x00\x00" + data)   # nhả
+
+    def media_key(self, name: str, repeat: int = 1) -> None:
+        """Phím đa phương tiện / độ sáng, theo tên trong :data:`MEDIA_KEYSYMS`."""
+
+        keysym = MEDIA_KEYSYMS.get(name)
+        if keysym is None:
+            log.warning("%s: không biết phím %r", self.spec.key, name)
+            return
+        self.press_keysym(keysym, repeat)
 
     def press_keys(self, *keys: str) -> None:
         """Nhấn tổ hợp: giữ tất cả rồi nhả theo thứ tự ngược, ví dụ Ctrl+C."""

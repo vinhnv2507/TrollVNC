@@ -148,6 +148,13 @@ class DevicePool:
     def scroll(self, key: str, x: int, y: int, dx: int, dy: int) -> None:
         self._call(lambda: self._with(key, lambda s: s.scroll(x, y, dx, dy)))
 
+    def media_key(self, keys: Iterable[str], name: str, repeat: int = 1) -> None:
+        """Phím độ sáng / âm lượng cho nhiều máy cùng lúc."""
+
+        key_list = list(keys)
+        self._call(lambda: [self._with(k, lambda s: s.media_key(name, repeat))
+                            for k in key_list])
+
     def type_text(self, keys: Iterable[str], text: str,
                   on_skipped: Optional[Callable[[str, str], None]] = None) -> None:
         """Gõ chữ vào nhiều máy. on_skipped(key, chars) khi có ký tự không gửi được."""

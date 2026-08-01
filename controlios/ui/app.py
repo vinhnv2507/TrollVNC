@@ -389,6 +389,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.gesture_requested.connect(self._run_device_gesture)
         self.apps_panel.install_ipa_requested.connect(self._install_ipa)
         self.apps_panel.push_file_requested.connect(self._push_file)
+        self.apps_panel.media_key_requested.connect(self._send_media_key)
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
@@ -672,6 +673,19 @@ class MainWindow(QMainWindow):
             self.recording_id = None
             self.record_action.setText("Ghi hình")
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
+
+    def _send_media_key(self, name: str, repeat: int) -> None:
+        """Độ sáng/âm lượng — đi qua VNC nên máy chưa vá cũng dùng được."""
+
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        self.pool.media_key(targets, name, repeat)
+        label = "giảm" if "down" in name else "tăng"
+        self.statusBar().showMessage(
+            f"{label} độ sáng {repeat} nấc trên {len(targets)} máy", 4000
+        )
 
     def _install_ipa(self) -> None:
         targets = self.action_targets()

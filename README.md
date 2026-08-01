@@ -170,6 +170,9 @@ máy**:
 
 - Hàng trên cùng: **⌂ Home**, **⇄ Chuyển app**, **⏻ Khoá máy**. Đây là thao tác
   mức thiết bị, đi bằng nút cứng (chuột phải/giữa theo map của TrollVNC).
+- Hàng **Độ sáng**: `▁ Tối đa` hạ xuống đáy, `− +` từng nấc, `▔ Sáng` lên cao
+  nhất. Điều khiển qua VNC nên **máy chưa vá cũng dùng được**. Xem mục dưới về
+  chuyện tắt hẳn màn hình.
 - Danh sách app đã cài, mỗi app một biểu tượng màu: **bấm để mở**, **chuột phải
   để đóng**. Có ô lọc theo tên hoặc bundle id, mặc định ẩn app hệ thống.
 
@@ -358,6 +361,12 @@ swipe 0.5 0.99 0.5 0.45 0.35 0.7  # ... rồi GIỮ 0.7s trước khi nhả
 text Xin chào                     # gõ chữ
 key Return                        # nhấn phím (tên keysym X11)
 wait 1.5                          # chờ 1.5 giây
+wait 5-10                         # chờ NGẪU NHIÊN 5–10 giây
+brightness min                    # hạ độ sáng xuống đáy (16 nấc)
+brightness down 3                 # giảm 3 nấc
+volume mute                       # tắt tiếng
+launchapp com.zing.zalo           # mở app theo bundle id (kênh điều khiển)
+killapp com.zing.zalo             # đóng app
 shot ket-qua                      # chụp màn hình, file có hậu tố ket-qua
 repeat 3                          # lặp khối thụt lề bên dưới 3 lần
     swipe 0.5 0.75 0.5 0.25 0.3
@@ -367,6 +376,17 @@ openapp Zalo                      # và mọi cử chỉ ở mục trên
 
 Tham số **giữ** của `swipe` không phải chi tiết vụn: vuốt lên từ mép dưới rồi
 nhả ngay thì iOS về màn hình chính, phải *giữ* lại mới ra trình chuyển app.
+
+**`wait 5-10` bốc số riêng cho từng máy**, không phải một số dùng chung. Nên khi
+chạy trên 50 máy, chúng không thao tác đồng loạt cùng một nhịp.
+
+Ví dụ đóng app rồi mở lại sau một khoảng ngẫu nhiên:
+
+```
+killapp com.zing.zalo
+wait 5-10
+launchapp com.zing.zalo
+```
 
 - **Kiểm tra** — dò cú pháp và in lại kịch bản bằng tiếng Việt để soát trước khi
   chạy. Lỗi báo kèm **số dòng**. Toạ độ ngoài khoảng 0..1 bị từ chối ngay, vì đó
@@ -454,7 +474,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-167 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+190 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -486,7 +506,10 @@ tượng cố định theo bundle id giữa các lần chạy · file 512 KB ch�
 trị byte đi qua nguyên vẹn không lệch một byte · file rỗng vẫn gửi được · đường
 dẫn tương đối và `..` bị từ chối · web server chỉ phục vụ file đã đăng ký, mọi
 đường dẫn khác trả 404 · `HEAD` không tính là một lượt tải · URL cài app mã hoá
-dấu cách nhưng giữ nguyên `://` · cài `.ipa` phải qua hộp xác nhận mới chạy.
+dấu cách nhưng giữ nguyên `://` · cài `.ipa` phải qua hộp xác nhận mới chạy ·
+phím độ sáng gửi đúng keysym XF86 tới server và lặp đúng số nấc · `wait 5-10`
+chạy 30 lượt đều nằm trong khoảng và không ra cùng một số · `wait 3` thì không
+bị ngẫu nhiên hoá.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 
@@ -535,3 +558,10 @@ Soi bố cục bằng ảnh (không cần iPhone):
   chuyển việc nạp ảnh sang chính app TrollVNC. Đây là việc còn để lại.
 - Cài `.ipa` phụ thuộc TrollStore trên máy nhận URL `apple-magnifier://`. Nếu
   TrollStore hỏi xác nhận thì phải bấm OK qua VNC — chưa tự động hoá bước đó.
+- **Không tắt hẳn được màn hình mà vẫn giữ VNC.** TrollVNC chụp hình bằng
+  IOSurface + CoreAnimation render server, **theo nhịp `CADisplayLink`** — mà
+  `CADisplayLink` chạy theo nhịp quét của màn hình. Màn tắt thì nhịp đó dừng,
+  luồng hình VNC đứng theo. Nên cách dùng được là **hạ độ sáng xuống đáy**:
+  màn vẫn bật (VNC vẫn chạy), panel tối, tiết kiệm pin — nhất là máy OLED.
+  Muốn kiểm chứng thì bấm **⏻ Khoá máy** trên một máy rồi xem ô của nó ở lưới
+  còn cập nhật không.
