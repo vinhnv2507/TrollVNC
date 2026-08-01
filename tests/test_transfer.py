@@ -114,6 +114,49 @@ class OpenUrlTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("http://192.168.1.5:8080/", url)
 
 
+class ContainerAndListTest(unittest.IsolatedAsyncioTestCase):
+    """Đưa file vào chỗ app Tệp nhìn thấy, và kiểm chứng file đã tới."""
+
+    async def asyncSetUp(self) -> None:
+        self.server = FakeControlServer()
+        port = await self.server.start()
+        self.channel = ControlChannel("127.0.0.1", port, self.server.token, timeout=5)
+        self.tmp = tempfile.TemporaryDirectory()
+
+    async def asyncTearDown(self) -> None:
+        await self.server.stop()
+        self.tmp.cleanup()
+
+    async def test_container_returns_both_paths(self) -> None:
+        data, bundle = await self.channel.container("com.golike.app")
+
+        self.assertTrue(data.startswith("/var/mobile/Containers/Data/"))
+        self.assertTrue(bundle.startswith("/var/containers/Bundle/"))
+
+    async def test_container_of_a_missing_app_is_an_error(self) -> None:
+        with self.assertRaises(ControlError) as ctx:
+            await self.channel.container("com.khong.co")
+        self.assertIn("không có app", str(ctx.exception))
+
+    async def test_ls_shows_a_pushed_file(self) -> None:
+        """Không có ls thì đẩy file lên xong chỉ biết tin vào con số byte."""
+
+        local = Path(self.tmp.name) / "anh.jpg"
+        local.write_bytes(b"x" * 1234)
+        await self.channel.put_file(local, "/var/mobile/Documents/anh.jpg")
+
+        entries = await self.channel.list_dir("/var/mobile/Documents")
+
+        self.assertIn(("anh.jpg", 1234, False), entries)
+
+    async def test_ls_of_an_empty_directory_is_empty_not_an_error(self) -> None:
+        self.assertEqual(await self.channel.list_dir("/var/mobile/Empty"), [])
+
+    async def test_ls_rejects_a_relative_path(self) -> None:
+        with self.assertRaises(ControlError):
+            await self.channel.list_dir("var/mobile")
+
+
 class FileServerTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()

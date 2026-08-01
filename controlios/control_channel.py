@@ -199,6 +199,35 @@ class ControlChannel:
         parts = head.split()
         return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else size
 
+    async def container(self, bundle_id: str) -> tuple[str, str]:
+        """Trả về (thư mục dữ liệu, thư mục bundle) của một app.
+
+        `/var/mobile/Documents/` là thư mục thật nhưng app Tệp của iOS không
+        hiện nó — Tệp chỉ hiện container của app. Muốn file nhìn thấy được thì
+        phải ghi vào đúng container.
+        """
+
+        text = await self.command(f"container {bundle_id}")
+        head = text.strip()
+        if head.startswith("NOT_FOUND"):
+            raise ControlError(f"Máy không có app {bundle_id}")
+        fields = head.split("\t")
+        if not fields or not fields[0]:
+            raise ControlError(f"Trả lời lạ cho lệnh container: {head!r}")
+        return fields[0], (fields[1] if len(fields) > 1 else "")
+
+    async def list_dir(self, path: str) -> List[tuple]:
+        """Liệt kê thư mục: danh sách (tên, cỡ byte, có phải thư mục không)."""
+
+        text = await self.command(f"ls {path}")
+        entries = []
+        for row in text.splitlines():
+            fields = row.split("\t")
+            if len(fields) < 3:
+                continue
+            entries.append((fields[0], int(fields[1] or 0), fields[2] == "1"))
+        return entries
+
     async def open_url(self, url: str) -> None:
         text = await self.command(f"openurl {url}")
         if not text.strip().startswith("OK"):

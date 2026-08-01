@@ -55,18 +55,16 @@ def main(argv=None) -> int:
     parser.add_argument("remote", nargs="?", help="đường dẫn đích trên máy")
     parser.add_argument("--install", action="store_true",
                         help="phục vụ file qua HTTP rồi nhờ TrollStore cài .ipa")
+    parser.add_argument("--app", metavar="BUNDLE_ID",
+                        help="đẩy vào thư mục Documents của app này, thay vì "
+                             "đường dẫn tuyệt đối (app Tệp chỉ thấy chỗ này)")
+    parser.add_argument("--ls", metavar="PATH",
+                        help="liệt kê một thư mục trên máy rồi thoát")
     parser.add_argument("--token", help="mặc định lấy từ config/devices.json")
     parser.add_argument("--port", type=int)
     parser.add_argument("--wait", type=float, default=120,
                         help="số giây chờ máy tải khi dùng --install")
     args = parser.parse_args(argv)
-
-    if not args.local.is_file():
-        print(f"Không thấy file {args.local}", file=sys.stderr)
-        return 2
-    if not args.install and not args.remote:
-        print("Cần đường dẫn đích trên máy, hoặc dùng --install", file=sys.stderr)
-        return 2
 
     settings = Registry.load(DEFAULT_REGISTRY).settings
     token = args.token or settings.control_token
@@ -76,12 +74,42 @@ def main(argv=None) -> int:
 
     channel = ControlChannel(args.device, args.port or settings.control_port, token,
                              timeout=10)
+
+    if args.ls:
+        try:
+            for name, size, is_dir in asyncio.run(channel.list_dir(args.ls)):
+                print(f"{'d' if is_dir else '-'} {size:>12}  {name}")
+        except ControlError as exc:
+            print(f"LỖI: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
+    if not args.local.is_file():
+        print(f"Không thấy file {args.local}", file=sys.stderr)
+        return 2
+
+    remote = args.remote
+    if args.app:
+        try:
+            data_dir, _bundle = asyncio.run(channel.container(args.app))
+        except ControlError as exc:
+            print(f"LỖI: {exc}", file=sys.stderr)
+            return 1
+        remote = f"{data_dir}/Documents/{args.local.name}"
+        print(f"Container của {args.app}: {data_dir}")
+        print(f"Đích: {remote}")
+
+    if not args.install and not remote:
+        print("Cần đường dẫn đích, hoặc --app <bundle id>, hoặc --install",
+              file=sys.stderr)
+        return 2
+
     try:
         if args.install:
             ok = asyncio.run(_install(channel, args.local, args.wait))
             return 0 if ok else 1
-        written = asyncio.run(_push(channel, args.local, args.remote))
-        print(f"Xong: {written} byte -> {args.remote}")
+        written = asyncio.run(_push(channel, args.local, remote))
+        print(f"Xong: {written} byte -> {remote}")
         return 0
     except ControlError as exc:
         print(f"LỖI: {exc}", file=sys.stderr)

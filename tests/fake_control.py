@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Set, Tuple
 
 
@@ -119,6 +120,25 @@ class FakeControlServer:
             self.launched.append(bundle)
             self.running.add(bundle)
             return b"OK\n"
+
+        if cmd.startswith("container "):
+            bundle = cmd[len("container "):].strip()
+            if bundle not in self.apps:
+                return b"NOT_FOUND\n"
+            data = f"/var/mobile/Containers/Data/Application/UUID-{bundle}"
+            bundle_dir = f"/var/containers/Bundle/Application/UUID-{bundle}"
+            return f"{data}\t{bundle_dir}\n".encode()
+
+        if cmd.startswith("ls "):
+            path = cmd[len("ls "):].strip()
+            if not path.startswith("/"):
+                return b"ERR BadPath\n"
+            rows = "".join(
+                f"{Path(p).name}\t{len(data)}\t0\n"
+                for p, data in self.received.items()
+                if str(Path(p).parent).replace("\\", "/") == path.rstrip("/")
+            )
+            return rows.encode()
 
         if cmd.startswith("openurl "):
             self.opened_urls.append(cmd[len("openurl "):].strip())
