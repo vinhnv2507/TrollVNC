@@ -52,6 +52,8 @@ class State(enum.Enum):
     CONNECTING = "connecting"
     ONLINE = "online"
     ERROR = "error"
+    # Chủ động ngắt để máy ngừng chụp hình — khác hẳn mất kết nối ngoài ý muốn.
+    DORMANT = "dormant"
 
 
 @dataclass
@@ -128,6 +130,20 @@ class VncSession:
             self._task = None
         self._resolve_captures(ConnectionError(f"{self.spec.key} stopped"))
         self._set_state(State.OFFLINE, "stopped")
+
+    def is_running(self) -> bool:
+        return self._task is not None and not self._task.done()
+
+    async def sleep(self) -> None:
+        """Ngắt hẳn kết nối để máy ngừng chụp hình.
+
+        TrollVNC chỉ chạy ScreenCapturer khi còn client nối vào, nên rời đi là
+        cách duy nhất để trả CPU và bộ nhớ lại cho iPhone. Tier IDLE chỉ tiết
+        kiệm băng thông và CPU phía PC, máy vẫn phải render.
+        """
+
+        await self.stop()
+        self._set_state(State.DORMANT, "tạm ngắt cho máy nghỉ")
 
     def set_tier(self, tier: Tier) -> None:
         if tier == self.tier:

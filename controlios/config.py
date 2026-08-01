@@ -68,6 +68,11 @@ class Settings:
     control_port: int = 46752
     control_token: str = ""
 
+    # Máy nằm ngoài khung nhìn quá bấy nhiêu giây thì ngắt hẳn kết nối, để
+    # TrollVNC trên máy dừng chụp hình và trả CPU lại cho app đang chạy.
+    # 0 = không bao giờ ngắt (giữ nguyên hành vi cũ).
+    idle_disconnect_after: float = 60.0
+
 
 @dataclass
 class Registry:

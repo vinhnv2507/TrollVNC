@@ -56,6 +56,9 @@ class DevicePool:
         self._sem: Optional[asyncio.Semaphore] = None
         self._recordings: Dict[str, asyncio.Event] = {}
         self._script_cancel: Optional[asyncio.Event] = None
+        #: key -> thời điểm bắt đầu nằm ngoài khung nhìn
+        self._idle_since: Dict[str, float] = {}
+        self._janitor: Optional[asyncio.Task] = None
 
     # --------------------------------------------------------------- lifecycle
 
@@ -71,6 +74,7 @@ class DevicePool:
         asyncio.set_event_loop(loop)
         self._loop = loop
         self._sem = asyncio.Semaphore(self.settings.connect_concurrency)
+        self._janitor = loop.create_task(self._idle_janitor())
         self._ready.set()
         try:
             loop.run_forever()
@@ -92,10 +96,14 @@ class DevicePool:
         self._loop = None
 
     async def _shutdown(self) -> None:
+        if self._janitor:
+            self._janitor.cancel()
+            self._janitor = None
         await asyncio.gather(
             *(s.stop() for s in list(self._sessions.values())), return_exceptions=True
         )
         self._sessions.clear()
+        self._idle_since.clear()
 
     # ----------------------------------------------------------------- devices
 
@@ -128,8 +136,54 @@ class DevicePool:
         self._call(self._set_tiers, tiers)
 
     def _set_tiers(self, tiers: Mapping[str, Tier]) -> None:
+        now = time.monotonic()
         for key, session in self._sessions.items():
-            session.set_tier(tiers.get(key, Tier.IDLE))
+            tier = tiers.get(key, Tier.IDLE)
+            session.set_tier(tier)
+            if tier > Tier.IDLE:
+                self._idle_since.pop(key, None)
+                if not session.is_running():
+                    session.start()          # đánh thức máy đang ngủ
+            else:
+                self._idle_since.setdefault(key, now)
+
+    async def _idle_janitor(self) -> None:
+        """Ngắt kết nối tới máy đã lâu không nhìn tới.
+
+        Cơ chế tier chỉ tiết kiệm cho phía PC: TrollVNC vẫn chạy ScreenCapturer
+        chừng nào còn client nối vào. Rời hẳn mới trả được CPU cho iPhone.
+        """
+
+        while True:
+            await asyncio.sleep(5)
+            limit = self.settings.idle_disconnect_after
+            if not limit:
+                continue
+            now = time.monotonic()
+            for key, since in list(self._idle_since.items()):
+                if now - since < limit:
+                    continue
+                session = self._sessions.get(key)
+                if session and session.is_running():
+                    await session.sleep()
+
+    async def _ensure_awake(self, key: str, timeout: float = 15.0):
+        """Đánh thức một máy đang ngủ và chờ nó online.
+
+        Cần cho chụp ảnh, ghi hình và kịch bản: nếu không thì máy ngoài khung
+        nhìn sẽ bị bỏ qua một cách khó hiểu.
+        """
+
+        session = self._sessions.get(key)
+        if session is None:
+            return None
+        self._idle_since.pop(key, None)
+        if not session.is_running():
+            session.start()
+        deadline = time.monotonic() + timeout
+        while session.state is not State.ONLINE and time.monotonic() < deadline:
+            await asyncio.sleep(0.1)
+        return session
 
     # ------------------------------------------------------------------- input
 
@@ -252,7 +306,7 @@ class DevicePool:
         self._call_coro(run())
 
     async def _capture_one(self, key: str, folder: Path, suffix: str, on_event) -> None:
-        session = self._sessions.get(key)
+        session = await self._ensure_awake(key)
         if session is None:
             if on_event:
                 on_event(key, None, "không có phiên")
@@ -310,9 +364,11 @@ class DevicePool:
 
     async def _record_one(self, key: str, folder: Path, fps: float,
                           stop: asyncio.Event, on_event) -> None:
-        session = self._sessions.get(key)
+        session = await self._ensure_awake(key)
         if session is None:
             return
+        # Ghi hình phải giữ máy tỉnh suốt buổi, không để janitor ngắt giữa chừng.
+        self._idle_since.pop(key, None)
         interval = 1.0 / max(fps, 0.1)
         index = 0
         while not stop.is_set():
@@ -496,11 +552,14 @@ class DevicePool:
                 await asyncio.to_thread(_write_capture, folder, spec, frame, label)
 
             async def one(key: str) -> None:
-                session = self._sessions.get(key)
+                # Máy ngoài khung nhìn đang ngủ vẫn phải chạy được kịch bản,
+                # nếu không thì chọn 250 máy rồi chạy sẽ bỏ sót phần lớn.
+                session = await self._ensure_awake(key)
                 if session is None or session.state is not State.ONLINE:
                     if on_event:
                         on_event(key, "bỏ qua: chưa kết nối")
                     return
+                self._idle_since.pop(key, None)
                 try:
                     await run_on_session(
                         session, steps,

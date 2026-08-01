@@ -17,13 +17,37 @@ D:\ControlIOS\.venv\Scripts\python.exe main.py
 
 | Tier   | Ý nghĩa                                   | Chi phí |
 |--------|-------------------------------------------|---------|
-| `IDLE` | Vẫn kết nối, vẫn gửi lệnh được, **không hỏi pixel** | ~0 |
+| `IDLE` | Vẫn kết nối, vẫn gửi lệnh được, **không hỏi pixel** | ~0 ở PC, nhưng **máy vẫn chụp** |
 | `GRID` | Ô đang nhìn thấy, refresh `grid_fps` (mặc định 1 fps), ảnh thu nhỏ | thấp |
 | `LIVE` | Máy đang mở ở khung bên phải, full độ phân giải, `live_fps` | cao |
 
 Nên bạn **kết nối cả 250 máy cùng lúc**, nhưng chỉ những ô đang lọt trong
 khung nhìn mới thực sự tải hình. Cuộn tới đâu, tier đổi tới đó. Ảnh thu nhỏ
 được scale ngay trong luồng mạng nên UI không bao giờ ôm 250 khung hình gốc.
+
+### Giảm tải cho chính iPhone
+
+Cơ chế tier ở trên tiết kiệm cho **phía PC và mạng**. Nhưng đọc mã nguồn
+TrollVNC thì thấy nó **bật/tắt ScreenCapturer theo số client đang nối**
+(`trollvncserver.mm`: `startCapture` khi `gClientCount > 0`, `endCapture` khi về
+0). Nghĩa là chừng nào Control IOS còn giữ kết nối, **iPhone vẫn render và mã
+hoá khung hình** dù bạn không nhìn ô đó.
+
+Nên có thêm `idle_disconnect_after`: máy nằm ngoài khung nhìn quá bấy nhiêu
+giây thì **ngắt hẳn kết nối** → `gClientCount = 0` → máy ngừng chụp, trả CPU và
+bộ nhớ lại cho app đang chạy. Cuộn tới hoặc mở máy đó thì tự nối lại (~1 giây).
+
+Ô của máy đang ngủ có **viền xanh dương** và giữ ảnh cuối — khác với viền xám
+là mất kết nối ngoài ý muốn. Thanh trạng thái đếm riêng mục *ngủ*.
+
+Chụp ảnh, ghi hình và kịch bản **tự đánh thức** máy đang ngủ, nên chọn cả 250
+máy rồi chạy kịch bản vẫn đủ, không bỏ sót máy nào.
+
+Đặt `0` để tắt hẳn chính sách này và giữ nguyên hành vi cũ.
+
+> Một cách nữa, không cần code: build TrollVNC với ô **`frame_rate_spec`** đặt
+> thấp (ví dụ `5`). Chỉ theo dõi và điều khiển thì 5 hình/giây là quá đủ, mà
+> CPU trên máy giảm hẳn. Một lần build dùng cho cả 250 máy.
 
 ### Số đo thực tế
 
@@ -411,7 +435,8 @@ launchapp com.zing.zalo
     "max_connected": 0,         // 0 = không giới hạn
     "reconnect_delay": 3.0,     // giây, tăng gấp đôi tới reconnect_max
     "reconnect_max": 60.0,
-    "stall_timeout": 20.0       // không có frame quá lâu -> coi như treo, nối lại
+    "stall_timeout": 20.0,      // không có frame quá lâu -> coi như treo, nối lại
+    "idle_disconnect_after": 60 // giây; máy ngoài khung nhìn bấy lâu thì ngắt hẳn
   },
   "devices": [
     { "host": "172.30.4.101", "port": 5901, "name": "iPhone-01", "group": "tang1" }
@@ -474,7 +499,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-190 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+196 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -509,7 +534,10 @@ dẫn tương đối và `..` bị từ chối · web server chỉ phục vụ f
 dấu cách nhưng giữ nguyên `://` · cài `.ipa` phải qua hộp xác nhận mới chạy ·
 phím độ sáng gửi đúng keysym XF86 tới server và lặp đúng số nấc · `wait 5-10`
 chạy 30 lượt đều nằm trong khoảng và không ra cùng một số · `wait 3` thì không
-bị ngẫu nhiên hoá.
+bị ngẫu nhiên hoá · máy ngoài khung nhìn tự ngắt kết nối còn máy đang nhìn thì
+không · cuộn tới thì máy tỉnh lại và mở kết nối mới · chụp ảnh và kịch bản đánh
+thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_after` bằng 0 thì
+giữ nguyên hành vi cũ.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 

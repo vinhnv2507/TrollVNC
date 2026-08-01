@@ -14,6 +14,8 @@ STATE_COLOUR = {
     State.CONNECTING: QColor("#f0b429"),
     State.ERROR: QColor("#e5484d"),
     State.OFFLINE: QColor("#6b7280"),
+    # Ngủ là do ta chủ động ngắt, không phải hỏng — màu riêng để khỏi tưởng lỗi.
+    State.DORMANT: QColor("#4f8cff"),
 }
 
 

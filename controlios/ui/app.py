@@ -985,8 +985,8 @@ class MainWindow(QMainWindow):
         stats = self.pool.stats()
         self.stats_label.setText(
             f"Tổng {stats['total']} phiên · online {stats['online']} · "
-            f"đang kết nối {stats['connecting']} · lỗi {stats['error']} · "
-            f"tắt {stats['offline']}"
+            f"đang kết nối {stats['connecting']} · ngủ {stats['dormant']} · "
+            f"lỗi {stats['error']} · tắt {stats['offline']}"
         )
 
     def closeEvent(self, event) -> None:
