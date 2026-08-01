@@ -174,9 +174,14 @@ class PoolTest(unittest.TestCase):
 
         # Rộng tay: khi chạy cùng cả bộ test, máy bận hơn nhiều so với lúc chạy
         # riêng. Đây là test về "có kết nối đủ không", không phải test tốc độ.
+        #
+        # Phải đếm số máy **khác nhau** đã gửi hình, không phải tổng số khung:
+        # một máy gửi hai khung là điều kiện tổng bị thoả sớm trong khi vẫn còn
+        # máy chưa gửi gì.
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
-            if pool.stats()["online"] == len(specs) and len(frames) >= len(specs):
+            if (pool.stats()["online"] == len(specs)
+                    and len({f.key for f in frames}) == len(specs)):
                 break
             time.sleep(0.05)
 

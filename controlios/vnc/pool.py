@@ -415,40 +415,51 @@ class DevicePool:
 
         self._call_coro(run())
 
-    def launch_app(self, keys: Iterable[str], bundle_id: str, on_event=None) -> None:
+    def _bulk_app_action(self, keys: Iterable[str], describe, action,
+                         on_event=None, on_done=None) -> None:
+        """Chạy một thao tác app trên nhiều máy rồi **tổng kết lại**.
+
+        Tổng kết là phần quan trọng: máy chưa cài bản TrollVNC đã vá sẽ lỗi
+        lặng lẽ, mà một dòng thoáng qua ở thanh trạng thái thì rất dễ bỏ sót.
+        """
+
         key_list = list(keys)
+        failures: List[tuple] = []
+        succeeded: List[str] = []
 
         async def run() -> None:
             async def one(key: str) -> None:
                 try:
-                    await self._channel(key).launch(bundle_id)
+                    message = await action(self._channel(key))
+                    succeeded.append(key)
                     if on_event:
-                        on_event(key, f"đã mở {bundle_id}")
+                        on_event(key, message)
                 except Exception as exc:
+                    failures.append((key, str(exc)))
                     if on_event:
                         on_event(key, f"LỖI {exc}")
 
             await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+            if on_done:
+                on_done(describe, len(succeeded), failures)
 
         self._call_coro(run())
 
-    def terminate_app(self, keys: Iterable[str], bundle_id: str, on_event=None) -> None:
-        key_list = list(keys)
+    def launch_app(self, keys: Iterable[str], bundle_id: str,
+                   on_event=None, on_done=None) -> None:
+        async def action(channel):
+            await channel.launch(bundle_id)
+            return f"đã mở {bundle_id}"
 
-        async def run() -> None:
-            async def one(key: str) -> None:
-                try:
-                    closed = await self._channel(key).terminate(bundle_id)
-                    if on_event:
-                        on_event(key, f"đã đóng {bundle_id}" if closed
-                                 else f"{bundle_id} vốn không chạy")
-                except Exception as exc:
-                    if on_event:
-                        on_event(key, f"LỖI {exc}")
+        self._bulk_app_action(keys, f"Mở {bundle_id}", action, on_event, on_done)
 
-            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+    def terminate_app(self, keys: Iterable[str], bundle_id: str,
+                      on_event=None, on_done=None) -> None:
+        async def action(channel):
+            closed = await channel.terminate(bundle_id)
+            return f"đã đóng {bundle_id}" if closed else f"{bundle_id} vốn không chạy"
 
-        self._call_coro(run())
+        self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
     def push_file(self, keys: Iterable[str], local: Path | str, remote: str,
                   on_event=None) -> None:

@@ -175,6 +175,10 @@ class AppsPanel(QWidget):
         self.status.setStyleSheet("color: #9aa4b2;")
         layout.addWidget(self.status)
 
+        self.note = QLabel("")
+        self.note.setWordWrap(True)
+        layout.addWidget(self.note)
+
     # ------------------------------------------------------------------ trạng thái
 
     def set_targets(self, count: int) -> None:
@@ -188,6 +192,20 @@ class AppsPanel(QWidget):
     def set_loading(self) -> None:
         self.status.setText("Đang hỏi máy…")
         self.refresh_button.setEnabled(False)
+
+    def set_busy(self, message: str) -> None:
+        self.note.setStyleSheet("color: #9aa4b2;")
+        self.note.setText(message)
+
+    def set_note(self, message: str, error: bool = False) -> None:
+        """Kết quả của thao tác hàng loạt gần nhất — **ở lại** cho tới lần sau.
+
+        Một dòng thoáng qua ở thanh trạng thái rất dễ bỏ sót, mà đây lại đúng
+        chỗ người dùng cần biết máy nào không làm được và vì sao.
+        """
+
+        self.note.setStyleSheet("color: #e5484d;" if error else "color: #3ddc84;")
+        self.note.setText(message)
 
     def set_error(self, message: str) -> None:
         self._apps = []

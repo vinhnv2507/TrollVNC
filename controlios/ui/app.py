@@ -59,6 +59,19 @@ closeapp
 # kịch bản, làm phương án dự phòng cho máy chưa cài bản TrollVNC đã vá.
 
 
+def _short_reason(error: str) -> str:
+    """Rút gọn lỗi thành một cụm ngắn để gộp đếm."""
+
+    lowered = error.lower()
+    if "chưa cài bản đã vá" in lowered or "không hiểu lệnh" in lowered:
+        return "chưa cài bản TrollVNC đã vá"
+    if "không phản hồi" in lowered:
+        return "không mở cổng điều khiển (chưa vá, hoặc TrollVNC không chạy)"
+    if "token" in lowered:
+        return "sai token"
+    return error.split("\n")[0][:60]
+
+
 class Bridge(QObject):
     """Carries callbacks from the asyncio thread onto the Qt thread."""
 
@@ -67,6 +80,7 @@ class Bridge(QObject):
     message = Signal(str)          # nhật ký từ luồng mạng -> luồng giao diện
     script_done = Signal()
     apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
+    bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
 
 
 class ScanWorker(QThread):
@@ -409,6 +423,7 @@ class MainWindow(QMainWindow):
         self.bridge.message.connect(self._on_message)
         self.bridge.script_done.connect(self._on_script_done)
         self.bridge.apps_loaded.connect(self._apply_apps)
+        self.bridge.bulk_done.connect(self._on_bulk_done)
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
@@ -634,6 +649,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Đã chọn {len(keys)} máy", 3000)
         if self.script_dialog:
             self.script_dialog.refresh_targets()
+        # Nhãn "thao tác áp cho N máy" phải theo kịp, nếu không nó đứng ở con số
+        # lúc nạp danh sách và người dùng tưởng đang thao tác một máy.
+        self.apps_panel.set_targets(len(self.action_targets()))
 
     def _set_broadcast(self, on: bool) -> None:
         self.broadcast = on
@@ -850,17 +868,39 @@ class MainWindow(QMainWindow):
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
-        self.pool.launch_app(targets, bundle_id,
-                             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"))
-        self.statusBar().showMessage(f"Mở {bundle_id} trên {len(targets)} máy", 4000)
+        self.apps_panel.set_busy(f"Đang mở {bundle_id} trên {len(targets)} máy…")
+        self.pool.launch_app(
+            targets, bundle_id,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
 
     def _terminate_app(self, bundle_id: str) -> None:
         targets = self.action_targets()
         if not targets:
             return
-        self.pool.terminate_app(targets, bundle_id,
-                                on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"))
-        self.statusBar().showMessage(f"Đóng {bundle_id} trên {len(targets)} máy", 4000)
+        self.apps_panel.set_busy(f"Đang đóng {bundle_id} trên {len(targets)} máy…")
+        self.pool.terminate_app(
+            targets, bundle_id,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
+
+    def _on_bulk_done(self, describe: str, ok: int, failures) -> None:
+        total = ok + len(failures)
+        if not failures:
+            self.apps_panel.set_note(f"{describe}: xong trên {ok}/{total} máy")
+            self.statusBar().showMessage(f"{describe}: xong trên {ok} máy", 5000)
+            return
+
+        # Gộp theo loại lỗi: 11 máy cùng một lý do thì nói một lần, đừng liệt kê 11 dòng.
+        reasons: dict[str, int] = {}
+        for _key, error in failures:
+            reasons[_short_reason(error)] = reasons.get(_short_reason(error), 0) + 1
+        detail = " · ".join(f"{count} máy {reason}" for reason, count in reasons.items())
+
+        self.apps_panel.set_note(f"{describe}: xong {ok}/{total} máy — {detail}", error=True)
+        self.statusBar().showMessage(f"{describe}: {ok}/{total} máy · {detail}", 10000)
 
     def _open_script_dialog(self) -> None:
         if self.script_dialog is None:

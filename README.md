@@ -333,6 +333,24 @@ Tính năng này đi qua **kênh điều khiển thứ hai**, song song với VN
 Thiếu một trong hai thì bảng báo lỗi rõ ràng chứ không treo. Máy chạy bản gốc
 sẽ báo "chưa cài bản đã vá".
 
+**Quan trọng khi mới cài được vài máy:** mở/đóng app chỉ chạy trên **máy đã vá**.
+Sau mỗi thao tác hàng loạt, bảng Ứng dụng hiện dòng tổng kết **ở lại trên màn
+hình**, ví dụ:
+
+> `Mở com.zing.zalo: xong 1/12 máy — 11 máy chưa cài bản TrollVNC đã vá`
+
+Các lý do giống nhau được gộp lại, chứ không liệt kê từng máy một. Nếu bạn thấy
+"chỉ máy đang mở mới ăn lệnh" thì gần như chắc chắn là các máy còn lại chưa cài
+bản `.tipa` đã vá.
+
+Kiểm tra nhanh một máy bất kỳ:
+
+```powershell
+.\tools\tvnc-ctl.ps1 -Device 172.30.3.152 -Command apps
+```
+
+Báo *"No connection could be made"* ở cổng 46752 nghĩa là máy đó chưa có bản vá.
+
 ```json
 {
   "settings": {
@@ -565,7 +583,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-238 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+250 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -606,7 +624,7 @@ thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_af
 giữ nguyên hành vi cũ · tier LIVE thu nhỏ đúng theo giới hạn (bước chia làm
 tròn **lên**, nếu làm tròn xuống thì giới hạn bị bỏ qua trong im lặng) · đặt 0
 thì giữ độ phân giải gốc · toạ độ chuột vẫn theo khung hình gốc sau khi thu
-nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh · bấm vào ô nhỏ ra đúng toạ độ giữa màn hình máy dù ô chỉ rộng 150 px · Ctrl+bấm vẫn chọn máy khi đang bật điều khiển trên lưới · bấm vào dải nhãn dưới ô thì không gửi gì · ô vừa thao tác được nâng nhịp rồi tự trả về.
+nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh · bấm vào ô nhỏ ra đúng toạ độ giữa màn hình máy dù ô chỉ rộng 150 px · Ctrl+bấm vẫn chọn máy khi đang bật điều khiển trên lưới · bấm vào dải nhãn dưới ô thì không gửi gì · ô vừa thao tác được nâng nhịp rồi tự trả về · thao tác hàng loạt tổng kết lại số máy được và số máy hỏng, gộp theo lý do · nhãn số máy trong bảng Ứng dụng cập nhật theo lựa chọn chứ không đứng yên.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 
