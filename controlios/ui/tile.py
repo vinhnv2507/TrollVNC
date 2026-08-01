@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QWidget
 
 from ..config import DeviceSpec
 from ..vnc.session import Frame, State
+from .image import qimage_for
 
 STATE_COLOUR = {
     State.ONLINE: QColor("#3ddc84"),
@@ -67,10 +68,7 @@ class DeviceTile(QWidget):
     def set_frame(self, frame: Frame) -> None:
         if frame.full_width and frame.full_height:
             self.set_aspect(frame.full_width / frame.full_height)
-        image = QImage(
-            frame.data, frame.width, frame.height, frame.width * 3, QImage.Format_RGB888
-        )
-        self._pixmap = QPixmap.fromImage(image)
+        self._pixmap = QPixmap.fromImage(qimage_for(frame))
         self._scaled = None
         self.update()
 

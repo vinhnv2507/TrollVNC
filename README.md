@@ -66,6 +66,19 @@ khi đổi cỡ khung. Đo bằng `tools/bench_paint.py`:
 Cũng bỏ luôn một lần sao chép cả khung hình mỗi frame: `QPixmap.fromImage()`
 vốn đã sao chép điểm ảnh, nên `image.copy()` trước đó là thừa.
 
+Và bỏ việc cắt kênh màu. Máy gửi về bộ đệm **BGRA 4 kênh**; trước đây ta cắt
+lấy 3 kênh cho `Format_RGB888` — mà cắt như vậy là **đọc nhảy cách**, chậm hơn
+hẳn chép thẳng cả khối. Qt đọc được BGRA qua `Format_RGB32` nên giờ đưa nguyên
+bộ đệm sang:
+
+| | Mỗi khung 752×1338 |
+|---|---|
+| Cắt 3 kênh rồi `tobytes()` | 8,44 ms · 3,02 MB |
+| `tobytes()` thẳng 4 kênh | **1,82 ms** · 4,02 MB |
+
+Tốn thêm 1 MB bộ nhớ mỗi khung nhưng nhanh hơn **4,6 lần**. Ảnh thu nhỏ trong
+lưới vẫn giữ 3 kênh vì đã ít điểm ảnh, giữ 4 kênh chỉ phí bộ nhớ giao diện.
+
 ### Giảm tải cho chính iPhone
 
 Cơ chế tier ở trên tiết kiệm cho **phía PC và mạng**. Nhưng đọc mã nguồn
@@ -541,7 +554,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-215 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+223 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -582,7 +595,7 @@ thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_af
 giữ nguyên hành vi cũ · tier LIVE thu nhỏ đúng theo giới hạn (bước chia làm
 tròn **lên**, nếu làm tròn xuống thì giới hạn bị bỏ qua trong im lặng) · đặt 0
 thì giữ độ phân giải gốc · toạ độ chuột vẫn theo khung hình gốc sau khi thu
-nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại.
+nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 

@@ -15,6 +15,7 @@ from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QWidget
 
 from ..vnc.session import Frame
+from .image import qimage_for
 
 # Qt key -> tên keysym X11 mà asyncvnc hiểu.
 SPECIAL_KEYS = {
@@ -117,12 +118,9 @@ class DetailView(QWidget):
     def on_frame(self, frame: Frame) -> None:
         if frame.key != self.key:
             return
-        image = QImage(
-            frame.data, frame.width, frame.height, frame.width * 3, QImage.Format_RGB888
-        )
         # fromImage đã sao chép điểm ảnh vào pixmap, nên .copy() ở đây là thừa
         # một lần sao chép cả khung hình.
-        self._pixmap = QPixmap.fromImage(image)
+        self._pixmap = QPixmap.fromImage(qimage_for(frame))
         self._fb = (frame.full_width, frame.full_height)
         self._scaled = None                  # khung mới -> phải thu phóng lại
         self.update()
