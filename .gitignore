@@ -8,3 +8,4 @@ ui-preview.png
 config/_preview_devices.json
 *.log
 _upstream/
+_fork/
