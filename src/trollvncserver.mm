@@ -4104,7 +4104,37 @@ static NSData *tvCtlListDirectory(NSString *path) {
     return [out dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-/// `openurl <url>` — dùng để nhờ TrollStore cài .ipa qua apple-magnifier://
+/// `openurlin <bundle id> <url>` — mở URL bằng **đúng app đó**.
+///
+/// Cần thiết vì `apple-magnifier://` là scheme TrollStore chiếm lại của app
+/// Kính lúp. Khi để hệ thống tự chọn, nó chọn app Kính lúp gốc và bật camera.
+/// Chỉ đích danh bundle id thì bỏ qua hẳn bước chọn đó.
+static NSData *tvCtlOpenURLInApp(NSString *bundleId, NSString *urlString) {
+    NSURL *url = [NSURL URLWithString:urlString];
+    if (!url || bundleId.length == 0)
+        return [@"ERR BadURL\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    BOOL ok = NO;
+    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                     "SpringBoardServices",
+                     RTLD_LAZY);
+    if (h) {
+        int (*sbsLaunchWithURL)(CFStringRef, CFURLRef, CFDictionaryRef, CFDictionaryRef,
+                                CFStringRef, Boolean) =
+            (int (*)(CFStringRef, CFURLRef, CFDictionaryRef, CFDictionaryRef, CFStringRef,
+                     Boolean))dlsym(h, "SBSLaunchApplicationWithIdentifierAndURL");
+        if (sbsLaunchWithURL)
+            ok = (sbsLaunchWithURL((__bridge CFStringRef)bundleId, (__bridge CFURLRef)url,
+                                   NULL, NULL, NULL, true) == 0);
+    }
+
+    TVLog(@"Control socket: openurlin %@ %@ -> %@", bundleId, urlString,
+          ok ? @"OK" : @"FAIL");
+    const char *raw = ok ? "OK\n" : "ERR OpenFailed\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
+/// `openurl <url>` — để hệ thống tự chọn app cho scheme đó.
 static NSData *tvCtlOpenURL(NSString *urlString) {
     NSURL *url = [NSURL URLWithString:urlString];
     if (!url)
@@ -4247,6 +4277,19 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"put "]) {
         resp = tvCtlReceiveFile(cfd, [cmd substringFromIndex:4], pending, pendingLength);
+    } else if ([cmd hasPrefix:@"openurlin "]) {
+        NSString *rest = [cmd substringFromIndex:10];
+        NSRange space = [rest rangeOfString:@" "];
+        if (space.location == NSNotFound) {
+            resp = [@"ERR Usage openurlin <bundle id> <url>\n"
+                dataUsingEncoding:NSUTF8StringEncoding];
+        } else {
+            resp = tvCtlOpenURLInApp(
+                [rest substringToIndex:space.location],
+                [[rest substringFromIndex:space.location + 1]
+                    stringByTrimmingCharactersInSet:[NSCharacterSet
+                                                        whitespaceAndNewlineCharacterSet]]);
+        }
     } else if ([cmd hasPrefix:@"openurl "]) {
         resp = tvCtlOpenURL([[cmd substringFromIndex:8]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
