@@ -25,6 +25,12 @@ class DeviceGrid(QScrollArea):
     selection_changed = Signal(list)
     device_activated = Signal(str)
 
+    # Điều khiển thẳng trên ô (toạ độ đã quy về framebuffer của máy)
+    tile_pressed = Signal(str, int, int, int)
+    tile_moved = Signal(str, int, int)
+    tile_released = Signal(str, int, int, int)
+    tile_scrolled = Signal(str, int, int, int, int)
+
     # Bề rộng ô tối thiểu khi tự chia cột, và khoảng cách giữa các ô.
     MIN_TILE_WIDTH = 120
     SPACING = 8
@@ -37,6 +43,9 @@ class DeviceGrid(QScrollArea):
         self.order: List[str] = []
         self.selection: List[str] = []
         self._focus_key: Optional[str] = None
+        self.control_enabled = False
+        #: ô vừa được thao tác — tạm nâng nhịp để thấy phản hồi
+        self._control_key: Optional[str] = None
         self._columns = 0            # số cột đang dùng
         self._forced_columns = 0     # 0 = tự động
         self._laying_out = False
@@ -60,6 +69,12 @@ class DeviceGrid(QScrollArea):
         self._debounce.timeout.connect(self._publish_tiers)
         self.verticalScrollBar().valueChanged.connect(self._debounce.start)
 
+        # Ô vừa thao tác giữ nhịp cao thêm vài giây rồi trả về bình thường.
+        self._control_timer = QTimer(self)
+        self._control_timer.setSingleShot(True)
+        self._control_timer.setInterval(4000)
+        self._control_timer.timeout.connect(self._release_control_boost)
+
     # ---------------------------------------------------------------- contents
 
     def set_devices(self, specs: List[DeviceSpec]) -> None:
@@ -74,6 +89,11 @@ class DeviceGrid(QScrollArea):
             tile = DeviceTile(spec, self.tile_width, self._body)
             tile.clicked.connect(self._on_tile_clicked)
             tile.activated.connect(self.device_activated)
+            tile.set_control_enabled(self.control_enabled)
+            tile.pressed_at.connect(self._on_tile_pressed)
+            tile.moved_at.connect(self.tile_moved)
+            tile.released_at.connect(self.tile_released)
+            tile.scrolled_at.connect(self._on_tile_scrolled)
             self.tiles[spec.key] = tile
             self.order.append(spec.key)
 
@@ -175,6 +195,37 @@ class DeviceGrid(QScrollArea):
 
     # ------------------------------------------------------------------- tiers
 
+    def set_control_enabled(self, enabled: bool) -> None:
+        """Bật thì bấm thẳng vào ô là điều khiển máy, không phải chọn máy."""
+
+        self.control_enabled = enabled
+        for tile in self.tiles.values():
+            tile.set_control_enabled(enabled)
+        if not enabled:
+            self._control_key = None
+            self._publish_tiers()
+
+    def _on_tile_pressed(self, key: str, x: int, y: int, button: int) -> None:
+        # Ô trong lưới chỉ làm mới 1 hình/giây, bấm vào mà chờ một giây mới thấy
+        # phản hồi thì không dùng được. Nâng riêng ô đang thao tác lên nhịp cao.
+        if key != self._control_key:
+            self._control_key = key
+            self._publish_tiers()
+        self._control_timer.start()
+        self.tile_pressed.emit(key, x, y, button)
+
+    def _on_tile_scrolled(self, key: str, x: int, y: int, dx: int, dy: int) -> None:
+        if key != self._control_key:
+            self._control_key = key
+            self._publish_tiers()
+        self._control_timer.start()
+        self.tile_scrolled.emit(key, x, y, dx, dy)
+
+    def _release_control_boost(self) -> None:
+        if self._control_key is not None:
+            self._control_key = None
+            self._publish_tiers()
+
     def set_focus_key(self, key: Optional[str]) -> None:
         """The device shown in the detail pane gets the LIVE tier."""
         self._focus_key = key
@@ -198,4 +249,6 @@ class DeviceGrid(QScrollArea):
             tiers[key] = Tier.GRID
         if self._focus_key in tiers:
             tiers[self._focus_key] = Tier.LIVE
+        if self._control_key in tiers:
+            tiers[self._control_key] = Tier.LIVE
         self.tiers_changed.emit(tiers)

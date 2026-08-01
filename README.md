@@ -166,6 +166,14 @@ Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầ
 - **Double-click** một ô → mở khung điều khiển bên phải ở full độ phân giải.
   Kéo/thả chuột và gõ phím trên khung đó sẽ đi thẳng tới máy. Xem mục
   [Chuột và bàn phím](#chuột-và-bàn-phím) cho chi tiết.
+- **Điều khiển thẳng trên lưới**: bật ô này trên thanh công cụ thì **bấm và kéo
+  thẳng vào ô nhỏ** là điều khiển máy đó luôn, khỏi phải mở khung riêng. Tiện
+  khi cần chạm nhanh vài chục máy. `Ctrl`/`Shift`+bấm **vẫn để chọn máy** —
+  không thì bật chế độ này lên là hết chọn được gì. Double-click vẫn mở khung
+  riêng.
+  - Ô lưới chỉ làm mới 1 hình/giây nên bấm vào mà chờ một giây mới thấy phản
+    hồi thì vô dụng. Vì vậy ô vừa thao tác được **tạm nâng lên nhịp cao trong
+    4 giây**, rồi tự trả về bình thường.
 - **Chọn nhiều máy**: click, `Ctrl`+click, `Shift`+click, hoặc **Chọn tất cả**.
 - **Gửi thao tác tới các máy đã chọn**: bật ô này thì mỗi cú click trên khung
   điều khiển được phát cho toàn bộ máy đang chọn. Toạ độ gửi đi là **tỉ lệ**
@@ -240,6 +248,9 @@ hình vẫn trúng chỗ:
   mọi cú kéo bị co lại thành một cú chạm ở điểm nhả, nên không vuốt hàng loạt
   được.)
 - Bánh xe → **cuộn** hàng loạt.
+
+Kết hợp được với **Điều khiển thẳng trên lưới**: bấm vào một ô bất kỳ là thao
+tác đó phát cho toàn bộ máy đang chọn.
 
 ## Bảng ứng dụng (cần TrollVNC đã vá)
 
@@ -554,7 +565,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-223 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+238 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -595,7 +606,7 @@ thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_af
 giữ nguyên hành vi cũ · tier LIVE thu nhỏ đúng theo giới hạn (bước chia làm
 tròn **lên**, nếu làm tròn xuống thì giới hạn bị bỏ qua trong im lặng) · đặt 0
 thì giữ độ phân giải gốc · toạ độ chuột vẫn theo khung hình gốc sau khi thu
-nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh.
+nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh · bấm vào ô nhỏ ra đúng toạ độ giữa màn hình máy dù ô chỉ rộng 150 px · Ctrl+bấm vẫn chọn máy khi đang bật điều khiển trên lưới · bấm vào dải nhãn dưới ô thì không gửi gì · ô vừa thao tác được nâng nhịp rồi tự trả về.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 

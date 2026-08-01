@@ -412,6 +412,10 @@ class MainWindow(QMainWindow):
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
+        self.grid.tile_pressed.connect(self._on_tile_pressed)
+        self.grid.tile_moved.connect(self._on_tile_moved)
+        self.grid.tile_released.connect(self._on_tile_released)
+        self.grid.tile_scrolled.connect(self._on_tile_scrolled)
 
         self.detail.pointer_pressed.connect(self._on_pointer_pressed)
         self.detail.pointer_moved.connect(self._on_pointer_moved)
@@ -481,6 +485,14 @@ class MainWindow(QMainWindow):
         bar.addAction(clear)
 
         bar.addSeparator()
+        self.grid_control_box = QCheckBox("Điều khiển thẳng trên lưới")
+        self.grid_control_box.setToolTip(
+            "Bấm và kéo thẳng vào ô nhỏ để điều khiển máy đó, khỏi phải mở "
+            "khung riêng. Ctrl/Shift+bấm vẫn để chọn máy."
+        )
+        self.grid_control_box.toggled.connect(self.grid.set_control_enabled)
+        bar.addWidget(self.grid_control_box)
+
         self.broadcast_box = QCheckBox("Gửi thao tác tới các máy đã chọn")
         self.broadcast_box.toggled.connect(self._set_broadcast)
         bar.addWidget(self.broadcast_box)
@@ -943,6 +955,49 @@ class MainWindow(QMainWindow):
             return
 
         self.pool.mouse_up(self.detail.key, x, y, button)
+
+    # ------------------------------------------ điều khiển thẳng trên lưới
+
+    def _tile_ratios(self, key: str, x: int, y: int):
+        tile = self.grid.tiles.get(key)
+        if not tile or not tile._fb[0]:
+            return None
+        return x / tile._fb[0], y / tile._fb[1]
+
+    def _on_tile_pressed(self, key: str, x: int, y: int, button: int) -> None:
+        self._tile_origin = (x, y)
+        self._tile_time = time.monotonic()
+        if self._broadcasting():
+            return          # chờ tới lúc nhả mới biết là chạm hay vuốt
+        self.pool.mouse_down(key, x, y, button)
+
+    def _on_tile_moved(self, key: str, x: int, y: int) -> None:
+        if not self._broadcasting():
+            self.pool.mouse_move(key, x, y)
+
+    def _on_tile_released(self, key: str, x: int, y: int, button: int) -> None:
+        origin = getattr(self, "_tile_origin", None)
+        if self._broadcasting():
+            start = self._tile_ratios(key, *origin) if origin else None
+            end = self._tile_ratios(key, x, y)
+            if end is None:
+                return
+            moved = origin and max(abs(x - origin[0]), abs(y - origin[1]))
+            if start and moved and moved > self.DRAG_THRESHOLD:
+                duration = max(0.1, min(1.5, time.monotonic() - self._tile_time))
+                self.pool.broadcast_swipe(self.grid.selection, start, end, duration)
+            else:
+                self.pool.broadcast_tap(self.grid.selection, *end)
+            return
+        self.pool.mouse_up(key, x, y, button)
+
+    def _on_tile_scrolled(self, key: str, x: int, y: int, dx: int, dy: int) -> None:
+        if self._broadcasting():
+            ratios = self._tile_ratios(key, x, y)
+            if ratios:
+                self.pool.broadcast_scroll(self.grid.selection, *ratios, dx, dy)
+            return
+        self.pool.scroll(key, x, y, dx, dy)
 
     def _on_scrolled(self, x: int, y: int, dx: int, dy: int) -> None:
         if not self.detail.key:
