@@ -35,6 +35,8 @@ class DeviceTile(QWidget):
         self.detail = ""
         self.selected = False
         self._pixmap: QPixmap | None = None
+        self._scaled: QPixmap | None = None
+        self._scaled_for = None
         self._tile_width = tile_width
         self._aspect = DEFAULT_ASPECT
         self._apply_size()
@@ -45,6 +47,7 @@ class DeviceTile(QWidget):
     def _apply_size(self) -> None:
         width = max(60, int(self._tile_width))
         height = int(width / self._aspect) + LABEL_HEIGHT
+        self._scaled = None                  # đổi cỡ -> ảnh nhớ sẵn hết dùng được
         self.setFixedSize(width, height)
 
     def set_tile_width(self, width: int) -> None:
@@ -67,7 +70,8 @@ class DeviceTile(QWidget):
         image = QImage(
             frame.data, frame.width, frame.height, frame.width * 3, QImage.Format_RGB888
         )
-        self._pixmap = QPixmap.fromImage(image.copy())
+        self._pixmap = QPixmap.fromImage(image)
+        self._scaled = None
         self.update()
 
     def set_state(self, state: State, detail: str = "") -> None:
@@ -96,9 +100,14 @@ class DeviceTile(QWidget):
 
         painter.fillRect(body, QColor("#111318"))
         if self._pixmap:
-            scaled = self._pixmap.scaled(
-                body.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
+            # Thu phóng một lần cho mỗi khung hình. Chọn/bỏ chọn hay di chuột
+            # đều vẽ lại ô, mà 250 ô cùng thu phóng lại thì rất tốn.
+            if self._scaled is None or self._scaled_for != body.size():
+                self._scaled = self._pixmap.scaled(
+                    body.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+                )
+                self._scaled_for = body.size()
+            scaled = self._scaled
             painter.drawPixmap(
                 body.x() + (body.width() - scaled.width()) // 2,
                 body.y() + (body.height() - scaled.height()) // 2,

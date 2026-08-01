@@ -13,6 +13,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from PySide6.QtCore import Qt                                # noqa: E402
 from PySide6.QtWidgets import QApplication, QDialog          # noqa: E402
 
 from controlios.config import DeviceSpec, Registry, Settings  # noqa: E402
@@ -77,6 +78,90 @@ class LiveDownscaleTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((frame.width, frame.height), (752, 1338))
 
 
+class ScaledPixmapCacheTest(unittest.TestCase):
+    """Thu phóng phải làm một lần cho mỗi khung hình, không phải mỗi lần vẽ."""
+
+    def setUp(self) -> None:
+        from controlios.ui.detail import DetailView
+        from controlios.vnc.session import Frame
+
+        self.Frame = Frame
+        self.view = DetailView()
+        self.view.resize(506, 890)
+        self.view.set_device("10.0.0.1:5901")
+        self.view.show()
+        app.processEvents()
+        self.view.on_frame(self._frame())
+        app.processEvents()
+
+    def tearDown(self) -> None:
+        self.view.close()
+
+    def _frame(self, key: str = "10.0.0.1:5901"):
+        return self.Frame(key=key, width=100, height=178,
+                          data=bytes(100 * 178 * 3),
+                          full_width=752, full_height=1338)
+
+    def test_repeated_paints_reuse_the_same_scaled_pixmap(self) -> None:
+        first = self.view._scaled_pixmap()
+        for _ in range(20):
+            self.assertIs(self.view._scaled_pixmap(), first)
+
+    def test_a_new_frame_invalidates_the_cache(self) -> None:
+        first = self.view._scaled_pixmap()
+        self.view.on_frame(self._frame())
+        self.assertIsNot(self.view._scaled_pixmap(), first)
+
+    def test_resizing_invalidates_the_cache(self) -> None:
+        first = self.view._scaled_pixmap()
+        self.view.resize(700, 1000)
+        app.processEvents()
+        second = self.view._scaled_pixmap()
+        self.assertIsNot(second, first)
+        self.assertLessEqual(second.height(), 1000)
+
+    def test_mouse_moves_do_not_rescale(self) -> None:
+        """Rê chuột từng gọi update() -> trước đây thu phóng lại cả khung."""
+
+        from PySide6.QtCore import QPointF
+        from PySide6.QtGui import QMouseEvent
+
+        first = self.view._scaled_pixmap()
+        centre = self.view._target.center()
+        for offset in range(20):
+            event = QMouseEvent(
+                QMouseEvent.Type.MouseMove,
+                QPointF(centre.x() + offset, centre.y()),
+                Qt.NoButton, Qt.NoButton, Qt.NoModifier,
+            )
+            self.view.mouseMoveEvent(event)
+            app.processEvents()
+
+        self.assertIs(self.view._scaled_pixmap(), first,
+                      "rê chuột không được làm thu phóng lại")
+
+    def test_tile_caches_too(self) -> None:
+        from controlios.config import DeviceSpec
+        from controlios.ui.tile import DeviceTile
+
+        tile = DeviceTile(DeviceSpec(host="10.0.0.9"), tile_width=150)
+        try:
+            tile.set_frame(self._frame("10.0.0.9:5901"))
+            tile.show()
+            app.processEvents()
+            tile.render(tile.grab())          # buộc vẽ một lần
+            first = tile._scaled
+            self.assertIsNotNone(first)
+
+            tile.render(tile.grab())
+            self.assertIs(tile._scaled, first)
+
+            tile.set_frame(self._frame("10.0.0.9:5901"))
+            self.assertIsNone(tile._scaled, "khung mới phải xoá ảnh nhớ sẵn")
+        finally:
+            tile.close()
+
+
 class QualityDialogTest(unittest.TestCase):
     def setUp(self) -> None:
         self.settings = Settings()
@@ -94,6 +179,7 @@ class QualityDialogTest(unittest.TestCase):
         self.dialog.live_fps.setValue(6)
         self.dialog.grid_fps.setValue(0.4)
         self.dialog.thumb_edge.setValue(200)
+        self.dialog.live_full.setChecked(False)      # mặc định là giữ ảnh gốc
         self.dialog.live_edge.setValue(500)
         self.dialog.apply()
 

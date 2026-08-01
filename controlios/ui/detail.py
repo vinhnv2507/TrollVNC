@@ -74,6 +74,8 @@ class DetailView(QWidget):
         super().__init__(parent)
         self.key: Optional[str] = None
         self._pixmap: Optional[QPixmap] = None
+        self._scaled: Optional[QPixmap] = None
+        self._scaled_for = None
         self._fb = (0, 0)
         self._target = QRect()
         self._dragging = False
@@ -106,6 +108,7 @@ class DetailView(QWidget):
     def set_device(self, key: Optional[str]) -> None:
         self.key = key
         self._pixmap = None
+        self._scaled = None
         self._cursor = None
         self._cursor_down = False
         self._dragging = False
@@ -117,8 +120,11 @@ class DetailView(QWidget):
         image = QImage(
             frame.data, frame.width, frame.height, frame.width * 3, QImage.Format_RGB888
         )
-        self._pixmap = QPixmap.fromImage(image.copy())
+        # fromImage đã sao chép điểm ảnh vào pixmap, nên .copy() ở đây là thừa
+        # một lần sao chép cả khung hình.
+        self._pixmap = QPixmap.fromImage(image)
         self._fb = (frame.full_width, frame.full_height)
+        self._scaled = None                  # khung mới -> phải thu phóng lại
         self.update()
 
     # ------------------------------------------------------------- coordinates
@@ -218,6 +224,26 @@ class DetailView(QWidget):
 
     # ---------------------------------------------------------------- painting
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._scaled = None
+
+    def _scaled_pixmap(self) -> QPixmap:
+        """Thu phóng **một lần cho mỗi khung hình**, rồi dùng lại.
+
+        Trước đây việc này nằm thẳng trong paintEvent, mà rê chuột thì gọi
+        update() liên tục — hoá ra mỗi lần chuột nhúc nhích là thu phóng lại cả
+        khung 752×1338 bằng SmoothTransformation. Đó là nguyên nhân chính khiến
+        thao tác thấy giật.
+        """
+
+        if self._scaled is None or self._scaled_for != self.size():
+            self._scaled = self._pixmap.scaled(
+                self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self._scaled_for = self.size()
+        return self._scaled
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.fillRect(self.rect(), QColor("#0b0d11"))
@@ -228,9 +254,7 @@ class DetailView(QWidget):
             painter.end()
             return
 
-        scaled = self._pixmap.scaled(
-            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-        )
+        scaled = self._scaled_pixmap()
         self._target = QRect(
             (self.width() - scaled.width()) // 2,
             (self.height() - scaled.height()) // 2,

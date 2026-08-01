@@ -38,23 +38,33 @@ nối lại máy nào và không phải khởi động lại phần mềm.
 Ba mẫu sẵn: **Mượt** (8 fps / 640px), **Cân bằng** (12 fps / 900px), **Nét**
 (20 fps / độ phân giải gốc).
 
-**Vì sao độ nét lại ảnh hưởng tới độ mượt:** khung điều khiển chỉ rộng chừng
-500 px, nhưng trước đây phần mềm nhận nguyên khung 752×1338 rồi mới để Qt thu
-nhỏ — mỗi khung bị sao chép ở kích thước gốc rồi vứt đi hơn nửa số điểm ảnh.
-Đo trên máy này:
+Mặc định `live_long_edge` là **0** — giữ nguyên độ phân giải máy gửi sang. Toạ
+độ chuột luôn tính theo khung hình gốc nên thu nhỏ không làm chạm sai chỗ.
 
-| Giới hạn | Kích thước nhận về | Mỗi khung | CPU ở 12 fps |
-|---|---|---|---|
-| Gốc | 752×1338 · 3,02 MB | 7,00 ms | 84 ms/giây |
-| 900 px | 376×669 · 0,75 MB | 2,04 ms | **24 ms/giây** |
-| 640 px | 251×446 · 0,34 MB | 0,69 ms | **8 ms/giây** |
+**Vì sao mặc định lại là "không thu nhỏ":** việc thu nhỏ ở đây dùng bước nguyên
+(lấy mẫu theo stride) cho nhanh, nên từ màn 1338 px chỉ nhảy được xuống 669.
+Mà khung điều khiển cao chừng 890 px — tức là thu nhỏ rồi **phóng ngược lên**,
+ảnh mờ đi mà chẳng nhanh hơn bao nhiêu. Đặt khác 0 chỉ đáng khi mạng yếu và bạn
+chấp nhận mờ để đổi lấy nhẹ.
 
-Mặc định là 900 px. Toạ độ chuột vẫn tính theo khung hình **gốc** nên thu nhỏ
-không làm chạm sai chỗ.
+### Vì sao trước đây thấy giật
 
-> Việc thu nhỏ dùng bước nguyên (lấy mẫu theo stride) cho nhanh, nên kết quả
-> có thể nhỏ hơn giới hạn khá nhiều: đặt 900 px trên màn 1338 thì bước là 2 và
-> ra 669 px. Đặt 700 hay 900 đều cho cùng kết quả.
+Hai chỗ, cùng một nguyên nhân: **thu phóng ảnh nằm ngay trong `paintEvent`**.
+
+Rê chuột trên khung điều khiển gọi `update()` ở mỗi lần chuột nhúc nhích, và
+mỗi lần vẽ lại là một lần thu phóng cả khung 752×1338 bằng `SmoothTransformation`.
+Ô trong lưới cũng vậy — chọn, bỏ chọn, di chuột qua đều vẽ lại.
+
+Giờ ảnh đã thu phóng được **nhớ lại**, chỉ tính lại khi có khung hình mới hoặc
+khi đổi cỡ khung. Đo bằng `tools/bench_paint.py`:
+
+| | 200 lần vẽ lại giữa hai khung hình |
+|---|---|
+| Cách cũ (thu phóng mỗi lần vẽ) | **384 ms** |
+| Cách mới (nhớ ảnh đã thu phóng) | **2 ms** |
+
+Cũng bỏ luôn một lần sao chép cả khung hình mỗi frame: `QPixmap.fromImage()`
+vốn đã sao chép điểm ảnh, nên `image.copy()` trước đó là thừa.
 
 ### Giảm tải cho chính iPhone
 
@@ -462,7 +472,7 @@ launchapp com.zing.zalo
     "grid_fps": 1.0,            // fps của ô thu nhỏ đang nhìn thấy
     "live_fps": 12.0,           // fps của máy đang mở full
     "thumb_long_edge": 320,     // cạnh dài ảnh thu nhỏ trong lưới
-    "live_long_edge": 900,      // cạnh dài khung máy đang mở; 0 = độ phân giải gốc     // cạnh dài ảnh thu nhỏ, px
+    "live_long_edge": 0,        // 0 = giữ độ phân giải gốc (mặc định, nét nhất)
     "connect_concurrency": 24,  // số máy bắt tay RFB cùng lúc
     "max_connected": 0,         // 0 = không giới hạn
     "reconnect_delay": 3.0,     // giây, tăng gấp đôi tới reconnect_max
@@ -531,7 +541,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-210 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+215 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -572,7 +582,7 @@ thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_af
 giữ nguyên hành vi cũ · tier LIVE thu nhỏ đúng theo giới hạn (bước chia làm
 tròn **lên**, nếu làm tròn xuống thì giới hạn bị bỏ qua trong im lặng) · đặt 0
 thì giữ độ phân giải gốc · toạ độ chuột vẫn theo khung hình gốc sau khi thu
-nhỏ · huỷ hộp thoại chất lượng thì không đổi gì.
+nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 
