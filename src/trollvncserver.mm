@@ -79,6 +79,8 @@ static BOOL gTvCtlBindAll = NO;     // YES khi có token: nghe trên mọi giao 
 @property(nonatomic, readonly) NSString *localizedName;
 @property(nonatomic, readonly) NSString *applicationType;
 @property(nonatomic, readonly) NSString *shortVersionString;
+@property(nonatomic, readonly) NSURL *bundleURL;
+@property(nonatomic, readonly) NSURL *dataContainerURL;
 @end
 @interface LSApplicationWorkspace : NSObject
 + (instancetype)defaultWorkspace;
@@ -4053,6 +4055,55 @@ static NSData *tvCtlReceiveFile(int cfd, NSString *spec, const uint8_t *pending,
     return [ok dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+/// `container <bundle id>` — thư mục dữ liệu của app, để đẩy file vào đúng chỗ.
+///
+/// `/var/mobile/Documents/` là thư mục thật nhưng app Tệp của iOS không hiện
+/// nó: Tệp chỉ hiện container của những app tự khai báo hỗ trợ duyệt tài liệu.
+/// Muốn file nhìn thấy được thì phải ghi vào container của một app cụ thể.
+static NSData *tvCtlContainerForApp(NSString *bundleId) {
+    LSApplicationWorkspace *ws = tvAppWorkspace();
+    if (!ws)
+        return [@"ERR Unavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    for (LSApplicationProxy *app in [ws allApplications]) {
+        if (![app.applicationIdentifier isEqualToString:bundleId])
+            continue;
+        NSString *data = app.dataContainerURL.path ?: @"";
+        NSString *bundle = app.bundleURL.path ?: @"";
+        NSString *out = [NSString stringWithFormat:@"%@\t%@\n", data, bundle];
+        return [out dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+/// `ls <path>` — TSV: tên, cỡ byte, 1 nếu là thư mục.
+/// Có nó mới kiểm chứng được file đẩy lên đã tới nơi hay chưa.
+static NSData *tvCtlListDirectory(NSString *path) {
+    if (path.length == 0 || ![path hasPrefix:@"/"])
+        return [@"ERR BadPath\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *error = nil;
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:path error:&error];
+    if (!names) {
+        TVLog(@"Control socket: ls %@ failed: %@", path, error.localizedDescription);
+        return [@"ERR CannotRead\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
+    NSMutableString *out = [NSMutableString string];
+    for (NSString *name in names) {
+        NSString *full = [path stringByAppendingPathComponent:name];
+        BOOL isDir = NO;
+        [fm fileExistsAtPath:full isDirectory:&isDir];
+        NSDictionary *attrs = [fm attributesOfItemAtPath:full error:NULL];
+        unsigned long long size = isDir ? 0ull : [attrs fileSize];
+        [out appendFormat:@"%@\t%llu\t%d\n",
+                          [name stringByReplacingOccurrencesOfString:@"\t" withString:@" "],
+                          size, isDir ? 1 : 0];
+    }
+    return [out dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 /// `openurl <url>` — dùng để nhờ TrollStore cài .ipa qua apple-magnifier://
 static NSData *tvCtlOpenURL(NSString *urlString) {
     NSURL *url = [NSURL URLWithString:urlString];
@@ -4187,6 +4238,12 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlTSVForApps();
     } else if ([cmd hasPrefix:@"launch "]) {
         resp = tvCtlLaunchApp([[cmd substringFromIndex:7]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd hasPrefix:@"container "]) {
+        resp = tvCtlContainerForApp([[cmd substringFromIndex:10]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd hasPrefix:@"ls "]) {
+        resp = tvCtlListDirectory([[cmd substringFromIndex:3]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"put "]) {
         resp = tvCtlReceiveFile(cfd, [cmd substringFromIndex:4], pending, pendingLength);
