@@ -101,17 +101,43 @@ class OpenUrlTest(unittest.IsolatedAsyncioTestCase):
         await self.channel.open_url("https://example.com/a b")
         self.assertEqual(self.server.opened_urls, ["https://example.com/a b"])
 
-    async def test_install_ipa_uses_the_trollstore_scheme(self) -> None:
+    async def test_install_ipa_targets_trollstore_directly(self) -> None:
+        """Để hệ thống tự chọn app cho apple-magnifier:// thì nó bật camera.
+
+        TrollStore chiếm lại scheme của app Kính lúp, nên phải chỉ đích danh
+        bundle id của TrollStore.
+        """
+
         await self.channel.install_ipa("http://192.168.1.5:8080/App Store.ipa")
 
-        self.assertEqual(len(self.server.opened_urls), 1)
-        url = self.server.opened_urls[0]
+        self.assertFalse(self.server.opened_urls, "không được để hệ thống tự chọn app")
+        self.assertEqual(len(self.server.opened_in), 1)
+        bundle, url = self.server.opened_in[0]
+
+        self.assertEqual(bundle, "com.opa334.TrollStore")
         self.assertTrue(url.startswith("apple-magnifier://install?url="), url)
         # Dấu cách phải được mã hoá, nếu không TrollStore cắt URL giữa chừng.
         self.assertIn("%20", url)
         self.assertNotIn(" ", url)
         # Nhưng dấu hai chấm và gạch chéo của URL phải giữ nguyên.
         self.assertIn("http://192.168.1.5:8080/", url)
+
+    async def test_trollstore_is_found_by_asking_the_device(self) -> None:
+        self.assertEqual(await self.channel.find_trollstore(), "com.opa334.TrollStore")
+
+    async def test_without_trollstore_it_falls_back(self) -> None:
+        """Máy không có TrollStore thì vẫn thử, chứ không im lặng bỏ cuộc."""
+
+        self.server.apps.pop("com.opa334.TrollStore")
+
+        await self.channel.install_ipa("http://192.168.1.5:8080/a.ipa")
+
+        self.assertFalse(self.server.opened_in)
+        self.assertEqual(len(self.server.opened_urls), 1)
+
+    async def test_open_url_in_needs_both_arguments(self) -> None:
+        with self.assertRaises(ControlError):
+            await self.channel.open_url_in("com.opa334.TrollStore", "")
 
 
 class ContainerAndListTest(unittest.IsolatedAsyncioTestCase):

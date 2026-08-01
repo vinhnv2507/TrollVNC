@@ -24,6 +24,7 @@ class FakeControlServer:
             "com.golike.app": ("GoLike", "User", "2.1.0"),
             "io.grass.app": ("Grass", "User", "1.4"),
             "com.honeygain.app": ("Honeygain", "User", "3.0"),
+            "com.opa334.TrollStore": ("TrollStore", "User", "2.1.1"),
             "com.apple.Preferences": ("Cài đặt", "System", "1.0"),
         }
     )
@@ -32,6 +33,8 @@ class FakeControlServer:
     launched: List[str] = field(default_factory=list)
     terminated: List[str] = field(default_factory=list)
     opened_urls: List[str] = field(default_factory=list)
+    #: (bundle id, url) của các lệnh openurlin
+    opened_in: List[Tuple[str, str]] = field(default_factory=list)
     #: đường dẫn -> nội dung đã nhận
     received: Dict[str, bytes] = field(default_factory=dict)
     unauthorized: int = 0
@@ -139,6 +142,13 @@ class FakeControlServer:
                 if str(Path(p).parent).replace("\\", "/") == path.rstrip("/")
             )
             return rows.encode()
+
+        if cmd.startswith("openurlin "):
+            bundle, _, url = cmd[len("openurlin "):].strip().partition(" ")
+            if not url:
+                return b"ERR Usage openurlin <bundle id> <url>\n"
+            self.opened_in.append((bundle, url))
+            return b"OK\n"
 
         if cmd.startswith("openurl "):
             self.opened_urls.append(cmd[len("openurl "):].strip())

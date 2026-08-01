@@ -233,14 +233,43 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không mở được URL: {text.strip()}")
 
+    async def open_url_in(self, bundle_id: str, url: str) -> None:
+        """Mở URL bằng **đúng app đó**, bỏ qua bước hệ thống tự chọn."""
+
+        text = await self.command(f"openurlin {bundle_id} {url}")
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không mở được URL bằng {bundle_id}: {text.strip()}")
+
+    async def find_trollstore(self) -> Optional[str]:
+        """Bundle id của TrollStore trên chính máy đó.
+
+        Hỏi máy thay vì viết cứng: bản build khác nhau có thể khác bundle id.
+        """
+
+        for app in await self.list_apps():
+            if "trollstore" in app.bundle_id.lower() or \
+                    app.display_name.strip().lower() == "trollstore":
+                return app.bundle_id
+        return None
+
     async def install_ipa(self, url: str) -> None:
         """Nhờ TrollStore trên máy tải và cài .ipa từ URL.
 
         Tự cài bằng installd cần bộ quyền mà TrollVNC không có; TrollStore mới
         là thứ làm việc này đúng cách, nên ta chỉ đưa URL cho nó.
+
+        Phải chỉ đích danh TrollStore: `apple-magnifier://` là scheme TrollStore
+        chiếm lại của app Kính lúp, và khi để hệ thống tự chọn thì nó chọn app
+        Kính lúp gốc rồi bật camera.
         """
 
-        await self.open_url(f"apple-magnifier://install?url={quote(url, safe=':/?=&')}")
+        target = f"apple-magnifier://install?url={quote(url, safe=':/?=&')}"
+        bundle_id = await self.find_trollstore()
+        if bundle_id:
+            await self.open_url_in(bundle_id, target)
+            return
+        log.warning("%s: không thấy TrollStore, thử mở theo cách thường", self.host)
+        await self.open_url(target)
 
     async def client_count(self) -> int:
         """Số client VNC đang nối vào máy — lệnh có sẵn của TrollVNC gốc."""
