@@ -1,4 +1,4 @@
-# Control IOS
+﻿# Control IOS
 
 Quản lý và điều khiển nhiều iPhone chạy **TrollVNC** từ một cửa sổ duy nhất —
 thay cho việc mở hàng trăm cửa sổ TightVNC rời rạc. Thiết kế cho quy mô **250
@@ -24,6 +24,37 @@ D:\ControlIOS\.venv\Scripts\python.exe main.py
 Nên bạn **kết nối cả 250 máy cùng lúc**, nhưng chỉ những ô đang lọt trong
 khung nhìn mới thực sự tải hình. Cuộn tới đâu, tier đổi tới đó. Ảnh thu nhỏ
 được scale ngay trong luồng mạng nên UI không bao giờ ôm 250 khung hình gốc.
+
+### Chất lượng và tốc độ khung hình
+
+Nút **Chất lượng…** trên thanh công cụ. Đổi là **có hiệu lực ngay**, không phải
+nối lại máy nào và không phải khởi động lại phần mềm.
+
+| | Tốc độ | Độ nét |
+|---|---|---|
+| Máy đang mở (khung điều khiển) | `live_fps` | `live_long_edge` |
+| Ô trong lưới | `grid_fps` | `thumb_long_edge` |
+
+Ba mẫu sẵn: **Mượt** (8 fps / 640px), **Cân bằng** (12 fps / 900px), **Nét**
+(20 fps / độ phân giải gốc).
+
+**Vì sao độ nét lại ảnh hưởng tới độ mượt:** khung điều khiển chỉ rộng chừng
+500 px, nhưng trước đây phần mềm nhận nguyên khung 752×1338 rồi mới để Qt thu
+nhỏ — mỗi khung bị sao chép ở kích thước gốc rồi vứt đi hơn nửa số điểm ảnh.
+Đo trên máy này:
+
+| Giới hạn | Kích thước nhận về | Mỗi khung | CPU ở 12 fps |
+|---|---|---|---|
+| Gốc | 752×1338 · 3,02 MB | 7,00 ms | 84 ms/giây |
+| 900 px | 376×669 · 0,75 MB | 2,04 ms | **24 ms/giây** |
+| 640 px | 251×446 · 0,34 MB | 0,69 ms | **8 ms/giây** |
+
+Mặc định là 900 px. Toạ độ chuột vẫn tính theo khung hình **gốc** nên thu nhỏ
+không làm chạm sai chỗ.
+
+> Việc thu nhỏ dùng bước nguyên (lấy mẫu theo stride) cho nhanh, nên kết quả
+> có thể nhỏ hơn giới hạn khá nhiều: đặt 900 px trên màn 1338 thì bước là 2 và
+> ra 669 px. Đặt 700 hay 900 đều cho cùng kết quả.
 
 ### Giảm tải cho chính iPhone
 
@@ -430,7 +461,8 @@ launchapp com.zing.zalo
   "settings": {
     "grid_fps": 1.0,            // fps của ô thu nhỏ đang nhìn thấy
     "live_fps": 12.0,           // fps của máy đang mở full
-    "thumb_long_edge": 320,     // cạnh dài ảnh thu nhỏ, px
+    "thumb_long_edge": 320,     // cạnh dài ảnh thu nhỏ trong lưới
+    "live_long_edge": 900,      // cạnh dài khung máy đang mở; 0 = độ phân giải gốc     // cạnh dài ảnh thu nhỏ, px
     "connect_concurrency": 24,  // số máy bắt tay RFB cùng lúc
     "max_connected": 0,         // 0 = không giới hạn
     "reconnect_delay": 3.0,     // giây, tăng gấp đôi tới reconnect_max
@@ -499,7 +531,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-196 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+210 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -537,7 +569,10 @@ chạy 30 lượt đều nằm trong khoảng và không ra cùng một số · 
 bị ngẫu nhiên hoá · máy ngoài khung nhìn tự ngắt kết nối còn máy đang nhìn thì
 không · cuộn tới thì máy tỉnh lại và mở kết nối mới · chụp ảnh và kịch bản đánh
 thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_after` bằng 0 thì
-giữ nguyên hành vi cũ.
+giữ nguyên hành vi cũ · tier LIVE thu nhỏ đúng theo giới hạn (bước chia làm
+tròn **lên**, nếu làm tròn xuống thì giới hạn bị bỏ qua trong im lặng) · đặt 0
+thì giữ độ phân giải gốc · toạ độ chuột vẫn theo khung hình gốc sau khi thu
+nhỏ · huỷ hộp thoại chất lượng thì không đổi gì.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 

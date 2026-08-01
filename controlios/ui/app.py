@@ -29,6 +29,7 @@ from ..vnc.session import Frame, State, Tier
 from .apps_panel import AppsPanel
 from .detail import DetailView
 from .grid import DeviceGrid
+from .quality import QualityDialog
 
 log = logging.getLogger(__name__)
 
@@ -484,6 +485,11 @@ class MainWindow(QMainWindow):
         self.broadcast_box.toggled.connect(self._set_broadcast)
         bar.addWidget(self.broadcast_box)
 
+        quality = QAction("Chất lượng…", self)
+        quality.setToolTip("Tốc độ khung hình và độ nét — áp dụng ngay")
+        quality.triggered.connect(self._open_quality_dialog)
+        bar.addAction(quality)
+
         bar.addSeparator()
         send_text = QAction("Gõ chữ…", self)
         send_text.setToolTip("Gõ một đoạn chữ vào các máy đang chọn")
@@ -673,6 +679,20 @@ class MainWindow(QMainWindow):
             self.recording_id = None
             self.record_action.setText("Ghi hình")
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
+
+    def _open_quality_dialog(self) -> None:
+        dialog = QualityDialog(self.registry.settings, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        dialog.apply()
+        # Phiên đọc Settings ở mỗi vòng nhịp nên đổi là ăn ngay, khỏi nối lại.
+        self.registry.save(self.registry_path)
+        settings = self.registry.settings
+        self.statusBar().showMessage(
+            f"Đã áp dụng: {settings.live_fps:g} hình/giây · "
+            f"{'gốc' if not settings.live_long_edge else str(settings.live_long_edge) + 'px'}",
+            6000,
+        )
 
     def _send_media_key(self, name: str, repeat: int) -> None:
         """Độ sáng/âm lượng — đi qua VNC nên máy chưa vá cũng dùng được."""

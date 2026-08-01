@@ -49,6 +49,12 @@ class Settings:
     # inside the network thread so the UI never holds 250 full-size images.
     thumb_long_edge: int = 320
 
+    # Cạnh dài của khung hình ở tier LIVE. Khung điều khiển chỉ rộng chừng 500
+    # px, nên nhận nguyên 752×1338 rồi để Qt thu nhỏ là sao chép thừa gấp đôi
+    # số điểm ảnh — đó là nguyên nhân chính gây giật. 0 = giữ nguyên độ phân
+    # giải gốc (nét nhất, nặng nhất).
+    live_long_edge: int = 900
+
     # How many sessions may be doing their TCP+RFB handshake at once. Opening
     # 250 sockets simultaneously reliably trips iOS-side accept backlogs.
     connect_concurrency: int = 24

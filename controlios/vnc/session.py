@@ -73,10 +73,16 @@ StatusSink = Callable[[str, State, str], None]   # key, state, detail
 
 
 def _downscale_rgb(rgba: np.ndarray, long_edge: int) -> tuple[np.ndarray, int, int]:
-    """Nearest-neighbour downscale via strides — cheap enough to run 250x."""
+    """Nearest-neighbour downscale via strides — cheap enough to run 250x.
+
+    Bước phải làm tròn **lên**: 1338/900 = 1,49 mà làm tròn xuống thành 1 thì
+    hoá ra không thu nhỏ gì cả, và giới hạn bị bỏ qua trong im lặng. Đổi lại,
+    vì bước là số nguyên nên kết quả có thể nhỏ hơn giới hạn khá nhiều.
+    """
 
     height, width = rgba.shape[:2]
-    step = max(1, int(max(width, height) / max(1, long_edge)))
+    limit = max(1, long_edge)
+    step = max(1, -(-max(width, height) // limit))      # chia làm tròn lên
     small = rgba[::step, ::step, :3]
     return np.ascontiguousarray(small), small.shape[1], small.shape[0]
 
@@ -429,8 +435,12 @@ class VncSession:
             return
         rgba = video.as_rgba()
         if self.tier is Tier.LIVE:
-            rgb = np.ascontiguousarray(rgba[:, :, :3])
-            width, height = video.width, video.height
+            limit = self.settings.live_long_edge
+            if limit and max(video.width, video.height) > limit:
+                rgb, width, height = _downscale_rgb(rgba, limit)
+            else:
+                rgb = np.ascontiguousarray(rgba[:, :, :3])
+                width, height = video.width, video.height
         else:
             rgb, width, height = _downscale_rgb(rgba, self.settings.thumb_long_edge)
         try:
