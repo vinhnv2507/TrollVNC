@@ -469,7 +469,8 @@ class DevicePool:
         session = self._sessions.get(key)
         host = session.spec.host if session else key.partition(":")[0]
         return SshChannel(host, self.settings.ssh_port, self.settings.ssh_user,
-                          self.settings.ssh_password)
+                          self.settings.ssh_password,
+                          key_path=self.settings.ssh_key_path)
 
     def run_ssh(self, keys: Iterable[str], command: str, on_result=None,
                 on_done=None) -> None:

@@ -21,6 +21,8 @@ _HOST_KEY = asyncssh.generate_private_key("ssh-rsa", key_size=2048)
 class FakeSshServer:
     username: str = "root"
     password: str = "alpine"
+    #: các khoá công khai (dạng OpenSSH) được chấp nhận cho đăng nhập bằng khoá
+    authorized_keys: List[str] = field(default_factory=list)
 
     #: lệnh -> (mã trả về, stdout, stderr). Lệnh không khai thì trả về mã 127.
     responses: Dict[str, tuple] = field(default_factory=dict)
@@ -48,6 +50,18 @@ class FakeSshServer:
 
             def validate_password(self, username: str, password: str) -> bool:
                 return username == outer.username and password == outer.password
+
+            def public_key_auth_supported(self) -> bool:
+                return bool(outer.authorized_keys)
+
+            def validate_public_key(self, username, key) -> bool:
+                for authorized in outer.authorized_keys:
+                    try:
+                        if key == asyncssh.import_public_key(authorized):
+                            return True
+                    except (ValueError, asyncssh.KeyImportError):
+                        continue
+                return False
 
         async def handle(process: asyncssh.SSHServerProcess) -> None:
             command = process.command or ""

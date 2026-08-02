@@ -82,6 +82,10 @@ class Settings:
     ssh_port: int = 22
     ssh_user: str = "root"
     ssh_password: str = ""
+    # Khoá riêng để đăng nhập SSH bằng khoá thay vì mật khẩu. Đây là cách thoát
+    # bế tắc "tài khoản bị khoá, chưa có mật khẩu" trên Dopamine: cài khoá công
+    # khai vào máy qua control socket (chạy bằng root), rồi login bằng khoá.
+    ssh_key_path: str = ""
 
     # Máy nằm ngoài khung nhìn quá bấy nhiêu giây thì ngắt hẳn kết nối, để
     # TrollVNC trên máy dừng chụp hình và trả CPU lại cho app đang chạy.

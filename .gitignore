@@ -9,3 +9,5 @@ config/_preview_devices.json
 *.log
 _upstream/
 _fork/
+config/id_controlios
+config/id_controlios.pub

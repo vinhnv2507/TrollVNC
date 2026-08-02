@@ -228,6 +228,30 @@ class ControlChannel:
             entries.append((fields[0], int(fields[1] or 0), fields[2] == "1"))
         return entries
 
+    async def install_ssh_key(self, public_key: str, user: str = "root") -> str:
+        """Cài khoá công khai để đăng nhập SSH bằng khoá, không cần mật khẩu.
+
+        Control socket chạy bằng **root**, nên nó ghi được vào
+        `/var/root/.ssh/authorized_keys`. File đó do root sở hữu — đúng thứ sshd
+        cần cho việc đăng nhập bằng chính tài khoản root. Đây là đường thoát khi
+        tài khoản bị khoá và không đặt được mật khẩu (thường gặp trên Dopamine).
+
+        Trả về đường dẫn authorized_keys trên máy.
+        """
+
+        home = "/var/root" if user == "root" else f"/var/mobile"
+        remote = f"{home}/.ssh/authorized_keys"
+
+        data = public_key.strip() + "\n"
+        import tempfile
+        tmp = Path(tempfile.gettempdir()) / "controlios_authkey.pub"
+        tmp.write_text(data, encoding="ascii")
+        try:
+            await self.put_file(tmp, remote)
+        finally:
+            tmp.unlink(missing_ok=True)
+        return remote
+
     async def open_url(self, url: str) -> None:
         text = await self.command(f"openurl {url}")
         if not text.strip().startswith("OK"):

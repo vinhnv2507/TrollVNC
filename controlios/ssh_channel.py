@@ -73,20 +73,24 @@ class SshChannel:
     port: int = DEFAULT_SSH_PORT
     username: str = DEFAULT_SSH_USER
     password: str = ""
+    key_path: str = ""            # đăng nhập bằng khoá riêng, ưu tiên hơn mật khẩu
     timeout: float = 12.0
 
     def _connect(self):
         import asyncssh
 
-        return asyncssh.connect(
-            self.host, self.port,
+        kwargs = dict(
             username=self.username,
-            password=self.password or None,
             # Máy trong mạng nội bộ, và khoá máy đổi mỗi lần cài lại jailbreak
             # nên kiểm tra known_hosts chỉ gây phiền chứ không thêm an toàn.
             known_hosts=None,
             connect_timeout=self.timeout,
         )
+        if self.key_path:
+            kwargs["client_keys"] = [self.key_path]
+        if self.password:
+            kwargs["password"] = self.password
+        return asyncssh.connect(self.host, self.port, **kwargs)
 
     async def _open(self):
         import asyncssh
