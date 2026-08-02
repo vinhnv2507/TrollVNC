@@ -363,6 +363,49 @@ Báo *"No connection could be made"* ở cổng 46752 nghĩa là máy đó chưa
 Kênh này chỉ mở một socket ngắn cho mỗi lệnh, không giữ kết nối, nên không ảnh
 hưởng gì tới luồng hình VNC.
 
+## SSH — máy đã jailbreak
+
+Kênh thứ ba, và là kênh mạnh nhất. Nó **chấm dứt vòng lặp** "vá TrollVNC →
+build trên GitHub → cài lại từng máy": mọi tính năng mới sau này chỉ còn là một
+câu lệnh shell.
+
+Ba kênh bổ nhau chứ không thay thế nhau:
+
+| Kênh | Làm được gì | Điều kiện |
+|---|---|---|
+| **VNC** | hình ảnh, chuột/phím | mọi máy |
+| **Control socket** | app, truyền file, mở URL | TrollVNC đã vá |
+| **SSH** | lệnh tuỳ ý, SFTP | máy đã jailbreak |
+
+Nút **SSH…** mở bảng chạy lệnh: gõ lệnh, chạy song song trên các máy đang chọn,
+xem kết quả **từng máy** trong bảng — mã trả về và output cạnh nhau để so sánh.
+
+Có sẵn vài lệnh mẫu trong danh sách thả xuống. Đây cũng là công cụ để **dò xem
+lệnh nào thật sự chạy được trên iOS**: máy jailbreak không có đủ bộ lệnh như
+Linux, và mỗi bản jailbreak lại khác nhau — chạy thử rồi đọc kết quả, đừng đoán.
+
+```json
+{
+  "settings": {
+    "ssh_port": 22,
+    "ssh_user": "root",
+    "ssh_password": "…"
+  }
+}
+```
+
+> Mật khẩu mặc định của OpenSSH trên máy jailbreak là `alpine`. **Đổi ngay sau
+> khi cài** — ai trong mạng LAN cũng biết mật khẩu đó, và SSH root là quyền cao
+> nhất trên máy.
+
+Máy chưa jailbreak báo lỗi rõ ràng ("máy chưa jailbreak, chưa cài OpenSSH, hoặc
+đã khởi động lại và mất jailbreak") chứ không treo, và phân biệt được với lỗi
+sai mật khẩu.
+
+`pool.ssh_available()` trả về danh sách máy còn SSH — tức **máy nào còn jailbreak
+sau lần khởi động lại gần nhất**. Dopamine là semi-untethered nên đây là thông
+tin phải theo dõi thường xuyên.
+
 ## Chụp ảnh, ghi hình, kịch bản
 
 Ba nút này làm việc trên **các máy đang chọn** ở lưới (không chọn gì thì lấy máy
@@ -583,7 +626,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-250 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+298 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -624,7 +667,7 @@ thức được máy đang ngủ thay vì bỏ qua · đặt `idle_disconnect_af
 giữ nguyên hành vi cũ · tier LIVE thu nhỏ đúng theo giới hạn (bước chia làm
 tròn **lên**, nếu làm tròn xuống thì giới hạn bị bỏ qua trong im lặng) · đặt 0
 thì giữ độ phân giải gốc · toạ độ chuột vẫn theo khung hình gốc sau khi thu
-nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh · bấm vào ô nhỏ ra đúng toạ độ giữa màn hình máy dù ô chỉ rộng 150 px · Ctrl+bấm vẫn chọn máy khi đang bật điều khiển trên lưới · bấm vào dải nhãn dưới ô thì không gửi gì · ô vừa thao tác được nâng nhịp rồi tự trả về · thao tác hàng loạt tổng kết lại số máy được và số máy hỏng, gộp theo lý do · nhãn số máy trong bảng Ứng dụng cập nhật theo lựa chọn chứ không đứng yên.
+nhỏ · huỷ hộp thoại chất lượng thì không đổi gì · ảnh đã thu phóng được dùng lại giữa các lần vẽ, chỉ tính lại khi có khung mới hoặc đổi cỡ · rê chuột không làm thu phóng lại · khung LIVE đi đường 4 kênh còn ảnh thu nhỏ giữ 3 kênh · điểm ảnh đỏ dạng BGRA đọc ra vẫn là đỏ chứ không bị đảo thành xanh · bấm vào ô nhỏ ra đúng toạ độ giữa màn hình máy dù ô chỉ rộng 150 px · Ctrl+bấm vẫn chọn máy khi đang bật điều khiển trên lưới · bấm vào dải nhãn dưới ô thì không gửi gì · ô vừa thao tác được nâng nhịp rồi tự trả về · thao tác hàng loạt tổng kết lại số máy được và số máy hỏng, gộp theo lý do · nhãn số máy trong bảng Ứng dụng cập nhật theo lựa chọn chứ không đứng yên · SSH chạy với server SSH thật dựng trong tiến trình, không giả lập nửa vời: lệnh chạy được, mã trả về giữ nguyên, nhiều lệnh dùng chung một kết nối, tải lên rồi tải về khớp từng byte · phân biệt được sai mật khẩu với máy chưa jailbreak · biết máy nào còn jailbreak sau reboot.
 
 Soi bố cục bằng ảnh (không cần iPhone):
 

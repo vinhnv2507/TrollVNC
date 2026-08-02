@@ -461,6 +461,67 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
+    # --------------------------------------------------------------- SSH
+
+    def _ssh(self, key: str):
+        from ..ssh_channel import SshChannel
+
+        session = self._sessions.get(key)
+        host = session.spec.host if session else key.partition(":")[0]
+        return SshChannel(host, self.settings.ssh_port, self.settings.ssh_user,
+                          self.settings.ssh_password)
+
+    def run_ssh(self, keys: Iterable[str], command: str, on_result=None,
+                on_done=None) -> None:
+        """Chạy một lệnh shell trên nhiều máy đã jailbreak.
+
+        on_result(key, CommandResult|None, error|None) cho từng máy,
+        on_done(mô tả, số máy thành công, danh sách lỗi) khi xong hết.
+        """
+
+        key_list = list(keys)
+        failures: List[tuple] = []
+        succeeded: List[str] = []
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    result = await self._ssh(key).run(command)
+                    if result.ok:
+                        succeeded.append(key)
+                    else:
+                        failures.append((key, f"mã {result.exit_code}: {result.output}"))
+                    if on_result:
+                        on_result(key, result, None)
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_result:
+                        on_result(key, None, str(exc))
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+            if on_done:
+                on_done(command, len(succeeded), failures)
+
+        self._call_coro(run())
+
+    def ssh_available(self, keys: Iterable[str], on_done=None) -> None:
+        """Máy nào đang có SSH — tức máy nào còn jailbreak sau lần reboot cuối."""
+
+        key_list = list(keys)
+
+        async def run() -> None:
+            async def one(key: str) -> tuple:
+                return key, await self._ssh(key).is_available()
+
+            pairs = await asyncio.gather(*(one(k) for k in key_list),
+                                         return_exceptions=True)
+            alive = [k for item in pairs if isinstance(item, tuple)
+                     for k, ok in [item] if ok]
+            if on_done:
+                on_done(alive, [k for k in key_list if k not in alive])
+
+        self._call_coro(run())
+
     def push_file(self, keys: Iterable[str], local: Path | str, remote: str,
                   on_event=None) -> None:
         """Đẩy một file lên nhiều máy."""

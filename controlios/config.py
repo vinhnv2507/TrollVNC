@@ -76,6 +76,13 @@ class Settings:
     control_port: int = 46752
     control_token: str = ""
 
+    # SSH tới máy đã jailbreak. Mật khẩu mặc định của OpenSSH trên máy
+    # jailbreak là "alpine" — đổi ngay sau khi cài, vì ai trong mạng LAN cũng
+    # biết mật khẩu đó.
+    ssh_port: int = 22
+    ssh_user: str = "root"
+    ssh_password: str = ""
+
     # Máy nằm ngoài khung nhìn quá bấy nhiêu giây thì ngắt hẳn kết nối, để
     # TrollVNC trên máy dừng chụp hình và trả CPU lại cho app đang chạy.
     # 0 = không bao giờ ngắt (giữ nguyên hành vi cũ).

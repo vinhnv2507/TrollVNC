@@ -30,6 +30,7 @@ from .apps_panel import AppsPanel
 from .detail import DetailView
 from .grid import DeviceGrid
 from .quality import QualityDialog
+from .ssh_console import SshConsoleDialog
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,8 @@ class Bridge(QObject):
     script_done = Signal()
     apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
+    ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
+    ssh_done = Signal(int, object)
 
 
 class ScanWorker(QThread):
@@ -366,6 +369,7 @@ class MainWindow(QMainWindow):
         self.page = 0
         self.broadcast = False
         self.script_dialog: ScriptDialog | None = None
+        self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
 
         self.bridge = Bridge()
@@ -424,6 +428,8 @@ class MainWindow(QMainWindow):
         self.bridge.script_done.connect(self._on_script_done)
         self.bridge.apps_loaded.connect(self._apply_apps)
         self.bridge.bulk_done.connect(self._on_bulk_done)
+        self.bridge.ssh_result.connect(self._on_ssh_result)
+        self.bridge.ssh_done.connect(self._on_ssh_done)
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
@@ -552,6 +558,11 @@ class MainWindow(QMainWindow):
             "và control_token trong cấu hình"
         )
         bar.addAction(self.apps_action)
+
+        ssh_action = QAction("SSH…", self)
+        ssh_action.setToolTip("Chạy lệnh shell trên các máy đã jailbreak")
+        ssh_action.triggered.connect(self._open_ssh_console)
+        bar.addAction(ssh_action)
 
         script_action = QAction("Kịch bản…", self)
         script_action.triggered.connect(self._open_script_dialog)
@@ -901,6 +912,38 @@ class MainWindow(QMainWindow):
 
         self.apps_panel.set_note(f"{describe}: xong {ok}/{total} máy — {detail}", error=True)
         self.statusBar().showMessage(f"{describe}: {ok}/{total} máy · {detail}", 10000)
+
+    def _open_ssh_console(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        if self.ssh_console is None:
+            self.ssh_console = SshConsoleDialog(len(targets), self)
+            self.ssh_console.run_requested.connect(self._run_ssh)
+        self.ssh_console.set_targets(len(targets))
+        self.ssh_console.show()
+        self.ssh_console.raise_()
+
+    def _run_ssh(self, command: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            return
+        self.pool.run_ssh(
+            targets, command,
+            on_result=lambda k, r, e: self.bridge.ssh_result.emit(
+                k, -1 if r is None else r.exit_code, e or (r.output if r else "")
+            ),
+            on_done=lambda d, ok, fails: self.bridge.ssh_done.emit(ok, fails),
+        )
+
+    def _on_ssh_result(self, key: str, code: int, output: str) -> None:
+        if self.ssh_console:
+            self.ssh_console.add_result(key, code, output)
+
+    def _on_ssh_done(self, ok: int, failures) -> None:
+        if self.ssh_console:
+            self.ssh_console.finish(ok, failures)
 
     def _open_script_dialog(self) -> None:
         if self.script_dialog is None:

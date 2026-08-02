@@ -5,3 +5,7 @@ PySide6-Essentials>=6.6
 # Tìm máy qua Bonjour/mDNS (_rfb._tcp). Không có thì phần Bonjour tự tắt,
 # quét theo CIDR/ARP vẫn chạy.
 zeroconf>=0.130
+
+# SSH toi may da jailbreak (muc 2). Thieu thi phan SSH khong dung duoc,
+# cac kenh khac van chay.
+asyncssh>=2.14
