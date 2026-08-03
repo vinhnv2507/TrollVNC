@@ -44,6 +44,8 @@
 #import <unistd.h>
 #import <vector>
 
+#import <Photos/Photos.h>
+
 #import "BulletinManager.h"
 #import "ClipboardManager.h"
 #import "Control.h"
@@ -3973,6 +3975,116 @@ static NSData *tvCtlTerminateApp(NSString *bundleId) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
+#pragma mark - Clipboard
+
+// `clipset <size>` — đọc đúng `size` byte payload (đã gồm phần bị vòng đọc dòng
+// lệnh nuốt trước) rồi đặt làm clipboard. Tái dùng ClipboardManager sẵn có —
+// chính lớp mà đường clipboard VNC dùng — thay vì gọi thẳng UIPasteboard, cho
+// nhất quán và tránh vòng lặp echo (setStringFromRemote bỏ qua callback + thông
+// báo hệ thống một lần).
+static NSData *tvCtlSetClipboard(int cfd, NSString *spec, const uint8_t *pending,
+                                 size_t pendingLength) {
+    long long size = [[spec stringByTrimmingCharactersInSet:
+                          [NSCharacterSet whitespaceAndNewlineCharacterSet]] longLongValue];
+    if (size < 0 || size > 16 * 1024 * 1024) // 16 MiB dư sức cho chữ; lớn hơn là gõ nhầm
+        return [@"ERR BadSize\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSMutableData *buffer = [NSMutableData dataWithCapacity:(NSUInteger)size];
+
+    // Phần đã bị nuốt trước phải ghi vào trước tiên.
+    if (pendingLength > 0) {
+        size_t take = (size_t)MIN((uint64_t)pendingLength, (uint64_t)size);
+        [buffer appendBytes:pending length:take];
+    }
+
+    struct timeval tv;
+    tv.tv_sec = 15;
+    tv.tv_usec = 0;
+    setsockopt(cfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+
+    uint8_t chunk[65536];
+    while ((long long)buffer.length < size) {
+        size_t want = (size_t)MIN((uint64_t)sizeof(chunk), (uint64_t)(size - buffer.length));
+        ssize_t n = recv(cfd, chunk, want, 0);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        if (n == 0)
+            break;
+        [buffer appendBytes:chunk length:(NSUInteger)n];
+    }
+
+    if ((long long)buffer.length != size)
+        return [@"ERR Incomplete\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSString *text = [[NSString alloc] initWithData:buffer encoding:NSUTF8StringEncoding];
+    if (!text)
+        text = @"";
+    [[ClipboardManager sharedManager] setStringFromRemote:text];
+
+    TVLog(@"Control socket: clipset (%lld bytes)", size);
+    NSString *ok = [NSString stringWithFormat:@"OK %lld\n", size];
+    return [ok dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+// `clipget` — trả về `OK <n>\n` rồi đúng n byte nội dung clipboard (UTF-8).
+static NSData *tvCtlGetClipboard(void) {
+    NSString *text = [[ClipboardManager sharedManager] currentString] ?: @"";
+    NSData *body = [text dataUsingEncoding:NSUTF8StringEncoding] ?: [NSData data];
+    NSMutableData *resp = [NSMutableData data];
+    NSString *header = [NSString stringWithFormat:@"OK %lu\n", (unsigned long)body.length];
+    [resp appendData:[header dataUsingEncoding:NSUTF8StringEncoding]];
+    [resp appendData:body];
+    return resp;
+}
+
+#pragma mark - Photo library
+
+// `savephoto <path>` — nạp một file ảnh đã có trên máy vào Thư viện Ảnh. Chép
+// vào thư mục thường không đủ: iOS quản ảnh bằng CSDL riêng, phải qua
+// PHPhotoLibrary thì ảnh mới dùng được trong app khác.
+static NSData *tvCtlSavePhoto(NSString *path) {
+    path = [path stringByTrimmingCharactersInSet:
+               [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (path.length == 0 || ![path hasPrefix:@"/"] ||
+        [path rangeOfString:@".."].location != NSNotFound)
+        return [@"ERR BadPath\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path])
+        return [@"ERR NotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSURL *fileURL = [NSURL fileURLWithPath:path];
+    dispatch_semaphore_t done = dispatch_semaphore_create(0);
+    __block BOOL ok = NO;
+    __block NSError *err = nil;
+
+    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+        [PHAssetCreationRequest creationRequestForAssetFromImageAtFileURL:fileURL];
+    } completionHandler:^(BOOL success, NSError *error) {
+        ok = success;
+        err = error;
+        dispatch_semaphore_signal(done);
+    }];
+
+    // Chờ nạp xong (giới hạn 30s) để trả lời đúng trạng thái cho PC.
+    if (dispatch_semaphore_wait(done,
+            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(30 * NSEC_PER_SEC))) != 0)
+        return [@"ERR Timeout\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    if (ok) {
+        TVLog(@"Control socket: savephoto %@ -> OK", path);
+        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
+    // TCC từ chối thường rơi vào đây. Xem docs/trollvnc-patch-3.md.
+    TVLog(@"Control socket: savephoto %@ -> FAIL %@", path, err);
+    NSString *msg = err.localizedDescription.length
+        ? [NSString stringWithFormat:@"ERR %@\n", err.localizedDescription]
+        : @"ERR Denied\n";
+    return [msg dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - File transfer
 
 // Giới hạn cho chắc: file lớn hơn mức này gần như luôn là gõ nhầm.
@@ -4277,6 +4389,12 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"put "]) {
         resp = tvCtlReceiveFile(cfd, [cmd substringFromIndex:4], pending, pendingLength);
+    } else if ([cmd hasPrefix:@"clipset "]) {
+        resp = tvCtlSetClipboard(cfd, [cmd substringFromIndex:8], pending, pendingLength);
+    } else if ([cmd isEqualToString:@"clipget"]) {
+        resp = tvCtlGetClipboard();
+    } else if ([cmd hasPrefix:@"savephoto "]) {
+        resp = tvCtlSavePhoto([cmd substringFromIndex:10]);
     } else if ([cmd hasPrefix:@"openurlin "]) {
         NSString *rest = [cmd substringFromIndex:10];
         NSRange space = [rest rangeOfString:@" "];
