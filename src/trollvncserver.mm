@@ -39,7 +39,6 @@
 #import <rfb/rfb.h>
 #import <signal.h>
 #import <string>
-#import <sys/reboot.h>
 #import <sys/socket.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
@@ -4161,8 +4160,12 @@ static NSData *tvCtlRespring(void) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
-// `reboot` — khởi động lại máy. Daemon chạy root nên gọi reboot() trực tiếp.
-// Trả OK cho PC trước, rồi reboot sau 1 giây để câu trả lời kịp bay đi.
+// SDK iOS ẩn/đánh dấu reboot() là unavailable. Khai báo thẳng để gọi symbol
+// trong libSystem — daemon chạy root nên có quyền. RB_AUTOBOOT = 0.
+extern "C" int reboot(int howto);
+
+// `reboot` — khởi động lại máy. Trả OK cho PC trước, rồi reboot sau 1 giây để
+// câu trả lời kịp bay đi.
 // CẢNH BÁO: máy semi-untethered (Dopamine) sẽ MẤT jailbreak tới khi chạy lại app
 // jailbreak. TrollVNC/VNC vẫn tự chạy lại sau boot (cài qua TrollStore).
 static NSData *tvCtlReboot(void) {
@@ -4170,7 +4173,7 @@ static NSData *tvCtlReboot(void) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
                    dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         sync();
-        reboot(RB_AUTOBOOT);
+        reboot(0); // RB_AUTOBOOT
     });
     return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
