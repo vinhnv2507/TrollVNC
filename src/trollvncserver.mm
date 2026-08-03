@@ -39,6 +39,7 @@
 #import <rfb/rfb.h>
 #import <signal.h>
 #import <string>
+#import <sys/reboot.h>
 #import <sys/socket.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
@@ -4136,6 +4137,44 @@ static NSData *tvCtlSavePhoto(NSString *path) {
     return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+#pragma mark - Power
+
+// `respring` — kill SpringBoard; backboardd tự bật lại. Gỡ giao diện treo mà
+// KHÔNG reboot, nên giữ nguyên jailbreak trên máy semi-untethered (Dopamine).
+static NSData *tvCtlRespring(void) {
+    pid_t pid = 0;
+    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                     "SpringBoardServices",
+                     RTLD_LAZY);
+    if (h) {
+        int (*sbsPid)(CFStringRef, pid_t *) =
+            (int (*)(CFStringRef, pid_t *))dlsym(h, "SBSProcessIDForDisplayIdentifier");
+        if (sbsPid)
+            sbsPid((__bridge CFStringRef)@"com.apple.springboard", &pid);
+    }
+    if (pid <= 0)
+        return [@"ERR NoSpringBoard\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    BOOL ok = (kill(pid, SIGKILL) == 0);
+    TVLog(@"Control socket: respring (SpringBoard pid %d) -> %@", pid, ok ? @"OK" : @"FAIL");
+    const char *raw = ok ? "OK\n" : "ERR RespringFailed\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
+// `reboot` — khởi động lại máy. Daemon chạy root nên gọi reboot() trực tiếp.
+// Trả OK cho PC trước, rồi reboot sau 1 giây để câu trả lời kịp bay đi.
+// CẢNH BÁO: máy semi-untethered (Dopamine) sẽ MẤT jailbreak tới khi chạy lại app
+// jailbreak. TrollVNC/VNC vẫn tự chạy lại sau boot (cài qua TrollStore).
+static NSData *tvCtlReboot(void) {
+    TVLog(@"Control socket: reboot requested");
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
+                   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+        sync();
+        reboot(RB_AUTOBOOT);
+    });
+    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - File transfer
 
 // Giới hạn cho chắc: file lớn hơn mức này gần như luôn là gõ nhầm.
@@ -4446,6 +4485,10 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlGetClipboard();
     } else if ([cmd hasPrefix:@"savephoto "]) {
         resp = tvCtlSavePhoto([cmd substringFromIndex:10]);
+    } else if ([cmd isEqualToString:@"respring"]) {
+        resp = tvCtlRespring();
+    } else if ([cmd isEqualToString:@"reboot"]) {
+        resp = tvCtlReboot();
     } else if ([cmd hasPrefix:@"openurlin "]) {
         NSString *rest = [cmd substringFromIndex:10];
         NSRange space = [rest rangeOfString:@" "];
