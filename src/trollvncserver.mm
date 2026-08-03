@@ -4173,11 +4173,24 @@ static NSData *tvCtlReboot(void) {
     TVLog(@"Control socket: reboot requested");
     sync();
 
+    // reboot(2) BSD hay bị EPERM trên iOS dù root (AMFI chặn).
     int rc = reboot(0); // RB_AUTOBOOT
     int e = errno;
-    TVLog(@"Control socket: reboot() -> rc=%d errno=%d", rc, e);
-    NSString *msg = [NSString stringWithFormat:@"ERR RebootFailed rc=%d errno=%d\n",
-                                               rc, e];
+
+    // reboot3() — đường Apple hiện đại, thường qua được khi reboot() EPERM.
+    // Resolve bằng dlsym để KHÔNG lỗi link nếu symbol vắng.
+    int rc3 = -2, e3 = 0;
+    int (*rb3)(uint64_t) = (int (*)(uint64_t))dlsym(RTLD_DEFAULT, "reboot3");
+    if (rb3) {
+        errno = 0;
+        rc3 = rb3(0); // RB_AUTOBOOT
+        e3 = errno;
+    }
+
+    TVLog(@"Control socket: reboot rc=%d(errno=%d) reboot3=%d(errno=%d)", rc, e, rc3, e3);
+    NSString *msg = [NSString stringWithFormat:
+                     @"ERR RebootFailed reboot=%d(errno=%d) reboot3=%d(errno=%d)\n",
+                     rc, e, rc3, e3];
     return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
