@@ -4042,9 +4042,13 @@ static NSData *tvCtlGetClipboard(void) {
 
 #pragma mark - Photo library
 
-// `savephoto <path>` — nạp một file ảnh đã có trên máy vào Thư viện Ảnh. Chép
-// vào thư mục thường không đủ: iOS quản ảnh bằng CSDL riêng, phải qua
+// `savephoto <path>` — nạp một file ảnh/video đã có trên máy vào Thư viện Ảnh.
+// Chép vào thư mục thường không đủ: iOS quản ảnh bằng CSDL riêng, phải qua
 // PHPhotoLibrary thì ảnh mới dùng được trong app khác.
+//
+// Quan trọng: phải **xin quyền trước**. Gọi thẳng performChanges khi chưa được
+// cấp quyền có thể làm framework Photos abort (đóng socket, không trả lời) thay
+// vì báo lỗi. Xin quyền trước biến crash thành "ERR Denied" đọc được.
 static NSData *tvCtlSavePhoto(NSString *path) {
     path = [path stringByTrimmingCharactersInSet:
                [NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -4055,17 +4059,56 @@ static NSData *tvCtlSavePhoto(NSString *path) {
         return [@"ERR NotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     NSURL *fileURL = [NSURL fileURLWithPath:path];
+    NSString *ext = path.pathExtension.lowercaseString;
+    BOOL isVideo = [@[ @"mov", @"mp4", @"m4v" ] containsObject:ext];
+
+    // 1) Xin quyền (thêm-only) và CHỜ kết quả trước khi đụng tới thư viện.
+    __block PHAuthorizationStatus status = PHAuthorizationStatusNotDetermined;
+    dispatch_semaphore_t authDone = dispatch_semaphore_create(0);
+    if (@available(iOS 14, *)) {
+        [PHPhotoLibrary requestAuthorizationForAccessLevel:PHAccessLevelAddOnly
+                                                   handler:^(PHAuthorizationStatus s) {
+            status = s;
+            dispatch_semaphore_signal(authDone);
+        }];
+    } else {
+        [PHPhotoLibrary requestAuthorization:^(PHAuthorizationStatus s) {
+            status = s;
+            dispatch_semaphore_signal(authDone);
+        }];
+    }
+    dispatch_semaphore_wait(authDone,
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(10 * NSEC_PER_SEC)));
+
+    if (status != PHAuthorizationStatusAuthorized) {
+        TVLog(@"Control socket: savephoto %@ -> chưa được cấp quyền (status=%ld)",
+              path, (long)status);
+        NSString *msg = [NSString stringWithFormat:@"ERR Denied status=%ld\n",
+                                                   (long)status];
+        return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
+    // 2) Nạp asset. Bọc @try để một NSException của Photos không giết daemon.
     dispatch_semaphore_t done = dispatch_semaphore_create(0);
     __block BOOL ok = NO;
     __block NSError *err = nil;
-
-    [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-        [PHAssetCreationRequest creationRequestForAssetFromImageAtFileURL:fileURL];
-    } completionHandler:^(BOOL success, NSError *error) {
-        ok = success;
-        err = error;
-        dispatch_semaphore_signal(done);
-    }];
+    @try {
+        [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
+            if (isVideo)
+                [PHAssetCreationRequest creationRequestForAssetFromVideoAtFileURL:fileURL];
+            else
+                [PHAssetCreationRequest creationRequestForAssetFromImageAtFileURL:fileURL];
+        } completionHandler:^(BOOL success, NSError *error) {
+            ok = success;
+            err = error;
+            dispatch_semaphore_signal(done);
+        }];
+    } @catch (NSException *ex) {
+        TVLog(@"Control socket: savephoto %@ -> exception %@", path, ex.reason);
+        NSString *msg = [NSString stringWithFormat:@"ERR %@\n",
+                                                   ex.reason ?: @"PhotosException"];
+        return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    }
 
     // Chờ nạp xong (giới hạn 30s) để trả lời đúng trạng thái cho PC.
     if (dispatch_semaphore_wait(done,
@@ -4073,15 +4116,15 @@ static NSData *tvCtlSavePhoto(NSString *path) {
         return [@"ERR Timeout\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     if (ok) {
-        TVLog(@"Control socket: savephoto %@ -> OK", path);
+        TVLog(@"Control socket: savephoto %@ -> OK (%@)", path,
+              isVideo ? @"video" : @"ảnh");
         return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
 
-    // TCC từ chối thường rơi vào đây. Xem docs/trollvnc-patch-3.md.
     TVLog(@"Control socket: savephoto %@ -> FAIL %@", path, err);
     NSString *msg = err.localizedDescription.length
         ? [NSString stringWithFormat:@"ERR %@\n", err.localizedDescription]
-        : @"ERR Denied\n";
+        : @"ERR Failed\n";
     return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
