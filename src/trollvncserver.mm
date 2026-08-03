@@ -4094,10 +4094,18 @@ static NSData *tvCtlSavePhoto(NSString *path) {
     __block NSError *err = nil;
     @try {
         [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-            if (isVideo)
-                [PHAssetCreationRequest creationRequestForAssetFromVideoAtFileURL:fileURL];
-            else
+            if (isVideo) {
+                // addResourceWithType bỏ qua bước kiểm tra tương thích gắt của
+                // creationRequestForAssetFromVideoAtFileURL: — bước đó từ chối cả
+                // video H.264 hợp lệ nếu thiếu track audio, level cao, hoặc moov
+                // atom nằm cuối file (không faststart).
+                PHAssetCreationRequest *req = [PHAssetCreationRequest creationRequestForAsset];
+                [req addResourceWithType:PHAssetResourceTypeVideo
+                                 fileURL:fileURL
+                                 options:nil];
+            } else {
                 [PHAssetCreationRequest creationRequestForAssetFromImageAtFileURL:fileURL];
+            }
         } completionHandler:^(BOOL success, NSError *error) {
             ok = success;
             err = error;
