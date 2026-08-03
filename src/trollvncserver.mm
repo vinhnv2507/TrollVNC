@@ -4164,18 +4164,21 @@ static NSData *tvCtlRespring(void) {
 // trong libSystem — daemon chạy root nên có quyền. RB_AUTOBOOT = 0.
 extern "C" int reboot(int howto);
 
-// `reboot` — khởi động lại máy. Trả OK cho PC trước, rồi reboot sau 1 giây để
-// câu trả lời kịp bay đi.
+// `reboot` — khởi động lại máy. Gọi ĐỒNG BỘ: nếu thành công, tiến trình chết
+// theo máy và PC nhận kết nối đứt (coi như đã reboot). Nếu reboot() TRẢ VỀ tức
+// là thất bại — báo mã lỗi (errno) về PC để biết đúng lý do thay vì im lặng.
 // CẢNH BÁO: máy semi-untethered (Dopamine) sẽ MẤT jailbreak tới khi chạy lại app
 // jailbreak. TrollVNC/VNC vẫn tự chạy lại sau boot (cài qua TrollStore).
 static NSData *tvCtlReboot(void) {
     TVLog(@"Control socket: reboot requested");
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)),
-                   dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        sync();
-        reboot(0); // RB_AUTOBOOT
-    });
-    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    sync();
+
+    int rc = reboot(0); // RB_AUTOBOOT
+    int e = errno;
+    TVLog(@"Control socket: reboot() -> rc=%d errno=%d", rc, e);
+    NSString *msg = [NSString stringWithFormat:@"ERR RebootFailed rc=%d errno=%d\n",
+                                               rc, e];
+    return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 #pragma mark - File transfer
