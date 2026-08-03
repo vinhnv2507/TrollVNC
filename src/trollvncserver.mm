@@ -4160,36 +4160,79 @@ static NSData *tvCtlRespring(void) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
-// SDK iOS ẩn/đánh dấu reboot() là unavailable. Khai báo thẳng để gọi symbol
-// trong libSystem — daemon chạy root nên có quyền. RB_AUTOBOOT = 0.
+// SDK iOS ẩn/đánh dấu reboot() là unavailable; khai báo thẳng cho fallback.
 extern "C" int reboot(int howto);
 
-// `reboot` — khởi động lại máy. Gọi ĐỒNG BỘ: nếu thành công, tiến trình chết
-// theo máy và PC nhận kết nối đứt (coi như đã reboot). Nếu reboot() TRẢ VỀ tức
-// là thất bại — báo mã lỗi (errno) về PC để biết đúng lý do thay vì im lặng.
+// Khai báo tối thiểu hai lớp private để gọi đường reboot "chuẩn" của iOS.
+// Class resolve bằng NSClassFromString lúc chạy nên KHÔNG tạo phụ thuộc link.
+@interface SBSRelaunchAction : NSObject
++ (instancetype)actionWithReason:(NSString *)reason
+                         options:(NSUInteger)options
+                       targetURL:(NSURL *)targetURL;
+@end
+
+@interface FBSSystemService : NSObject
++ (instancetype)sharedService;
+- (void)sendActions:(NSSet *)actions withResult:(id)result;
+@end
+
+// Reboot đúng chuẩn iOS: gửi SBSRelaunchAction cờ RebootPending (1<<2) qua
+// FBSSystemService. Dùng entitlement com.apple.frontboard.shutdown (đã có sẵn) —
+// đây là cách các tiện ích jailbreak reboot thật sự dùng, khác với syscall
+// reboot() vốn bị AMFI chặn (EPERM). Trả YES nếu đã gửi được lệnh.
+static BOOL tvFrontBoardReboot(void) {
+    Class actCls = NSClassFromString(@"SBSRelaunchAction");
+    Class svcCls = NSClassFromString(@"FBSSystemService");
+    if (!actCls || !svcCls) {
+        TVLog(@"reboot: thiếu SBSRelaunchAction/FBSSystemService");
+        return NO;
+    }
+    @try {
+        NSUInteger kRebootPending = (1 << 2); // SBSRelaunchActionOptionsRebootPending
+        id action = [actCls actionWithReason:@"ControlIOS reboot"
+                                     options:kRebootPending
+                                   targetURL:nil];
+        if (!action)
+            return NO;
+        id svc = [svcCls sharedService];
+        if (!svc)
+            return NO;
+        [svc sendActions:[NSSet setWithObject:action] withResult:nil];
+        TVLog(@"reboot: đã gửi FrontBoard reboot action");
+        return YES;
+    } @catch (NSException *ex) {
+        TVLog(@"reboot: FrontBoard exception %@", ex.reason);
+        return NO;
+    }
+}
+
+// `reboot` — khởi động lại máy. Ưu tiên đường FrontBoard; syscall chỉ là fallback
+// chẩn đoán (thường EPERM trên iOS).
 // CẢNH BÁO: máy semi-untethered (Dopamine) sẽ MẤT jailbreak tới khi chạy lại app
 // jailbreak. TrollVNC/VNC vẫn tự chạy lại sau boot (cài qua TrollStore).
 static NSData *tvCtlReboot(void) {
     TVLog(@"Control socket: reboot requested");
     sync();
 
-    // reboot(2) BSD hay bị EPERM trên iOS dù root (AMFI chặn).
+    if (tvFrontBoardReboot()) {
+        // Reboot chạy bất đồng bộ; máy sẽ tắt sau giây lát. Trả OK ngay.
+        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
     int rc = reboot(0); // RB_AUTOBOOT
     int e = errno;
-
-    // reboot3() — đường Apple hiện đại, thường qua được khi reboot() EPERM.
-    // Resolve bằng dlsym để KHÔNG lỗi link nếu symbol vắng.
     int rc3 = -2, e3 = 0;
     int (*rb3)(uint64_t) = (int (*)(uint64_t))dlsym(RTLD_DEFAULT, "reboot3");
     if (rb3) {
         errno = 0;
-        rc3 = rb3(0); // RB_AUTOBOOT
+        rc3 = rb3(0);
         e3 = errno;
     }
 
-    TVLog(@"Control socket: reboot rc=%d(errno=%d) reboot3=%d(errno=%d)", rc, e, rc3, e3);
+    TVLog(@"Control socket: reboot fallback rc=%d(errno=%d) reboot3=%d(errno=%d)",
+          rc, e, rc3, e3);
     NSString *msg = [NSString stringWithFormat:
-                     @"ERR RebootFailed reboot=%d(errno=%d) reboot3=%d(errno=%d)\n",
+                     @"ERR RebootFailed frontboard=no reboot=%d(errno=%d) reboot3=%d(errno=%d)\n",
                      rc, e, rc3, e3];
     return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
