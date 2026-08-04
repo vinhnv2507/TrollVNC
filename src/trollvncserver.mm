@@ -4181,15 +4181,24 @@ static NSData *tvCtlSetScale(NSString *arg) {
         return [@"ERR BadScale (can 0 < s <= 1)\n" dataUsingEncoding:NSUTF8StringEncoding];
     int oldW = gWidth, oldH = gHeight;
     gScale = v;
-    TVLog(@"Control socket: setscale %.3f (từ %dx%d)", v, oldW, oldH);
 
-    // Chờ luồng capture áp resize framebuffer (nó gọi maybeResize mỗi khung, đọc
-    // gScale) TRƯỚC khi trả lời. Nhờ vậy khi PC nối lại phiên, ServerInit báo
-    // đúng kích thước mới ngay -> không còn cảnh hai màn hình lồng nhau vì máy
-    // resize sau lúc client đã bắt tay. Tối đa ~2s; nếu cỡ không đổi thì thôi.
-    for (int i = 0; i < 40 && gWidth == oldW && gHeight == oldH; i++)
-        usleep(50000);
+    // Quan trọng: ScreenCapturer bỏ qua khung khi màn hình KHÔNG đổi nội dung
+    // (dirty frame count không đổi), nên maybeResize không tự chạy trên màn hình
+    // tĩnh -> framebuffer không đổi cỡ tới khi có tương tác. Vì vậy ÉP resize NGAY
+    // tại đây. Chạy trên main queue (nơi frame handler chạy) để không đua với
+    // luồng capture khi cấp phát lại buffer. dispatch_sync để chắc chắn xong rồi
+    // mới trả lời -> PC nối lại là ServerInit thấy đúng cỡ mới, hết lồng nhau.
+    int rotQ = (gOrientationSyncEnabled
+                    ? (int)gRotationQuad.load(std::memory_order_relaxed) : 0) & 3;
+    if ([NSThread isMainThread]) {
+        maybeResizeFramebufferForRotation(rotQ);
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            maybeResizeFramebufferForRotation(rotQ);
+        });
+    }
 
+    TVLog(@"Control socket: setscale %.3f: %dx%d -> %dx%d", v, oldW, oldH, gWidth, gHeight);
     NSString *ok = [NSString stringWithFormat:@"OK %.3f %dx%d\n", v, gWidth, gHeight];
     return [ok dataUsingEncoding:NSUTF8StringEncoding];
 }
