@@ -13,6 +13,8 @@ Toạ độ luôn là **tỉ lệ 0..1** chứ không phải pixel, nên cùng m
     repeat 3                      # lặp lại khối thụt lề bên dưới
         tap 0.5 0.9
         wait 1
+    retry 3 1                     # lỗi thì thử lại tối đa 3 lần, cách nhau 1s
+        restartapp com.zing.zalo 2
 
 Ngoài ra còn các lệnh cử chỉ iOS dựng sẵn trong :mod:`controlios.gestures`:
 ``home``, ``switcher``, ``spotlight``, ``openapp <tên>``, ``closeapp``,
@@ -105,11 +107,11 @@ def parse(source: str, gestures: Optional[Dict[str, str]] = None,
                 raise ScriptError(line_no, "thụt lề không khớp")
             step, index = _statement(line_no, text, index + 1, gestures, _macro_depth)
             steps.append(step)
-            if step.op == "repeat":
+            if step.op in ("repeat", "retry"):
                 if index < len(lines) and lines[index][1] > indent:
                     step.body, index = block(index, lines[index][1], depth + 1)
                 if not step.body:
-                    raise ScriptError(line_no, "repeat phải có khối thụt lề bên dưới")
+                    raise ScriptError(line_no, f"{step.op} phải có khối thụt lề bên dưới")
         return steps, index
 
     steps, consumed = block(0, lines[0][1] if lines else 0, 0)
@@ -171,6 +173,40 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             )
         return Step(op, (bundle,), line_no=line_no), index
 
+    if op == "restartapp":
+        if len(args) not in (1, 2):
+            raise ScriptError(line_no, "cú pháp: restartapp <bundle id> [giây chờ]")
+        bundle = args[0]
+        if "." not in bundle:
+            raise ScriptError(line_no, f"{bundle!r} không giống bundle id")
+        delay = _seconds(args[1], line_no) if len(args) == 2 else 1.0
+        return Step(op, (bundle, delay), line_no=line_no), index
+
+    if op == "openurl":
+        url = text[len(parts[0]):].strip()
+        if not url or "://" not in url or " " in url:
+            raise ScriptError(line_no, "cú pháp: openurl <url>, URL không được có dấu cách")
+        return Step(op, (url,), line_no=line_no), index
+
+    if op == "openurlin":
+        if len(args) != 2 or "." not in args[0] or "://" not in args[1]:
+            raise ScriptError(line_no, "cú pháp: openurlin <bundle id> <url>")
+        return Step(op, (args[0], args[1]), line_no=line_no), index
+
+    if op == "clipboard":
+        payload = text[len(parts[0]):].strip()
+        if not payload:
+            raise ScriptError(line_no, "cú pháp: clipboard <nội dung>")
+        return Step(op, (payload,), line_no=line_no), index
+
+    if op == "savephoto":
+        path = text[len(parts[0]):].strip()
+        if not path or not path.startswith("/"):
+            raise ScriptError(
+                line_no, "cú pháp: savephoto <đường dẫn tuyệt đối ảnh trên máy>"
+            )
+        return Step(op, (path,), line_no=line_no), index
+
     if op == "text":
         payload = text[len(parts[0]):].strip()
         if not payload:
@@ -198,8 +234,16 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             raise ScriptError(line_no, "cú pháp: repeat <số lần ≥ 1>")
         return Step(op, (int(args[0]),), line_no=line_no), index
 
+    if op == "retry":
+        if len(args) not in (1, 2) or not args[0].isdigit() or int(args[0]) < 1:
+            raise ScriptError(line_no, "cú pháp: retry <số lần ≥ 1> [giây nghỉ]")
+        delay = _seconds(args[1], line_no) if len(args) == 2 else 1.0
+        return Step(op, (int(args[0]), delay), line_no=line_no), index
+
     known = ", ".join(["tap", "button", "swipe", "text", "key", "wait", "shot",
-                       "repeat", "brightness", "volume", "launchapp", "killapp"]
+                       "repeat", "retry", "brightness", "volume", "launchapp",
+                       "killapp", "restartapp", "openurl", "openurlin",
+                       "clipboard", "savephoto"]
                       + sorted(gestures))
     raise ScriptError(line_no, f"lệnh không hiểu: {parts[0]!r}. Lệnh có: {known}")
 
@@ -318,6 +362,10 @@ def describe(steps: Sequence[Step]) -> List[str]:
             if step.op == "repeat":
                 out.append(f"{indent}lặp {step.args[0]} lần:")
                 walk(step.body, indent + "  ")
+            elif step.op == "retry":
+                attempts, delay = step.args
+                out.append(f"{indent}thử lại tối đa {attempts} lần, nghỉ {delay}s:")
+                walk(step.body, indent + "  ")
             elif step.op == "macro":
                 name, param = step.args
                 label = _MACRO_LABELS.get(name, f"cử chỉ {name}")
@@ -337,6 +385,16 @@ def describe(steps: Sequence[Step]) -> List[str]:
                 out.append(f"{indent}mở app {step.args[0]} (qua kênh điều khiển)")
             elif step.op == "killapp":
                 out.append(f"{indent}đóng app {step.args[0]} (qua kênh điều khiển)")
+            elif step.op == "restartapp":
+                out.append(f"{indent}khởi động lại app {step.args[0]}, chờ {step.args[1]}s")
+            elif step.op == "openurl":
+                out.append(f"{indent}mở URL {step.args[0]}")
+            elif step.op == "openurlin":
+                out.append(f"{indent}mở URL {step.args[1]} bằng app {step.args[0]}")
+            elif step.op == "clipboard":
+                out.append(f"{indent}đặt clipboard máy = {step.args[0]!r}")
+            elif step.op == "savephoto":
+                out.append(f"{indent}nạp {step.args[0]} vào Thư viện Ảnh")
             elif step.op == "text":
                 out.append(f"{indent}gõ {step.args[0]!r}")
             elif step.op == "key":
@@ -366,6 +424,9 @@ def count_steps(steps: Sequence[Step]) -> int:
     for step in steps:
         if step.op == "repeat":
             total += step.args[0] * count_steps(step.body)
+        elif step.op == "retry":
+            # Hiển thị trường hợp xấu nhất để người dùng biết trần công việc.
+            total += step.args[0] * count_steps(step.body)
         elif step.op == "macro":
             total += count_steps(step.body)
         else:
@@ -385,7 +446,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
     """Chạy kịch bản trên một phiên. Toạ độ tỉ lệ đổi sang pixel theo máy đó.
 
     ``control`` là :class:`~controlios.control_channel.ControlChannel` của đúng
-    máy đó, chỉ cần cho ``launchapp``/``killapp``.
+    máy đó, chỉ cần cho các lệnh app/URL theo bundle id.
     """
 
     client = session._client
@@ -421,6 +482,31 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                     await control.launch(step.args[0])
                 else:
                     await control.terminate(step.args[0])
+            elif step.op in ("restartapp", "openurl", "openurlin"):
+                if control is None:
+                    raise ConnectionError(
+                        f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
+                        "trong config/devices.json và dùng TrollVNC đã vá"
+                    )
+                if step.op == "restartapp":
+                    bundle, delay = step.args
+                    await control.terminate(bundle)
+                    await asyncio.sleep(delay)
+                    await control.launch(bundle)
+                elif step.op == "openurl":
+                    await control.open_url(step.args[0])
+                else:
+                    await control.open_url_in(step.args[0], step.args[1])
+            elif step.op in ("clipboard", "savephoto"):
+                if control is None:
+                    raise ConnectionError(
+                        f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
+                        "trong config/devices.json và dùng TrollVNC đã vá"
+                    )
+                if step.op == "clipboard":
+                    await control.set_clipboard(step.args[0])
+                else:
+                    await control.save_photo(step.args[0])
             elif step.op == "text":
                 session.type_text(step.args[0])
                 await asyncio.sleep(0.05)
@@ -442,6 +528,24 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
             elif step.op == "repeat":
                 for _ in range(step.args[0]):
                     await execute(step.body)
+                continue
+            elif step.op == "retry":
+                attempts, delay = step.args
+                for attempt in range(1, attempts + 1):
+                    try:
+                        await execute(step.body)
+                        break
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception as exc:
+                        if attempt >= attempts:
+                            raise
+                        on_event(
+                            session.spec.key,
+                            f"dòng {step.line_no}: lỗi {exc}; thử lại "
+                            f"{attempt + 1}/{attempts} sau {delay}s",
+                        )
+                        await asyncio.sleep(delay)
                 continue
             elif step.op == "macro":
                 name, param = step.args
