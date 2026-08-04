@@ -134,6 +134,9 @@ class VncSession:
         # Bừng dậy giữa chừng một request đang chờ khi đổi tier (mở khung lớn):
         # incremental request trên màn hình tĩnh có thể treo tới stall_timeout.
         self._promote = asyncio.Event()
+        # Yêu cầu nối lại phiên (framebuffer đổi kích thước, ví dụ đổi scale) —
+        # client này không đăng ký DesktopSize nên phải bắt tay lại để lấy cỡ mới.
+        self._resync = asyncio.Event()
         self._tier_changed = asyncio.Event()
         self._frame_ready = asyncio.Event()
         self._stop = asyncio.Event()
@@ -172,6 +175,10 @@ class VncSession:
 
         await self.stop()
         self._set_state(State.DORMANT, "tạm ngắt cho máy nghỉ")
+
+    def request_resync(self) -> None:
+        """Nối lại phiên: dùng khi framebuffer đổi kích thước (đổi scale/xoay máy)."""
+        self._resync.set()
 
     def set_tier(self, tier: Tier) -> None:
         if tier == self.tier:
@@ -379,8 +386,14 @@ class VncSession:
 
             if self._stop.is_set():
                 break
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, self.settings.reconnect_max)
+            if self._resync.is_set():
+                # Nối lại chủ động (đổi scale) — nhanh, không backoff.
+                self._resync.clear()
+                await asyncio.sleep(0.3)
+                delay = self.settings.reconnect_delay
+            else:
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, self.settings.reconnect_max)
 
         self._set_state(State.OFFLINE)
 
@@ -389,7 +402,9 @@ class VncSession:
 
         reader = asyncio.create_task(self._read_loop(client))
         pacer = asyncio.create_task(self._pace_loop(client))
-        tasks = {reader, pacer}
+        # Cũng thức dậy khi có yêu cầu nối lại (đổi scale) để bắt tay lại lấy cỡ mới.
+        resync = asyncio.create_task(self._resync.wait())
+        tasks = {reader, pacer, resync}
         try:
             done, pending = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
@@ -400,6 +415,8 @@ class VncSession:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
         for task in done:
+            if task is resync:
+                continue        # yêu cầu nối lại: kết thúc phiên êm, không phải lỗi
             if not task.cancelled() and task.exception():
                 raise task.exception()
 

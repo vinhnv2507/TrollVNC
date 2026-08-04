@@ -477,13 +477,38 @@ class DevicePool:
 
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
-        """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ)."""
+        """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).
 
-        async def action(channel):
-            await channel.set_scale(factor)
-            return f"đã đặt scale {factor:.2f}"
+        Đổi scale làm framebuffer đổi kích thước; client này không đăng ký
+        DesktopSize nên phải **nối lại phiên** để lấy cỡ mới, tránh cảnh hai màn
+        hình lồng nhau. Sau khi đặt scale, chờ máy áp resize rồi mới nối lại.
+        """
 
-        self._bulk_app_action(keys, f"Scale {factor:.2f}", action, on_event, on_done)
+        key_list = list(keys)
+        failures: List[tuple] = []
+        succeeded: List[str] = []
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    await self._channel(key).set_scale(factor)
+                    succeeded.append(key)
+                    if on_event:
+                        on_event(key, f"đã đặt scale {factor:.2f}, đang nối lại…")
+                    session = self._sessions.get(key)
+                    if session:
+                        await asyncio.sleep(1.5)   # chờ máy đổi framebuffer
+                        session.request_resync()
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+            if on_done:
+                on_done(f"Scale {factor:.2f}", len(succeeded), failures)
+
+        self._call_coro(run())
 
     def set_clipboard(self, keys: Iterable[str], text: str,
                       on_event=None, on_done=None) -> None:

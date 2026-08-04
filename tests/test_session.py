@@ -143,6 +143,22 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
 
         await session.stop()
 
+    async def test_request_resync_reconnects_cleanly(self) -> None:
+        # Đổi scale làm framebuffer đổi cỡ -> yêu cầu nối lại. Phiên phải rời ra
+        # rồi ONLINE trở lại (bắt tay lại lấy kích thước mới), server vẫn sống.
+        session = self.make_session()
+        session.set_tier(Tier.GRID)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+
+        session.request_resync()
+        self.assertTrue(await self.wait_for(lambda: session.state is not State.ONLINE, 6.0),
+                        "resync phải làm phiên rời ra")
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE, 10.0),
+                        "resync phải nối lại được")
+
+        await session.stop()
+
 
 class PoolTest(unittest.TestCase):
     """The pool runs its own loop in a thread — exercise it from sync code."""
