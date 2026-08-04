@@ -1,0 +1,33 @@
+CONTROL IOS — bản đóng gói (chạy không cần cài Python)
+========================================================
+
+CÁCH CHẠY
+- Chép NGUYÊN thư mục "ControlIOS" này sang máy khác (đừng tách riêng file .exe).
+- Chạy ControlIOS.exe.
+- Dữ liệu (config, ảnh chụp, kịch bản) tự tạo CẠNH file exe:
+    config/devices.json   danh sách máy
+    config/scripts.json   kịch bản đã lưu
+    captures/             ảnh chụp, ghi hình, ảnh từ kịch bản
+
+CHẾ ĐỘ WIFI (chạy ngay, không cần cài gì thêm)
+- Quét mạng / Nạp file: thêm máy TrollVNC trong LAN.
+
+CHẾ ĐỘ USB (điều khiển qua cáp, không cần WiFi)
+- Chỉ cần cài "Apple Mobile Device Support" ở máy này (cài iTunes bản desktop
+  từ apple.com là có sẵn). KHÔNG cần cài gì thêm — tidevice đã nằm trong exe.
+- Cắm iPhone (bấm "Tin cậy" trên máy) rồi bấm nút "Quét USB".
+- Máy USB điều khiển qua cáp: xem/điều khiển, app, clipboard, nạp ảnh, respring,
+  scale... đều chạy. Máy USB KHÔNG cần control_token.
+
+CONTROL_TOKEN (cho máy WiFi)
+- App/clipboard/ảnh/respring/scale trên máy WIFI cần control_token khớp token
+  dùng khi build TrollVNC. Đặt trong config/devices.json:
+      "settings": { "control_token": "...token của bạn..." }
+- Máy USB thì không cần.
+
+NẠP ẢNH/VIDEO
+- Ảnh chạy ngay. Video lạ định dạng cần ffmpeg trên PATH để tự chuẩn hoá.
+
+XỬ LÝ SỰ CỐ
+- Không mở được: chạy từ PowerShell để xem lỗi:  .\ControlIOS.exe
+- Antivirus có thể chặn exe chưa ký — cho phép chạy.
