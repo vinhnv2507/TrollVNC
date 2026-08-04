@@ -398,10 +398,15 @@ class DevicePool:
         from ..control_channel import ControlChannel
 
         session = self._sessions.get(key)
-        host = session.spec.host if session else key.partition(":")[0]
-        return ControlChannel(
-            host, self.settings.control_port, self.settings.control_token
-        )
+        spec = session.spec if session else None
+        host = spec.host if spec else key.partition(":")[0]
+        # Cổng control riêng của máy (chế độ USB) nếu có, không thì cổng chung.
+        port = (spec.control_port if spec and spec.control_port
+                else self.settings.control_port)
+        # Qua USB, control socket là loopback trên máy -> gửi lệnh không kèm auth.
+        loopback = bool(spec and spec.is_usb)
+        return ControlChannel(host, port, self.settings.control_token,
+                              loopback=loopback)
 
     def list_apps(self, key: str, on_done, user_only: bool = False) -> None:
         """on_done(key, apps, error) — chạy trên luồng mạng."""
@@ -461,14 +466,88 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
+    def respring(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        """Khởi động lại SpringBoard trên nhiều máy (không mất jailbreak)."""
+
+        async def action(channel):
+            await channel.respring()
+            return "đã respring"
+
+        self._bulk_app_action(keys, "Respring", action, on_event, on_done)
+
+    def set_scale(self, keys: Iterable[str], factor: float,
+                  on_event=None, on_done=None) -> None:
+        """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ)."""
+
+        async def action(channel):
+            await channel.set_scale(factor)
+            return f"đã đặt scale {factor:.2f}"
+
+        self._bulk_app_action(keys, f"Scale {factor:.2f}", action, on_event, on_done)
+
+    def set_clipboard(self, keys: Iterable[str], text: str,
+                      on_event=None, on_done=None) -> None:
+        """Đặt clipboard (UTF-8) cho nhiều máy — dán khối chữ dài hàng loạt."""
+
+        async def action(channel):
+            written = await channel.set_clipboard(text)
+            return f"đã đặt clipboard ({written} byte)"
+
+        self._bulk_app_action(keys, "Đặt clipboard", action, on_event, on_done)
+
+    def push_photo(self, keys: Iterable[str], local: Path | str,
+                   on_event=None, on_done=None) -> None:
+        """Đẩy ảnh/video rồi nạp vào Thư viện Ảnh trên nhiều máy.
+
+        Video chưa đúng chuẩn iOS được **tự re-encode một lần** (ffmpeg) trước
+        khi phát cho cả mẻ, nên bạn chỉ cần đưa file gốc.
+        """
+
+        from .. import media
+
+        key_list = list(keys)
+        source = Path(local)
+        failures: List[tuple] = []
+        succeeded: List[str] = []
+
+        async def run() -> None:
+            # Chuẩn hoá MỘT lần cho cả mẻ (transcode nặng nên chạy ở thread riêng).
+            ready = source
+            try:
+                ready = await asyncio.to_thread(media.ensure_ios_media, source)
+            except Exception as exc:
+                if on_event:
+                    on_event("*", f"Không chuẩn hoá được, đẩy nguyên bản: {exc}")
+            if ready != source and on_event:
+                on_event("*", f"Đã chuẩn hoá {source.name} → {ready.name} cho iOS")
+
+            async def one(key: str) -> None:
+                try:
+                    await self._channel(key).push_photo(ready, normalize=False)
+                    succeeded.append(key)
+                    if on_event:
+                        on_event(key, f"đã nạp {ready.name} vào Thư viện")
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+            if on_done:
+                on_done(f"Nạp {source.name}", len(succeeded), failures)
+
+        self._call_coro(run())
+
     # --------------------------------------------------------------- SSH
 
     def _ssh(self, key: str):
         from ..ssh_channel import SshChannel
 
         session = self._sessions.get(key)
-        host = session.spec.host if session else key.partition(":")[0]
-        return SshChannel(host, self.settings.ssh_port, self.settings.ssh_user,
+        spec = session.spec if session else None
+        host = spec.host if spec else key.partition(":")[0]
+        port = spec.ssh_port if spec and spec.ssh_port else self.settings.ssh_port
+        return SshChannel(host, port, self.settings.ssh_user,
                           self.settings.ssh_password,
                           key_path=self.settings.ssh_key_path)
 
@@ -671,6 +750,11 @@ class DevicePool:
             counts[session.state.value] += 1
         counts["total"] = len(self._sessions)
         return counts
+
+    def online_keys(self) -> List[str]:
+        """Máy đang ONLINE — để phát lệnh control cho toàn bộ máy đang xem."""
+        return [key for key, session in list(self._sessions.items())
+                if session.state is State.ONLINE]
 
     def _with(self, key: str, fn) -> None:
         session = self._sessions.get(key)
