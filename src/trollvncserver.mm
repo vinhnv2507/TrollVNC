@@ -4179,9 +4179,18 @@ static NSData *tvCtlSetScale(NSString *arg) {
                     [NSCharacterSet whitespaceAndNewlineCharacterSet]] doubleValue];
     if (!(v > 0.0 && v <= 1.0))
         return [@"ERR BadScale (can 0 < s <= 1)\n" dataUsingEncoding:NSUTF8StringEncoding];
+    int oldW = gWidth, oldH = gHeight;
     gScale = v;
-    TVLog(@"Control socket: setscale %.3f", v);
-    NSString *ok = [NSString stringWithFormat:@"OK %.3f\n", v];
+    TVLog(@"Control socket: setscale %.3f (từ %dx%d)", v, oldW, oldH);
+
+    // Chờ luồng capture áp resize framebuffer (nó gọi maybeResize mỗi khung, đọc
+    // gScale) TRƯỚC khi trả lời. Nhờ vậy khi PC nối lại phiên, ServerInit báo
+    // đúng kích thước mới ngay -> không còn cảnh hai màn hình lồng nhau vì máy
+    // resize sau lúc client đã bắt tay. Tối đa ~2s; nếu cỡ không đổi thì thôi.
+    for (int i = 0; i < 40 && gWidth == oldW && gHeight == oldH; i++)
+        usleep(50000);
+
+    NSString *ok = [NSString stringWithFormat:@"OK %.3f %dx%d\n", v, gWidth, gHeight];
     return [ok dataUsingEncoding:NSUTF8StringEncoding];
 }
 
