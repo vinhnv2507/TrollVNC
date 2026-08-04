@@ -4165,6 +4165,26 @@ static NSData *tvCtlRespring(void) {
 // SBSRelaunchAction chỉ respring. Với farm Dopamine reboot còn làm mất jailbreak
 // nên cũng không nên dùng. Chỉ giữ `respring` ở trên.
 
+#pragma mark - Scale
+
+// `setscale <0..1>` — đổi hệ số scale khung hình LÚC ĐANG CHẠY để giảm tải cho
+// máy đời cũ (khung nhỏ hơn -> nén nhanh hơn -> mượt hơn). Chỉ cần đổi gScale;
+// luồng xử lý khung gọi maybeResizeFramebufferForRotation() mỗi khung nên sẽ tự
+// đổi kích thước framebuffer ngay ở lượt kế (trên đúng luồng đó, không race).
+// Đổi kích thước khiến client nối lại một nhịp (client này không đăng ký
+// DesktopSize) — giống lúc xoay máy. Giá trị không lưu qua lần khởi động lại
+// daemon; muốn cố định thì đặt pref `Scale`.
+static NSData *tvCtlSetScale(NSString *arg) {
+    double v = [[arg stringByTrimmingCharactersInSet:
+                    [NSCharacterSet whitespaceAndNewlineCharacterSet]] doubleValue];
+    if (!(v > 0.0 && v <= 1.0))
+        return [@"ERR BadScale (can 0 < s <= 1)\n" dataUsingEncoding:NSUTF8StringEncoding];
+    gScale = v;
+    TVLog(@"Control socket: setscale %.3f", v);
+    NSString *ok = [NSString stringWithFormat:@"OK %.3f\n", v];
+    return [ok dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - File transfer
 
 // Giới hạn cho chắc: file lớn hơn mức này gần như luôn là gõ nhầm.
@@ -4477,6 +4497,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlSavePhoto([cmd substringFromIndex:10]);
     } else if ([cmd isEqualToString:@"respring"]) {
         resp = tvCtlRespring();
+    } else if ([cmd hasPrefix:@"setscale "]) {
+        resp = tvCtlSetScale([cmd substringFromIndex:9]);
     } else if ([cmd hasPrefix:@"openurlin "]) {
         NSString *rest = [cmd substringFromIndex:10];
         NSRange space = [rest rangeOfString:@" "];
