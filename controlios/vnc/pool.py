@@ -492,14 +492,16 @@ class DevicePool:
             async def one(key: str) -> None:
                 try:
                     await self._channel(key).set_scale(factor)
-                    if on_event:
-                        on_event(key, f"đã đặt scale {factor:.2f}, đang nối lại…")
                     session = self._sessions.get(key)
                     if session:
-                        # setscale đã chờ máy resize xong mới trả lời, nên nối lại
-                        # ngay là ServerInit thấy đúng cỡ mới.
-                        await asyncio.sleep(0.3)
+                        # ĐẶT resync NGAY (không await ở giữa) để cờ được bật TRƯỚC
+                        # khi pacer kịp gửi một frame ở cỡ mới — nếu để pacer gửi
+                        # trước, scale TO LÊN sẽ làm client lỗi (frame vượt buffer)
+                        # và nối lại theo đường backoff chậm ~10s thay vì nhanh.
                         session.request_resync()
+                    if on_event:
+                        on_event(key, f"đã đặt scale {factor:.2f}, đang nối lại…")
+                    if session:
                         ok = await self._wait_reconnect(session, timeout=15.0)
                         if on_event:
                             on_event(key, "đã nối lại ✓" if ok

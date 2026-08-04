@@ -144,16 +144,20 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         await session.stop()
 
     async def test_request_resync_reconnects_cleanly(self) -> None:
-        # Đổi scale làm framebuffer đổi cỡ -> yêu cầu nối lại. Phiên phải rời ra
-        # rồi ONLINE trở lại (bắt tay lại lấy kích thước mới), server vẫn sống.
+        # Đổi scale làm framebuffer đổi cỡ -> yêu cầu nối lại. Phiên phải bắt tay
+        # lại (xuất hiện CONNECTING) rồi ONLINE trở lại. Kiểm tra qua LỊCH SỬ trạng
+        # thái vì reconnect rất nhanh, bắt trạng thái tức thời dễ hụt.
         session = self.make_session()
         session.set_tier(Tier.GRID)
         session.start()
         self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
 
+        self.states.clear()
         session.request_resync()
-        self.assertTrue(await self.wait_for(lambda: session.state is not State.ONLINE, 6.0),
-                        "resync phải làm phiên rời ra")
+        self.assertTrue(
+            await self.wait_for(
+                lambda: any(s is State.CONNECTING for _, s in self.states), 8.0),
+            "resync phải làm phiên nối lại (có CONNECTING)")
         self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE, 10.0),
                         "resync phải nối lại được")
 
