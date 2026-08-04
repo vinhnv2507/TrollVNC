@@ -496,10 +496,12 @@ class ScriptDialog(QDialog):
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn ít nhất một máy.")
             return
-        if not self.window.registry.settings.control_token:
+        if self.window._needs_control_token(targets) \
+                and not self.window.registry.settings.control_token:
             QMessageBox.warning(
                 self, "Thiếu control token",
-                "Đặt control_token trong config/devices.json để lấy danh sách app.",
+                "Máy WiFi cần control_token trong config/devices.json để lấy danh "
+                "sách app (máy USB thì không cần).",
             )
             return
 
@@ -1113,6 +1115,12 @@ class MainWindow(QMainWindow):
             return list(self.grid.selection)
         return [self.detail.key] if self.detail.key else []
 
+    def _needs_control_token(self, keys) -> bool:
+        """Có máy WiFi trong nhóm không? Máy USB (loopback) không cần token."""
+
+        usb_keys = {d.key for d in self.registry.devices if d.is_usb}
+        return any(key not in usb_keys for key in keys)
+
     def _capture_selected(self) -> None:
         targets = self.action_targets()
         if not targets:
@@ -1172,12 +1180,13 @@ class MainWindow(QMainWindow):
         # nên phải phát riêng — và chỉ khi thật sự đổi để tránh nối lại vô cớ.
         if abs(settings.device_scale - old_scale) > 1e-6:
             targets = self.pool.online_keys()
-            if not settings.control_token:
-                QMessageBox.warning(
+            if self._needs_control_token(targets) and not settings.control_token:
+                QMessageBox.information(
                     self, "Thiếu control token",
-                    "Đổi scale cần control_token trong config/devices.json.",
+                    "Máy WiFi cần control_token trong config/devices.json để đổi "
+                    "scale (máy USB thì không cần). Vẫn gửi cho máy USB.",
                 )
-            elif targets:
+            if targets:
                 dlg = BulkResultDialog(
                     f"Đặt scale {settings.device_scale:.2f}", len(targets), self)
                 dlg.show()
@@ -1265,10 +1274,11 @@ class MainWindow(QMainWindow):
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
-        if not self.registry.settings.control_token:
+        if self._needs_control_token(targets) and not self.registry.settings.control_token:
             QMessageBox.warning(
                 self, "Thiếu control token",
-                "Đặt control_token trong config/devices.json để nạp ảnh.",
+                "Máy WiFi cần control_token trong config/devices.json để nạp ảnh "
+                "(máy USB thì không cần).",
             )
             return
 
@@ -1295,9 +1305,10 @@ class MainWindow(QMainWindow):
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
-        if not self.registry.settings.control_token:
+        if self._needs_control_token(targets) and not self.registry.settings.control_token:
             QMessageBox.warning(self, "Thiếu control token",
-                                "Đặt control_token trong config/devices.json.")
+                                "Máy WiFi cần control_token trong config/devices.json "
+                                "(máy USB thì không cần).")
             return
         if QMessageBox.question(
             self, "Respring",
@@ -1628,10 +1639,11 @@ class MainWindow(QMainWindow):
         text, use_clipboard, paste_after = dialog.delivery()
         _, press_enter = dialog.result_text()
         if text and use_clipboard:
-            if not self.registry.settings.control_token:
+            if self._needs_control_token(targets) and not self.registry.settings.control_token:
                 QMessageBox.warning(
                     self, "Thiếu control token",
-                    "Đặt control_token trong config/devices.json để dùng clipboard.",
+                    "Máy WiFi cần control_token trong config/devices.json để dùng "
+                    "clipboard (máy USB thì không cần).",
                 )
                 return
             def _after_clipboard(_desc, ok_count: int, _fails) -> None:
