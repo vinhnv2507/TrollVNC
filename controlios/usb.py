@@ -12,9 +12,7 @@ Mỗi máy chiếm một dải cổng cục bộ (VNC/control/SSH). Không đụ
 
 from __future__ import annotations
 
-import json
 import logging
-import shutil
 import subprocess
 import sys
 from typing import List, Optional
@@ -34,69 +32,64 @@ PORT_STRIDE = 10
 _NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
-def _tidevice_base() -> Optional[List[str]]:
-    """Cách gọi tidevice, bền cả khi chạy từ mã nguồn lẫn khi đóng gói EXE.
-
-    - Có ``tidevice``/``tidevice.exe`` trên PATH (đã ``pip install tidevice``): dùng nó.
-    - Chạy từ mã nguồn (không đóng gói): ``python -m tidevice``.
-    - Đóng gói EXE mà không có tidevice trên PATH: trả None -> USB không dùng được.
-    """
-
-    exe = shutil.which("tidevice")
-    if exe:
-        return [exe]
-    if not getattr(sys, "frozen", False):
-        return [sys.executable, "-m", "tidevice"]
-    return None
-
-
-def _tidevice_cmd(*args: str) -> Optional[List[str]]:
-    base = _tidevice_base()
-    return [*base, *args] if base else None
-
-
 def tidevice_available() -> bool:
-    cmd = _tidevice_cmd("version")
-    if not cmd:
-        return False
+    """tidevice + usbmuxd của Apple có sẵn sàng không (thư viện, chạy cả trong EXE)."""
+
     try:
-        out = subprocess.run(cmd, capture_output=True, text=True, timeout=15,
-                             creationflags=_NO_WINDOW)
-        return out.returncode == 0
-    except (OSError, subprocess.SubprocessError):
+        from tidevice import Usbmux
+        Usbmux().device_list()
+        return True
+    except Exception as exc:
+        log.warning("usbmux chưa sẵn sàng (thiếu tidevice hoặc Apple Mobile Device "
+                    "Support?): %s", exc)
         return False
 
 
 def list_usb_devices() -> List[dict]:
-    """Máy iOS đang cắm USB: [{'udid', 'name', 'serial'}...]. Rỗng nếu không có."""
+    """Máy iOS đang cắm USB: [{'udid', 'name'}...]. Rỗng nếu không có.
 
-    cmd = _tidevice_cmd("list", "--json", "--usb")
-    if not cmd:
+    Dùng thẳng thư viện tidevice (không gọi tiến trình ngoài) nên chạy được cả
+    khi đóng gói EXE, miễn tidevice đã được gói kèm và Apple usbmuxd đang chạy.
+    """
+
+    try:
+        from tidevice import Usbmux, Device
+    except Exception as exc:
+        log.warning("thiếu tidevice: %s", exc)
         return []
     try:
-        out = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=20, creationflags=_NO_WINDOW,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        log.warning("tidevice list lỗi: %s", exc)
+        um = Usbmux()
+        infos = um.device_list()
+    except Exception as exc:
+        log.warning("không hỏi được usbmux: %s", exc)
         return []
-    if out.returncode != 0:
-        return []
-    try:
-        data = json.loads(out.stdout or "[]")
-    except json.JSONDecodeError:
-        return []
+
     devices = []
-    for item in data:
-        udid = item.get("udid") or item.get("serialNumber")
-        if not udid:
-            continue
-        devices.append({
-            "udid": udid,
-            "name": item.get("name") or item.get("serial") or udid[:8],
-            "serial": item.get("serial", ""),
-        })
+    seen = set()
+    for info in infos:
+        udid = getattr(info, "udid", None)
+        conn = str(getattr(info, "conn_type", "")).upper()
+        if not udid or udid in seen or "USB" not in conn:
+            continue          # chỉ lấy máy cắm cáp (bỏ WiFi-sync)
+        seen.add(udid)
+        try:
+            name = Device(udid, um).name or udid[:8]
+        except Exception:
+            name = udid[:8]
+        devices.append({"udid": udid, "name": name})
     return devices
+
+
+def run_relay(udid: str, lport, rport) -> None:
+    """Chạy relay một cổng qua USB (chặn, chạy mãi tới khi bị tắt).
+
+    ``main.py`` gọi hàm này khi EXE tự re-launch ở chế độ ``--usb-relay`` — nhờ
+    vậy bản đóng gói không cần tidevice.exe ngoài.
+    """
+
+    from tidevice import Device
+    from tidevice._relay import relay
+    relay(Device(udid), int(lport), int(rport))
 
 
 def ports_for(index: int, base: int = DEFAULT_BASE_PORT) -> tuple:
@@ -116,10 +109,13 @@ class UsbRelayManager:
         self._procs: List[subprocess.Popen] = []
 
     def _spawn(self, udid: str, local_port: int, device_port: int) -> None:
-        cmd = _tidevice_cmd("-u", udid, "relay", str(local_port), str(device_port))
-        if not cmd:
-            log.warning("không có tidevice để dựng relay")
-            return
+        if getattr(sys, "frozen", False):
+            # Đóng gói EXE: tự re-launch chính exe ở chế độ relay (tidevice đã gói kèm).
+            cmd = [sys.executable, "--usb-relay", udid, str(local_port), str(device_port)]
+        else:
+            # Chạy từ mã nguồn: dùng CLI tidevice.
+            cmd = [sys.executable, "-m", "tidevice", "-u", udid, "relay",
+                   str(local_port), str(device_port)]
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,

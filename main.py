@@ -17,6 +17,17 @@ from controlios.scan import arp_hosts, discover_bonjour, probe_hosts, scan_sync
 
 
 def main() -> int:
+    # Chế độ relay USB: khi đóng gói EXE, app tự re-launch chính nó với cờ này để
+    # tunnel một cổng qua USB (tidevice được gói kèm exe). Chặn, chạy tới khi tắt.
+    if len(sys.argv) == 5 and sys.argv[1] == "--usb-relay":
+        from controlios.usb import run_relay
+        try:
+            run_relay(sys.argv[2], sys.argv[3], sys.argv[4])
+        except Exception as exc:
+            print(f"usb-relay lỗi: {exc}", file=sys.stderr)
+            return 1
+        return 0
+
     parser = argparse.ArgumentParser(prog="Control IOS")
     parser.add_argument("--scan", nargs="+", metavar="TARGET",
                         help="dải cần quét: 172.30.3.0/24, 172.30.3.10-90, hoặc IP")

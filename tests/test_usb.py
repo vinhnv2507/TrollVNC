@@ -21,23 +21,41 @@ class PortsTest(unittest.TestCase):
         self.assertEqual(usb.ports_for(2), (6021, 6022, 6023))
 
 
+class _FakeInfo:
+    def __init__(self, udid, conn):
+        self.udid = udid
+        self.conn_type = conn
+
+
+class _FakeDevice:
+    def __init__(self, udid, um=None):
+        self._udid = udid
+
+    @property
+    def name(self):
+        return "iPhone " + self._udid[:3]
+
+
 class ListDevicesTest(unittest.TestCase):
-    def _run(self, stdout: str, returncode: int = 0):
-        completed = subprocess.CompletedProcess([], returncode, stdout, "")
-        with unittest.mock.patch("controlios.usb.subprocess.run", return_value=completed):
+    def _list(self, infos):
+        class FakeUsbmux:
+            def device_list(self_inner):
+                return infos
+        with unittest.mock.patch("tidevice.Usbmux", FakeUsbmux), \
+                unittest.mock.patch("tidevice.Device", _FakeDevice):
             return usb.list_usb_devices()
 
-    def test_parses_json(self) -> None:
-        out = ('[{"udid": "abc123", "name": "iPhone A", "serial": "S1"},'
-               ' {"udid": "def456", "name": "iPhone B", "serial": "S2"}]')
-        devices = self._run(out)
+    def test_lists_usb_only_with_names(self) -> None:
+        devices = self._list([
+            _FakeInfo("abc123", "ConnectionType.USB"),
+            _FakeInfo("net999", "ConnectionType.Network"),   # WiFi-sync: bỏ
+            _FakeInfo("def456", "ConnectionType.USB"),
+        ])
         self.assertEqual([d["udid"] for d in devices], ["abc123", "def456"])
-        self.assertEqual(devices[0]["name"], "iPhone A")
+        self.assertEqual(devices[0]["name"], "iPhone abc")
 
-    def test_empty_and_bad_json_return_empty(self) -> None:
-        self.assertEqual(self._run("[]"), [])
-        self.assertEqual(self._run("not json"), [])
-        self.assertEqual(self._run("[]", returncode=1), [])
+    def test_empty_when_none(self) -> None:
+        self.assertEqual(self._list([]), [])
 
 
 class RelayManagerTest(unittest.TestCase):
