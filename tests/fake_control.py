@@ -37,6 +37,12 @@ class FakeControlServer:
     opened_in: List[Tuple[str, str]] = field(default_factory=list)
     #: đường dẫn -> nội dung đã nhận
     received: Dict[str, bytes] = field(default_factory=dict)
+    #: clipboard hiện tại của "máy"
+    clipboard: str = ""
+    #: đường dẫn các ảnh đã được nạp vào Thư viện qua savephoto
+    saved_photos: List[str] = field(default_factory=list)
+    respring_count: int = 0
+    scale: float = 1.0
     unauthorized: int = 0
     #: Đặt True để giả lập bản TrollVNC gốc (chưa vá).
     unpatched: bool = False
@@ -75,6 +81,8 @@ class FakeControlServer:
 
             if cmd.startswith("put "):
                 writer.write(await self._receive(reader, cmd[len("put "):]))
+            elif cmd.startswith("clipset "):
+                writer.write(await self._receive_clip(reader, cmd[len("clipset "):]))
             else:
                 writer.write(self._respond(cmd))
             await writer.drain()
@@ -102,9 +110,58 @@ class FakeControlServer:
         self.received[path] = data
         return f"OK {len(data)}\n".encode()
 
+    async def _receive_clip(self, reader: asyncio.StreamReader, spec: str) -> bytes:
+        """`clipset <size>` — đọc đúng size byte rồi đặt làm clipboard."""
+
+        if self.unpatched:
+            return b"ERR Unknown\n"
+        try:
+            size = int(spec.strip())
+        except ValueError:
+            return b"ERR Usage clipset <size>\n"
+        try:
+            data = await asyncio.wait_for(reader.readexactly(size), timeout=10)
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError):
+            return b"ERR Incomplete\n"
+        self.clipboard = data.decode("utf-8", errors="replace")
+        return f"OK {len(data)}\n".encode()
+
     def _respond(self, cmd: str) -> bytes:
         if cmd == "count":
             return b"1\n"
+
+        if cmd == "clipget":
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            payload = self.clipboard.encode("utf-8")
+            return b"OK " + str(len(payload)).encode() + b"\n" + payload
+
+        if cmd.startswith("savephoto "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            path = cmd[len("savephoto "):].strip()
+            if path not in self.received:
+                return b"ERR NotFound\n"
+            self.saved_photos.append(path)
+            return b"OK\n"
+
+        if cmd == "respring":
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            self.respring_count += 1
+            return b"OK\n"
+
+        if cmd.startswith("setscale "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            try:
+                value = float(cmd[len("setscale "):].strip())
+            except ValueError:
+                return b"ERR BadScale\n"
+            if not (0.0 < value <= 1.0):
+                return b"ERR BadScale\n"
+            self.scale = value
+            return f"OK {value:.3f}\n".encode()
 
         if self.unpatched and cmd.split(" ")[0] in ("apps", "launch", "terminate"):
             return b"ERR Unknown\n"

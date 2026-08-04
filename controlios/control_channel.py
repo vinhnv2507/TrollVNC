@@ -61,11 +61,20 @@ class ControlChannel:
     port: int = DEFAULT_CONTROL_PORT
     token: str = ""
     timeout: float = 6.0
+    # Qua USB, relay nối tới control socket ở **loopback trên máy**, mà server chỉ
+    # cắt tiền tố `auth <token>` cho kết nối NGOÀI loopback. Vậy với đường USB
+    # phải gửi lệnh **không kèm auth**, nếu không server hiểu nhầm `auth` là lệnh.
+    loopback: bool = False
+
+    def _auth_prefix(self) -> str:
+        if self.loopback or not self.token:
+            return ""
+        return f"auth {self.token} "
 
     async def command(self, line: str) -> str:
         """Gửi một lệnh, trả về nguyên văn phần trả lời."""
 
-        payload = f"auth {self.token} {line}\n" if self.token else f"{line}\n"
+        payload = f"{self._auth_prefix()}{line}\n"
         try:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(self.host, self.port), timeout=self.timeout
@@ -163,8 +172,7 @@ class ControlChannel:
             raise ControlError(f"{self.host}:{self.port} không phản hồi ({exc})") from None
 
         try:
-            header = f"auth {self.token} put {size} {remote}\n" if self.token \
-                else f"put {size} {remote}\n"
+            header = f"{self._auth_prefix()}put {size} {remote}\n"
             writer.write(header.encode("utf-8"))
             await writer.drain()
 
@@ -251,6 +259,135 @@ class ControlChannel:
         finally:
             tmp.unlink(missing_ok=True)
         return remote
+
+    async def _exchange(self, header_line: str, payload: bytes = b"",
+                        read_timeout: Optional[float] = None) -> bytes:
+        """Gửi một dòng lệnh (kèm payload nhị phân tuỳ chọn), trả về byte thô.
+
+        Dùng cho các lệnh có phần dữ liệu đi liền sau dòng lệnh (``clipset``) hoặc
+        có phần trả lời nhị phân (``clipget``) — nơi mà ``command`` giải mã sẵn
+        thành chuỗi là không đủ.
+        """
+
+        header = f"{self._auth_prefix()}{header_line}\n".encode("utf-8")
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), timeout=self.timeout
+            )
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ControlError(
+                f"{self.host}:{self.port} không phản hồi — TrollVNC chưa chạy, "
+                f"hoặc bản trên máy chưa được vá ({exc})"
+            ) from None
+
+        try:
+            writer.write(header)
+            if payload:
+                writer.write(payload)
+            await writer.drain()
+            data = await asyncio.wait_for(
+                reader.read(), timeout=read_timeout or self.timeout
+            )
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ControlError(f"{self.host}: mất kết nối giữa chừng ({exc})") from None
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+        return data
+
+    async def set_clipboard(self, text: str) -> int:
+        """Đặt clipboard của máy = ``text`` (UTF-8). Trả về số byte máy xác nhận.
+
+        Đây là đường vòng qua giới hạn clipboard latin-1 của client VNC: chữ đi
+        thẳng vào ``UIPasteboard`` nên **dán được khối chữ dài, đủ dấu tiếng
+        Việt** cho hàng loạt máy mà không phải gõ từng ký tự qua keysym.
+        """
+
+        payload = text.encode("utf-8")
+        data = await self._exchange(f"clipset {len(payload)}", payload)
+        reply = data.decode("utf-8", errors="replace")
+        self._raise_for_error(reply, "clipset")
+        head = reply.strip()
+        if not head.startswith("OK"):
+            raise ControlError(f"Máy từ chối clipboard: {head}")
+        parts = head.split()
+        return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else len(payload)
+
+    async def get_clipboard(self) -> str:
+        """Đọc clipboard hiện tại của máy (UTF-8)."""
+
+        data = await self._exchange("clipget")
+        self._raise_for_error(data.decode("utf-8", errors="replace"), "clipget")
+        newline = data.find(b"\n")
+        if newline == -1:
+            raise ControlError(f"Trả lời lạ cho clipget: {data!r}")
+        header = data[:newline].decode("utf-8", errors="replace").strip()
+        parts = header.split()
+        if not parts or parts[0] != "OK":
+            raise ControlError(f"Trả lời lạ cho clipget: {header!r}")
+        size = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+        payload = data[newline + 1:newline + 1 + size]
+        return payload.decode("utf-8", errors="replace")
+
+    async def save_photo(self, remote_path: str) -> None:
+        """Nạp một file ảnh **đã có trên máy** vào Thư viện Ảnh qua PHPhotoLibrary.
+
+        Chép ảnh vào thư mục thường không làm nó hiện trong app Ảnh — iOS quản
+        ảnh bằng cơ sở dữ liệu riêng. Lệnh này gọi ``PHAssetCreationRequest`` để
+        ảnh dùng được trong Shopee/TikTok. Ghép với :meth:`put_file` thì thành
+        đẩy-ảnh-rồi-nạp trong một lượt (xem :meth:`push_photo`).
+        """
+
+        # Nạp ảnh có thể lâu hơn một dòng lệnh: PHPhotoLibrary ghi bất đồng bộ.
+        data = await self._exchange(
+            f"savephoto {remote_path}", read_timeout=max(self.timeout, 30)
+        )
+        text = data.decode("utf-8", errors="replace")
+        self._raise_for_error(text, "savephoto")
+        head = text.strip()
+        if not head.startswith("OK"):
+            raise ControlError(f"Không nạp được ảnh vào Thư viện: {head}")
+
+    async def push_photo(self, local: Path | str,
+                         remote_dir: str = "/var/mobile/Media/controlios",
+                         normalize: bool = True) -> None:
+        """Đẩy một ảnh/video từ PC rồi nạp thẳng vào Thư viện Ảnh của máy.
+
+        ``normalize=True`` (mặc định): video lạ định dạng được tự re-encode sang
+        chuẩn iOS trước khi đẩy (cần ffmpeg). Tầng pool tắt cờ này vì đã chuẩn
+        hoá một lần cho cả mẻ.
+        """
+
+        local = Path(local)
+        if normalize:
+            from . import media
+            local = await asyncio.to_thread(media.ensure_ios_media, local)
+        remote = f"{remote_dir.rstrip('/')}/{local.name}"
+        await self.put_file(local, remote)
+        await self.save_photo(remote)
+
+    async def respring(self) -> None:
+        """Khởi động lại SpringBoard — gỡ giao diện treo, KHÔNG mất jailbreak."""
+
+        text = await self.command("respring")
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không respring được: {text.strip()}")
+
+    async def set_scale(self, factor: float) -> None:
+        """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.
+
+        Khung nhỏ hơn -> máy nén nhanh hơn -> mượt hơn, đổi lại kém nét. Đổi kích
+        thước làm phiên VNC nối lại một nhịp (như xoay máy). Cần TrollVNC đã vá.
+        """
+
+        if not (0.0 < factor <= 1.0):
+            raise ValueError("scale phải trong khoảng (0, 1]")
+        text = await self.command(f"setscale {factor:.3f}")
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không đổi được scale: {text.strip()}")
 
     async def open_url(self, url: str) -> None:
         text = await self.command(f"openurl {url}")
