@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
+import tempfile
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Iterable, List, Optional
@@ -12,9 +15,53 @@ DEFAULT_PORT = 5901
 # Dải quét gợi ý sẵn trong hộp thoại Quét mạng.
 DEFAULT_SCAN_RANGE = "172.30.3.0/24"
 
-# Where the registry lives by default (next to the project root).
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Nơi để dữ liệu (config, captures...). Khi đóng gói EXE, để CẠNH file exe cho
+# dễ mang đi máy khác; khi chạy từ mã nguồn thì ở gốc project.
+if getattr(sys, "frozen", False):
+    PROJECT_ROOT = Path(sys.executable).resolve().parent
+else:
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = PROJECT_ROOT / "config" / "devices.json"
+
+# Thư viện kịch bản đặt tên, lưu ngay trong app (không cần file .txt rời).
+DEFAULT_SCRIPTS = PROJECT_ROOT / "config" / "scripts.json"
+
+
+def load_named_scripts(path: Path | str | None = None) -> dict:
+    """Đọc thư viện kịch bản {tên: nội dung}. Thiếu/hỏng file thì trả về rỗng."""
+
+    path = Path(path) if path is not None else DEFAULT_SCRIPTS
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(name): str(body) for name, body in data.items()}
+
+
+def save_named_scripts(scripts: dict, path: Path | str | None = None) -> None:
+    """Ghi thư viện kịch bản, nguyên tử (không hỏng file khi bị ngắt giữa chừng)."""
+
+    path = Path(path) if path is not None else DEFAULT_SCRIPTS
+    path.parent.mkdir(parents=True, exist_ok=True)
+    data = json.dumps(scripts, indent=2, ensure_ascii=False)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp",
+                                     dir=path.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
 
 
 @dataclass
@@ -27,10 +74,21 @@ class DeviceSpec:
     group: str = ""
     password: Optional[str] = None
     enabled: bool = True
+    # Cổng control socket / SSH riêng cho máy này. None = dùng cổng chung trong
+    # Settings. Dùng cho chế độ USB: mỗi máy map sang một cổng 127.0.0.1 khác
+    # nhau (VNC = `port`, control = `control_port`, SSH = `ssh_port`).
+    control_port: Optional[int] = None
+    ssh_port: Optional[int] = None
+    # UDID máy USB (để tự dựng lại relay khi mở app). Rỗng với máy mạng thường.
+    udid: str = ""
 
     def __post_init__(self) -> None:
         if not self.name:
             self.name = self.host
+
+    @property
+    def is_usb(self) -> bool:
+        return bool(self.udid) or self.host in ("127.0.0.1", "localhost")
 
     @property
     def key(self) -> str:
@@ -92,6 +150,40 @@ class Settings:
     # 0 = không bao giờ ngắt (giữ nguyên hành vi cũ).
     idle_disconnect_after: float = 60.0
 
+    # Hệ số scale khung hình TrollVNC gửi về (0<scale<=1). 1.0 = gốc. Nhỏ hơn thì
+    # máy nén khung nhẹ hơn -> mượt hơn trên máy đời cũ, đổi lại kém nét. Áp qua
+    # control socket (setscale); cần TrollVNC đã vá vòng 5.
+    device_scale: float = 1.0
+
+    def validate(self) -> None:
+        """Reject settings that would fail later inside the network thread."""
+
+        positive = {
+            "grid_fps": self.grid_fps,
+            "live_fps": self.live_fps,
+            "thumb_long_edge": self.thumb_long_edge,
+            "connect_concurrency": self.connect_concurrency,
+            "reconnect_delay": self.reconnect_delay,
+            "reconnect_max": self.reconnect_max,
+            "stall_timeout": self.stall_timeout,
+            "control_port": self.control_port,
+            "ssh_port": self.ssh_port,
+        }
+        invalid = [name for name, value in positive.items() if value <= 0]
+        if invalid:
+            raise ValueError(f"Cấu hình phải lớn hơn 0: {', '.join(invalid)}")
+        if self.live_long_edge < 0 or self.max_connected < 0 \
+                or self.idle_disconnect_after < 0:
+            raise ValueError(
+                "live_long_edge, max_connected và idle_disconnect_after không được âm"
+            )
+        if self.reconnect_max < self.reconnect_delay:
+            raise ValueError("reconnect_max không được nhỏ hơn reconnect_delay")
+        if not self.ssh_user.strip():
+            raise ValueError("ssh_user không được để trống")
+        if not (0.0 < self.device_scale <= 1.0):
+            raise ValueError("device_scale phải trong khoảng (0, 1]")
+
 
 @dataclass
 class Registry:
@@ -106,16 +198,34 @@ class Registry:
         raw = json.loads(path.read_text(encoding="utf-8"))
         devices = [DeviceSpec(**d) for d in raw.get("devices", [])]
         settings = Settings(**raw.get("settings", {}))
+        settings.validate()
         return cls(devices=devices, settings=settings)
 
     def save(self, path: Path | str = DEFAULT_REGISTRY) -> None:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
+        self.settings.validate()
         payload = {
             "settings": asdict(self.settings),
             "devices": [asdict(d) for d in self.devices],
         }
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        # Ghi file tạm cùng thư mục rồi replace nguyên tử: mất điện hoặc app bị
+        # kill giữa lúc lưu sẽ không làm hỏng registry đang dùng.
+        data = json.dumps(payload, indent=2, ensure_ascii=False)
+        fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp",
+                                         dir=path.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+        except BaseException:
+            try:
+                os.unlink(temporary)
+            except FileNotFoundError:
+                pass
+            raise
 
     def merge_hosts(self, hosts: Iterable[str], port: int = DEFAULT_PORT) -> int:
         """Add hosts that are not in the registry yet. Returns the count added."""

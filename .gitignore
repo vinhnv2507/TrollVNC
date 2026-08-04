@@ -2,12 +2,20 @@
 __pycache__/
 *.pyc
 config/devices.json
+config/scripts.json
 captures/
 preview-*.png
 ui-preview.png
+toolbar-preview.png
 config/_preview_devices.json
 *.log
 _upstream/
 _fork/
 config/id_controlios
 config/id_controlios.pub
+backups/
+
+# PyInstaller
+build/
+dist/
+*.spec

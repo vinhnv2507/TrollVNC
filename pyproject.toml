@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "controlios"
+version = "0.1.0"
+description = "Điều khiển nhiều thiết bị iOS qua TrollVNC, control socket và SSH"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "asyncvnc>=1.1",
+    "numpy>=1.26",
+    "PySide6-Essentials>=6.6",
+    "zeroconf>=0.130",
+    "asyncssh>=2.14",
+    "tidevice>=0.11",          # chế độ USB: forward cổng qua usbmuxd (iproxy-like)
+]
+
+[project.scripts]
+controlios = "main:main"
+controlios-filepush = "controlios.filepush:main"
+controlios-ssh-setup = "controlios.ssh_setup:main"
+
+[tool.setuptools]
+py-modules = ["main"]
+
+[tool.setuptools.packages.find]
+include = ["controlios*"]
+
+[tool.unittest]
+start-directory = "tests"
