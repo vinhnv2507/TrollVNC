@@ -1003,9 +1003,9 @@ class MainWindow(QMainWindow):
         from ..usb import list_usb_devices, tidevice_available, UsbRelayManager
         if not tidevice_available():
             QMessageBox.warning(
-                self, "Thiếu tidevice",
-                "Chưa có tidevice. Cài bằng: .venv\\Scripts\\python.exe -m pip "
-                "install tidevice (cần Apple Mobile Device Support / iTunes).",
+                self, "Không dùng được USB",
+                "Chưa nói chuyện được với usbmuxd. Kiểm tra: Apple Mobile Device "
+                "Support (cài iTunes) đang chạy, và dây cáp đã cắm.",
             )
             return
 
@@ -1064,6 +1064,9 @@ class MainWindow(QMainWindow):
         self.grid.set_focus_key(key)
         self.detail.setFocus()
         self._update_detail_title(key)
+        # Buộc refit ở khung kế: nếu không, frame đầu có tỉ lệ trùng _detail_aspect
+        # cũ sẽ bị bỏ qua và khung không co lại đúng cỡ máy mới mở.
+        self._detail_aspect = -1.0
         self._fit_detail_pane()
 
     def _device_name(self, key: str) -> str:
@@ -1073,14 +1076,12 @@ class MainWindow(QMainWindow):
         return key or ""
 
     def _reset_detail_view(self, key: str) -> None:
-        """Xoá sạch khung lớn rồi nạp lại — bỏ pixel cũ sau khi framebuffer đổi cỡ."""
+        """Xoá sạch khung lớn rồi mở lại — bỏ pixel cũ + re-promote tier để có
+        khung LIVE mới sau khi framebuffer đổi cỡ."""
         if self.detail.key != key:
             return
-        self.detail.set_device(None)
-        self.detail.set_device(key)
-        self._update_detail_title(key)
-        self._detail_aspect = -1.0        # buộc refit ở khung kế
-        self._fit_detail_pane()
+        self.detail.set_device(None)      # xoá ảnh cũ (hết lồng)
+        self._focus_device(key)           # mở lại: re-promote tier + buộc refit
 
     def _update_detail_title(self, key: Optional[str]) -> None:
         if key:
@@ -1698,6 +1699,10 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)
+        # Máy đang mở ở khung lớn vừa nối lại (đổi scale/reconnect) -> buộc refit
+        # ở khung kế để khung tự co đúng cỡ mới, không phải bấm đúp lại.
+        if key == self.detail.key and state is State.ONLINE:
+            self._detail_aspect = -1.0
 
     def _refresh_stats(self) -> None:
         stats = self.pool.stats()
