@@ -116,6 +116,60 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
     async def test_count_uses_the_stock_command(self) -> None:
         self.assertEqual(await self.channel.client_count(), 1)
 
+    async def test_clipboard_round_trips_utf8_with_accents(self) -> None:
+        payload = "Xin chào bạn — bình luận số 1 😀 (emoji cũng qua được)"
+        written = await self.channel.set_clipboard(payload)
+        self.assertEqual(written, len(payload.encode("utf-8")))
+        self.assertEqual(self.server.clipboard, payload)
+        self.assertEqual(await self.channel.get_clipboard(), payload)
+
+    async def test_clipboard_preserves_newlines(self) -> None:
+        payload = "dòng một\ndòng hai\n"
+        await self.channel.set_clipboard(payload)
+        self.assertEqual(await self.channel.get_clipboard(), payload)
+
+    async def test_clipboard_fails_clearly_on_unpatched(self) -> None:
+        self.server.unpatched = True
+        with self.assertRaises(NotPatchedError):
+            await self.channel.set_clipboard("gì đó")
+
+    async def test_save_photo_needs_the_file_on_device(self) -> None:
+        with self.assertRaises(ControlError):
+            await self.channel.save_photo("/var/mobile/Media/khong-co.png")
+
+    async def test_respring_reaches_the_device(self) -> None:
+        await self.channel.respring()
+        self.assertEqual(self.server.respring_count, 1)
+
+    def test_loopback_omits_auth_prefix(self) -> None:
+        # Qua USB (loopback trên máy) server không cắt tiền tố auth -> phải bỏ nó.
+        usb = ControlChannel("127.0.0.1", 6002, "tok", loopback=True)
+        self.assertEqual(usb._auth_prefix(), "")
+        wifi = ControlChannel("172.30.3.5", 46752, "tok")
+        self.assertEqual(wifi._auth_prefix(), "auth tok ")
+
+    async def test_set_scale_applies_and_validates(self) -> None:
+        await self.channel.set_scale(0.5)
+        self.assertAlmostEqual(self.server.scale, 0.5)
+        with self.assertRaises(ValueError):
+            await self.channel.set_scale(1.5)      # ngoài (0,1]
+        with self.assertRaises(ValueError):
+            await self.channel.set_scale(0.0)
+
+    async def test_push_photo_uploads_then_imports(self) -> None:
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("wb", suffix=".png", delete=False) as handle:
+            handle.write(b"\x89PNG\r\n\x1a\n" + b"gia-lam-anh" * 100)
+            local = Path(handle.name)
+        try:
+            await self.channel.push_photo(local, remote_dir="/var/mobile/Media/ci")
+            remote = "/var/mobile/Media/ci/" + local.name
+            self.assertIn(remote, self.server.received)
+            self.assertEqual(self.server.saved_photos, [remote])
+        finally:
+            local.unlink(missing_ok=True)
+
 
 class ScriptAppCommandTest(unittest.TestCase):
     def test_parses_bundle_id_commands(self) -> None:
@@ -142,6 +196,36 @@ class ScriptAppCommandTest(unittest.TestCase):
 
     def test_counted_as_one_step(self) -> None:
         self.assertEqual(script.count_steps(script.parse("launchapp com.a.b")), 1)
+
+    def test_parses_restart_and_url_commands(self) -> None:
+        steps = script.parse(
+            "restartapp com.zing.zalo 2\n"
+            "openurl https://example.com/path?q=1\n"
+            "openurlin com.zing.zalo zalo://home"
+        )
+        self.assertEqual([s.op for s in steps], ["restartapp", "openurl", "openurlin"])
+        self.assertEqual(steps[0].args, ("com.zing.zalo", 2.0))
+
+    def test_retry_block_is_counted_at_worst_case(self) -> None:
+        steps = script.parse("retry 3 0.5\n    launchapp com.zing.zalo")
+        self.assertEqual(steps[0].args, (3, 0.5))
+        self.assertEqual(script.count_steps(steps), 3)
+
+    def test_retry_requires_an_indented_body(self) -> None:
+        with self.assertRaisesRegex(script.ScriptError, "retry phải có khối"):
+            script.parse("retry 3")
+
+    def test_parses_clipboard_and_savephoto(self) -> None:
+        steps = script.parse(
+            "clipboard Xin chào bạn\nsavephoto /var/mobile/Media/ci/anh.png"
+        )
+        self.assertEqual([s.op for s in steps], ["clipboard", "savephoto"])
+        self.assertEqual(steps[0].args, ("Xin chào bạn",))
+        self.assertEqual(steps[1].args, ("/var/mobile/Media/ci/anh.png",))
+
+    def test_savephoto_rejects_relative_path(self) -> None:
+        with self.assertRaisesRegex(script.ScriptError, "đường dẫn tuyệt đối"):
+            script.parse("savephoto anh.png")
 
 
 class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
@@ -186,6 +270,56 @@ class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
                 self._FakeSession(), steps, lambda k, m: None, control=None
             )
         self.assertIn("control_token", str(ctx.exception))
+
+    async def test_runner_sets_clipboard_via_control_channel(self) -> None:
+        steps = script.parse("clipboard Bình luận đủ dấu")
+        await script.run_on_session(
+            self._FakeSession(), steps, lambda k, m: None, control=self.channel
+        )
+        self.assertEqual(self.server.clipboard, "Bình luận đủ dấu")
+
+    async def test_runner_clipboard_needs_channel(self) -> None:
+        steps = script.parse("clipboard gì đó")
+        with self.assertRaises(ConnectionError):
+            await script.run_on_session(
+                self._FakeSession(), steps, lambda k, m: None, control=None
+            )
+
+    async def test_runner_restarts_app_and_opens_urls(self) -> None:
+        self.server.running.add("com.honeygain.app")
+        steps = script.parse(
+            "restartapp com.honeygain.app 0\n"
+            "openurl https://example.com/start\n"
+            "openurlin com.honeygain.app honeygain://dashboard"
+        )
+        await script.run_on_session(
+            self._FakeSession(), steps, lambda k, m: None, control=self.channel
+        )
+        self.assertEqual(self.server.terminated, ["com.honeygain.app"])
+        self.assertEqual(self.server.launched, ["com.honeygain.app"])
+        self.assertEqual(self.server.opened_urls, ["https://example.com/start"])
+        self.assertEqual(
+            self.server.opened_in,
+            [("com.honeygain.app", "honeygain://dashboard")],
+        )
+
+    async def test_retry_is_independent_per_session(self) -> None:
+        class FlakyControl:
+            attempts = 0
+
+            async def launch(self, _bundle):
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise ConnectionError("mạng chập chờn")
+
+        control = FlakyControl()
+        events = []
+        steps = script.parse("retry 3 0\n    launchapp com.honeygain.app")
+        await script.run_on_session(
+            self._FakeSession(), steps, lambda k, m: events.append(m), control=control
+        )
+        self.assertEqual(control.attempts, 3)
+        self.assertEqual(len([event for event in events if "thử lại" in event]), 2)
 
 
 if __name__ == "__main__":
