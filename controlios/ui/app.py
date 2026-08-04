@@ -1699,10 +1699,14 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)
-        # Máy đang mở ở khung lớn vừa nối lại (đổi scale/reconnect) -> buộc refit
-        # ở khung kế để khung tự co đúng cỡ mới, không phải bấm đúp lại.
-        if key == self.detail.key and state is State.ONLINE:
-            self._detail_aspect = -1.0
+        if key == self.detail.key:
+            if state in (State.CONNECTING, State.ERROR):
+                # Đang nối lại -> xoá ảnh cũ ở khung lớn để không giữ khung lồng.
+                self.detail.clear_frame()
+            elif state is State.ONLINE:
+                # Nối lại xong -> buộc refit ở khung kế để tự co đúng cỡ mới,
+                # không phải bấm đúp lại.
+                self._detail_aspect = -1.0
 
     def _refresh_stats(self) -> None:
         stats = self.pool.stats()

@@ -115,6 +115,13 @@ class DetailView(QWidget):
         self._dragging = False
         self.update()
 
+    def clear_frame(self) -> None:
+        """Bỏ ảnh đang hiển thị (giữ nguyên máy đang mở) — dùng khi nối lại để
+        không giữ khung cũ/lồng lúc framebuffer đổi cỡ."""
+        self._pixmap = None
+        self._scaled = None
+        self.update()
+
     def on_frame(self, frame: Frame) -> None:
         if frame.key != self.key:
             return

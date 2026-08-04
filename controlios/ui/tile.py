@@ -85,6 +85,11 @@ class DeviceTile(QWidget):
         self.update()
 
     def set_state(self, state: State, detail: str = "") -> None:
+        # Đang nối lại hoặc lỗi -> bỏ ảnh cũ để không giữ khung hỏng/lồng (ví dụ
+        # frame lệch cỡ lúc đổi scale). Máy ngủ (DORMANT) thì cố ý giữ ảnh cuối.
+        if state in (State.CONNECTING, State.ERROR):
+            self._pixmap = None
+            self._scaled = None
         self.state = state
         self.detail = detail
         self.update()
