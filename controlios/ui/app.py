@@ -1179,13 +1179,10 @@ class MainWindow(QMainWindow):
         # Scale đi qua control socket của từng máy (không phải Settings phía PC),
         # nên phải phát riêng — và chỉ khi thật sự đổi để tránh nối lại vô cớ.
         if abs(settings.device_scale - old_scale) > 1e-6:
+            # Gửi cho mọi máy đang online: máy USB (loopback) đổi được ngay; máy
+            # WiFi thiếu token sẽ hiện lỗi rõ ngay trong bảng kết quả — không cần
+            # popup cảnh báo riêng, tránh làm phiền mỗi lần đổi scale.
             targets = self.pool.online_keys()
-            if self._needs_control_token(targets) and not settings.control_token:
-                QMessageBox.information(
-                    self, "Thiếu control token",
-                    "Máy WiFi cần control_token trong config/devices.json để đổi "
-                    "scale (máy USB thì không cần). Vẫn gửi cho máy USB.",
-                )
             if targets:
                 dlg = BulkResultDialog(
                     f"Đặt scale {settings.device_scale:.2f}", len(targets), self)
