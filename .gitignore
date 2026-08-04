@@ -19,3 +19,4 @@ backups/
 build/
 dist/
 *.spec
+tests/_*.json

@@ -153,6 +153,22 @@ mạng** và **Nạp danh sách…** (file txt, mỗi dòng một IP hoặc `ip:
 
 Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầm với dịch vụ khác.
 
+### 1b. Qua USB (không cần WiFi)
+
+Cả ba kênh đều là TCP nên **forward được qua dây USB** bằng usbmuxd của Apple
+(đi kèm iTunes / Apple Mobile Device Support). Nút **Quét USB** trên thanh công
+cụ: tìm iPhone đang cắm, tự dựng relay (`tidevice`) cho cả VNC lẫn control socket
+lẫn SSH, rồi nạp vào lưới ở nhóm `usb`. Máy USB nhớ **cổng riêng từng kênh**
+(`127.0.0.1:<cổng>`) trong `DeviceSpec` nên **mọi tính năng chạy y như qua mạng**
+— xem/điều khiển, app, clipboard, nạp ảnh, respring, scale, SSH.
+
+Ưu điểm: không phụ thuộc WiFi, độ trễ thấp hơn, hết nghẽn router. Cần `tidevice`
+(đi kèm khi cài project) và Apple Mobile Device Support đang chạy. Relay tự tắt
+khi đóng app và tự dựng lại khi mở lại (máy USB đã lưu trong `devices.json`).
+
+> Giới hạn phần cứng: một PC/USB host chỉ cắm được số máy có hạn (hub có nguồn,
+> có thể phải nhiều card USB) — đây là trần vật lý, không phải phần mềm.
+
 ### 2. Dùng giao diện
 
 - **Lưới bên trái**: mỗi ô một máy, viền màu = trạng thái (xanh online, vàng
@@ -231,11 +247,16 @@ Nút **Gõ chữ…** mở hộp soạn nhiều dòng, dán được từ clipbo
 nhấn Enter sau khi gõ. Tiện hơn hẳn gõ tay khi cần nhập cùng một nội dung cho
 hàng loạt máy.
 
-> Phần mềm gõ **từng ký tự qua keysym** — chậm hơn nhưng đúng dấu. Bản thân
-> TrollVNC *có* hỗ trợ clipboard UTF-8 (extension của UltraVNC), nhưng thư viện
-> client `asyncvnc` chỉ hiện thực `ClientCutText` chuẩn (latin-1), nên đường
-> clipboard chưa dùng được cho tiếng Việt. Đây là chỗ có thể nâng cấp nếu cần
-> dán khối chữ dài cho nhiều máy.
+> Phần mềm gõ **từng ký tự qua keysym** — chậm hơn nhưng đúng dấu. Thư viện
+> client `asyncvnc` chỉ hiện thực `ClientCutText` chuẩn (latin-1) nên đường
+> clipboard **của VNC** không dùng được cho tiếng Việt.
+>
+> **Đường vòng: đặt clipboard qua kênh điều khiển.** Với máy chạy TrollVNC đã vá
+> (vòng 3), tick **Đặt vào clipboard máy (UTF-8, nhanh)** trong hộp *Gõ chữ…*:
+> chữ đi thẳng vào `UIPasteboard`, giữ đúng dấu lẫn emoji và **nhanh hơn hẳn** gõ
+> từng ký tự — hợp khi cần dán cùng một khối chữ dài (caption, bình luận) cho
+> hàng loạt máy. Tick thêm **Dán ngay (Cmd+V)** để dán luôn vào ô đang chọn.
+> Trong kịch bản: `clipboard <nội dung>`. Xem [docs/trollvnc-patch-3.md](docs/trollvnc-patch-3.md).
 
 ### Phát thao tác cho nhiều máy
 
@@ -502,6 +523,11 @@ Bấm **Kịch bản…**, soạn rồi **Chạy** — kịch bản chạy **son
 đang chọn. Toạ độ là **tỉ lệ 0..1**, không phải pixel, nên cùng một kịch bản
 chạy đúng trên các iPhone khác cỡ màn hình.
 
+Không cần nhớ bundle ID: trong hộp thoại, bấm **Lấy danh sách app**. Chương
+trình hỏi tất cả máy đang chọn, hợp nhất danh sách theo bundle ID và hiển thị
+độ phủ như `Zalo — com.zing.zalo — 48/50 máy`. Chọn app rồi bấm **Chèn mở**,
+**Chèn đóng** hoặc **Chèn mở lại** để đưa đúng lệnh vào vị trí con trỏ.
+
 ```
 # Dòng trống và dòng bắt đầu bằng # bị bỏ qua
 
@@ -517,10 +543,17 @@ brightness down 3                 # giảm 3 nấc
 volume mute                       # tắt tiếng
 launchapp com.zing.zalo           # mở app theo bundle id (kênh điều khiển)
 killapp com.zing.zalo             # đóng app
+restartapp com.zing.zalo 2        # đóng, chờ 2 giây rồi mở lại
+openurl https://example.com       # mở URL bằng app mặc định
+openurlin com.zing.zalo zalo://home # mở URL bằng đúng app chỉ định
+clipboard Xin chào bạn            # đặt clipboard máy (UTF-8, kênh điều khiển)
+savephoto /var/mobile/Media/x.jpg # nạp ảnh đã có trên máy vào Thư viện Ảnh
 shot ket-qua                      # chụp màn hình, file có hậu tố ket-qua
 repeat 3                          # lặp khối thụt lề bên dưới 3 lần
     swipe 0.5 0.75 0.5 0.25 0.3
     wait 1
+retry 3 1                         # lỗi thì thử lại riêng trên từng máy
+    restartapp com.zing.zalo 2
 openapp Zalo                      # và mọi cử chỉ ở mục trên
 ```
 
@@ -529,6 +562,10 @@ nhả ngay thì iOS về màn hình chính, phải *giữ* lại mới ra trình
 
 **`wait 5-10` bốc số riêng cho từng máy**, không phải một số dùng chung. Nên khi
 chạy trên 50 máy, chúng không thao tác đồng loạt cùng một nhịp.
+
+Block **`retry <số lần> [giây nghỉ]`** cũng chạy độc lập trên từng máy. Máy A
+mất mạng có thể thử lại mà không bắt máy B/C chạy lại hoặc dừng cả mẻ. Nếu hết
+số lần thử, chỉ máy đó báo lỗi; các máy còn lại tiếp tục tới cuối kịch bản.
 
 Ví dụ đóng app rồi mở lại sau một khoảng ngẫu nhiên:
 
@@ -542,7 +579,9 @@ launchapp com.zing.zalo
   chạy. Lỗi báo kèm **số dòng**. Toạ độ ngoài khoảng 0..1 bị từ chối ngay, vì đó
   gần như luôn là nhầm pixel với tỉ lệ.
 - **Dừng** — huỷ giữa chừng trên tất cả máy.
-- **Mở… / Lưu…** — kịch bản là file `.txt` thường.
+- **Thư viện kịch bản** — lưu thẳng trong app, không cần file rời. Hàng **Kịch
+  bản đã lưu** có ô chọn tên, nút **Lưu…** (đặt tên cho kịch bản đang soạn) và
+  **Xoá**. Chọn một tên là nạp lại vào ô soạn. Lưu ở `config/scripts.json`.
 - Ảnh từ lệnh `shot` nằm ở `captures/kichban/`.
 - Máy nào chưa kết nối thì bị bỏ qua (có ghi trong nhật ký), không làm hỏng
   cả mẻ; máy nào lỗi giữa chừng cũng chỉ dừng riêng máy đó.
@@ -626,7 +665,7 @@ $env:QT_QPA_PLATFORM='offscreen'
 .\.venv\Scripts\python.exe -m unittest discover -s tests -t .
 ```
 
-298 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
+316 test, gồm: tier IDLE thật sự im lặng · tier GRID stream và ảnh đúng kích
 thước · tier LIVE trả full res · thăng tier thì stream lại · chuột/phím tới
 được server · tự nối lại khi server chết rồi sống lại · pool kết nối nhiều máy
 · lưới chỉ thăng tier những ô nhìn thấy · PNG viết ra giải nén lại đúng từng
@@ -687,11 +726,9 @@ Soi bố cục bằng ảnh (không cần iPhone):
   `controlios/ui/detail.py` và `config/gestures.json`.
 - **Clipboard UTF-8** của TrollVNC chưa dùng được vì client `asyncvnc` chỉ có
   `ClientCutText` latin-1 (xem mục Gõ chữ).
-- **Encoding**: client chỉ đăng ký ZLib, rơi về Raw nếu server không có. Không
-  yêu cầu Tight/ZRLE dù TrollVNC có thể hỗ trợ — chỗ này còn dư địa tối ưu băng
-  thông cho 250 máy.
 - Client chỉ đăng ký encoding **ZLib**; nếu TrollVNC không hỗ trợ, nó rơi về
-  **Raw** (vẫn chạy, chỉ tốn băng thông hơn).
+  **Raw** (vẫn chạy, chỉ tốn băng thông hơn). Client chưa yêu cầu Tight/ZRLE
+  dù TrollVNC có thể hỗ trợ — chỗ này còn dư địa tối ưu băng thông cho 250 máy.
 - TrollVNC tự **xoay framebuffer** theo hướng máy (0/90/180/270°). Khi kích
   thước đổi (dọc ↔ ngang), client này không đăng ký pseudo-encoding DesktopSize
   nên phiên đó ngắt rồi tự nối lại — không mất máy, chỉ chớp một nhịp, và khung
@@ -701,19 +738,20 @@ Soi bố cục bằng ảnh (không cần iPhone):
 - Kịch bản chạy **mở vòng**: nó gửi thao tác theo đúng thời gian đã ghi, chứ
   không đọc màn hình để chờ một nút hiện ra. Nếu máy phản ứng chậm, tăng `wait`.
   Muốn kiểm chứng thì chèn `shot` ở các mốc rồi xem lại ảnh.
-- **Không liệt kê được app đã cài dạng text**, và không mở/đóng app theo bundle
-  id — VNC không có kênh cho việc đó (xem mục "Thao tác app"). Nếu các iPhone
-  này có **SSH** (máy jailbreak thường có Dropbear/OpenSSH cổng 22), thì làm
-  được thật: `uicache -l` liệt kê bundle id, `open <bundle>` mở app,
-  `killall <tên>` đóng app. Đó sẽ là một kênh điều khiển thứ hai bên cạnh VNC,
-  chưa cài trong bản này.
+- VNC thuần không liệt kê/mở/đóng app theo bundle id. Bản hiện tại giải quyết
+  bằng control socket của TrollVNC đã vá, hoặc bằng kênh SSH trên máy jailbreak
+  (xem mục "Bảng ứng dụng" và "SSH — máy đã jailbreak").
 - Toạ độ cử chỉ mặc định nhắm iPhone Face ID dọc màn hình. Máy có nút Home vật
   lý, hoặc iOS khác đời, cần chỉnh `config/gestures.json`.
-- **Chưa đưa được ảnh vào Thư viện Ảnh.** Đẩy file vào máy thì được, nhưng chép
-  vào `DCIM` không làm ảnh hiện trong app Ảnh — iOS quản ảnh bằng cơ sở dữ liệu
-  riêng, phải nạp qua `PHPhotoLibrary`. Vướng ở chỗ `trollvncserver` là tiến
-  trình nền nên xin quyền Thư viện Ảnh (TCC) không chắc được; có thể phải
-  chuyển việc nạp ảnh sang chính app TrollVNC. Đây là việc còn để lại.
+- **Nạp ảnh và video vào Thư viện Ảnh** đã chạy: nút **Nạp ảnh/video…** (đẩy file
+  rồi gọi `PHPhotoLibrary`), lệnh kịch bản `savephoto`, và bản vá TrollVNC vòng 3
+  ([docs/trollvnc-patch-3.md](docs/trollvnc-patch-3.md) — đã kèm entitlement TCC
+  nên quyền được cấp sẵn, không cần hộp thoại). **Video tự chuẩn hoá:** iOS chỉ
+  nhận H.264 (≤1080p) / HEVC, `yuv420p` — một `.mp4` mở tốt trên PC (ví dụ 4K
+  H.264 level 5.1) vẫn bị từ chối. `push_photo` tự soi bằng `ffprobe`, video nào
+  chưa đạt chuẩn thì `ffmpeg` re-encode **một lần** rồi mới phát cho cả mẻ (cache
+  ở `captures/_media_tmp/`). Cần **ffmpeg trên PATH**; thiếu thì video được đẩy
+  nguyên bản và máy tự báo lỗi nếu không nạp được.
 - Cài `.ipa` phụ thuộc TrollStore trên máy nhận URL `apple-magnifier://`. Nếu
   TrollStore hỏi xác nhận thì phải bấm OK qua VNC — chưa tự động hoá bước đó.
 - **Không tắt hẳn được màn hình mà vẫn giữ VNC.** TrollVNC chụp hình bằng
