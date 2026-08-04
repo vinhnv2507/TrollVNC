@@ -4160,49 +4160,10 @@ static NSData *tvCtlRespring(void) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
-// SDK iOS ẩn/đánh dấu reboot() là unavailable; khai báo thẳng cho fallback.
-extern "C" int reboot(int howto);
-
-// `reboot` — khởi động lại máy thật sự.
-//
-// Trên iOS reboot(2) BSD bị AMFI chặn (EPERM) dù root; còn reboot3() thì GỌI
-// ĐƯỢC (không EPERM) nhưng phải đúng cờ mới reboot. Thử lần lượt vài cờ ứng viên
-// của RB2_FULLREBOOT: cái nào đúng thì tiến trình chết theo máy ngay tại đó; cái
-// nào sai thì trả về và ta ghi lại để biết.
-// CẢNH BÁO: máy semi-untethered (Dopamine) sẽ MẤT jailbreak tới khi chạy lại app
-// jailbreak. TrollVNC/VNC vẫn tự chạy lại sau boot (cài qua TrollStore).
-static NSData *tvCtlReboot(void) {
-    TVLog(@"Control socket: reboot requested");
-    sync();
-
-    NSMutableString *diag = [NSMutableString string];
-    int (*rb3)(uint64_t) = (int (*)(uint64_t))dlsym(RTLD_DEFAULT, "reboot3");
-    if (rb3) {
-        // Các ứng viên RB2_FULLREBOOT hay gặp trong mã reboot của iOS.
-        uint64_t cands[] = {
-            0x1ULL,
-            0x08000000ULL,
-            0x8000000000000000ULL,
-            0x100000000ULL,
-        };
-        for (unsigned i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
-            errno = 0;
-            int rc = rb3(cands[i]); // reboot thật -> tiến trình chết tại đây
-            [diag appendFormat:@"reboot3(0x%llx)=%d(errno=%d) ",
-                               (unsigned long long)cands[i], rc, errno];
-        }
-    } else {
-        [diag appendString:@"reboot3=missing "];
-    }
-
-    errno = 0;
-    int rc = reboot(0);
-    [diag appendFormat:@"reboot(0)=%d(errno=%d)", rc, errno];
-
-    TVLog(@"Control socket: reboot fallback: %@", diag);
-    NSString *msg = [NSString stringWithFormat:@"ERR RebootFailed %@\n", diag];
-    return [msg dataUsingEncoding:NSUTF8StringEncoding];
-}
+// Ghi chú: reboot kernel thật sự KHÔNG làm được từ daemon này — reboot(2) bị AMFI
+// chặn (EPERM) dù root, reboot3() bị gate (trả cùng một mã bất kể cờ), và
+// SBSRelaunchAction chỉ respring. Với farm Dopamine reboot còn làm mất jailbreak
+// nên cũng không nên dùng. Chỉ giữ `respring` ở trên.
 
 #pragma mark - File transfer
 
@@ -4516,8 +4477,6 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlSavePhoto([cmd substringFromIndex:10]);
     } else if ([cmd isEqualToString:@"respring"]) {
         resp = tvCtlRespring();
-    } else if ([cmd isEqualToString:@"reboot"]) {
-        resp = tvCtlReboot();
     } else if ([cmd hasPrefix:@"openurlin "]) {
         NSString *rest = [cmd substringFromIndex:10];
         NSRange space = [rest rangeOfString:@" "];
