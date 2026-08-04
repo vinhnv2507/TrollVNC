@@ -496,7 +496,9 @@ class DevicePool:
                         on_event(key, f"đã đặt scale {factor:.2f}, đang nối lại…")
                     session = self._sessions.get(key)
                     if session:
-                        await asyncio.sleep(1.5)   # chờ máy đổi framebuffer
+                        # setscale đã chờ máy resize xong mới trả lời, nên nối lại
+                        # ngay là ServerInit thấy đúng cỡ mới.
+                        await asyncio.sleep(0.3)
                         session.request_resync()
                         ok = await self._wait_reconnect(session, timeout=15.0)
                         if on_event:
