@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from .. import script as script_lang
 from ..config import (
     DEFAULT_PORT, DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
-    DeviceSpec, Registry,
+    DeviceSpec, Registry, load_named_scripts, save_named_scripts,
 )
 from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
@@ -44,9 +44,9 @@ SAMPLE_SCRIPT = """\
 # Toạ độ là TỈ LỆ màn hình (0..1), không phải pixel,
 # nên cùng kịch bản chạy đúng trên mọi cỡ iPhone.
 
-home
-openapp Zalo
-wait 2
+retry 3 1
+    restartapp com.zing.zalo 2
+wait 1-3
 shot da-mo-app
 repeat 3
     swipe 0.5 0.75 0.5 0.25 0.3
@@ -54,6 +54,38 @@ repeat 3
 shot sau-khi-luot
 closeapp
 """
+
+# Bảng lệnh bấm-để-chèn: (mẫu chèn vào ô soạn, mô tả ngắn).
+SCRIPT_COMMANDS = [
+    ("tap 0.5 0.85", "chạm tại toạ độ tỉ lệ (x y, 0..1)"),
+    ("swipe 0.5 0.8 0.5 0.2 0.4", "vuốt từ (x1 y1) tới (x2 y2) trong <giây>"),
+    ("swipe 0.5 0.99 0.5 0.45 0.35 0.7", "vuốt rồi GIỮ 0.7s trước khi nhả (mở switcher)"),
+    ("text {nội dung}", "gõ chữ, đủ dấu tiếng Việt"),
+    ("key {tên phím}", "nhấn phím theo tên keysym (Return · BackSpace · Escape · Tab · Up…)"),
+    ("wait 1.5", "chờ 1.5 giây"),
+    ("wait 5-10", "chờ NGẪU NHIÊN 5–10 giây (mỗi máy một số)"),
+    ("shot {hậu tố}", "chụp màn hình, file có hậu tố"),
+    ("clipboard {nội dung}", "đặt clipboard máy (UTF-8) — cần TrollVNC đã vá"),
+    ("savephoto {đường dẫn ảnh trên máy}", "nạp ảnh đã có trên máy vào Thư viện Ảnh"),
+    ("launchapp {bundle id}", "mở app theo bundle id (kênh điều khiển)"),
+    ("killapp {bundle id}", "đóng app theo bundle id"),
+    ("restartapp {bundle id} 2", "đóng, chờ 2s, mở lại"),
+    ("openurl {url}", "mở URL bằng app mặc định"),
+    ("openurlin {bundle id} {url}", "mở URL bằng đúng app chỉ định"),
+    ("brightness min", "độ sáng: min · max · up [nấc] · down [nấc]"),
+    ("volume mute", "âm lượng: mute · up · down"),
+    ("repeat 3\n    swipe 0.5 0.75 0.5 0.25 0.3\n    wait 1", "lặp khối thụt lề bên dưới N lần"),
+    ("retry 3 1\n    launchapp {bundle id}", "lỗi thì thử lại tối đa N lần, cách <giây>"),
+    ("home", "về màn hình chính (nút cứng)"),
+    ("switcher", "mở trình chuyển app (Home hai lần)"),
+    ("lock", "khoá máy (nút Power)"),
+    ("spotlight", "về home rồi vuốt xuống mở ô tìm kiếm"),
+    ("openapp {tên app}", "mở app qua Spotlight theo TÊN hiển thị (đủ dấu)"),
+    ("closeapp", "đóng app đang mở (vào switcher, hất thẻ)"),
+    ("closeall 5", "hất 5 thẻ liên tiếp trong switcher"),
+    ("applibrary", "sang trang App Library"),
+    ("button home", "bấm nút cứng: home · power · left <x y>"),
+]
 
 # Các cử chỉ `openapp` / `closeapp` / `applibrary` không còn nút riêng: bảng
 # Ứng dụng làm việc đó tốt hơn nhiều qua bundle id. Chúng vẫn dùng được trong
@@ -211,16 +243,38 @@ class SendTextDialog(QDialog):
         self.resize(520, 300)
 
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(f"Nội dung sẽ được gõ vào {target_count} máy:"))
+        layout.addWidget(QLabel(f"Nội dung sẽ được gửi tới {target_count} máy:"))
         self.editor = QPlainTextEdit()
         layout.addWidget(self.editor)
-        layout.addWidget(QLabel(
+
+        self.use_clipboard = QCheckBox(
+            "Đặt vào clipboard máy (UTF-8, nhanh) thay vì gõ từng phím"
+        )
+        self.use_clipboard.setToolTip(
+            "Đi qua kênh điều khiển của TrollVNC đã vá. Nhanh hơn nhiều và giữ "
+            "đúng dấu lẫn emoji, nhưng cần control_token và bản đã vá."
+        )
+        layout.addWidget(self.use_clipboard)
+
+        self._hint = QLabel(
             "Gõ được tiếng Việt có dấu. Emoji thì không — ký tự nào không gửi "
             "được sẽ bị bỏ qua và ghi vào nhật ký."
-        ))
+        )
+        self._hint.setWordWrap(True)
+        layout.addWidget(self._hint)
+
+        self.paste_after = QCheckBox("Dán ngay vào ô đang chọn (gửi Cmd+V)")
+        self.paste_after.setVisible(False)
+        layout.addWidget(self.paste_after)
 
         self.press_enter = QCheckBox("Nhấn Enter sau khi gõ xong")
         layout.addWidget(self.press_enter)
+
+        def _mode_changed(clipboard: bool) -> None:
+            self.paste_after.setVisible(clipboard)
+            self._hint.setVisible(not clipboard)
+
+        self.use_clipboard.toggled.connect(_mode_changed)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Gửi")
@@ -234,9 +288,79 @@ class SendTextDialog(QDialog):
     def result_text(self) -> tuple[str, bool]:
         return self.editor.toPlainText(), self.press_enter.isChecked()
 
+    def delivery(self) -> tuple[str, bool, bool]:
+        """(nội dung, dùng clipboard?, dán ngay?)."""
+
+        return (self.editor.toPlainText(),
+                self.use_clipboard.isChecked(),
+                self.use_clipboard.isChecked() and self.paste_after.isChecked())
+
+
+class BulkResultDialog(QDialog):
+    """Bảng tiến trình & kết quả từng máy cho một thao tác hàng loạt.
+
+    Các callback ``on_event``/``on_done`` chạy trên luồng mạng nên chỉ phát signal
+    (an toàn qua thread Qt); phần cập nhật giao diện chạy ở luồng chính.
+    """
+
+    _line = Signal(str, str)                 # key, message
+    _finished = Signal(str, int, object)     # mô tả, số máy xong, danh sách lỗi
+
+    def __init__(self, title: str, total: int, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.resize(600, 440)
+        self._total = total
+        self._done = 0
+
+        layout = QVBoxLayout(self)
+        self.status = QLabel(f"Đang chạy trên {total} máy…")
+        layout.addWidget(self.status)
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setStyleSheet("font-family: Consolas, monospace;")
+        layout.addWidget(self.log)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.button(QDialogButtonBox.Close).setText("Đóng")
+        buttons.rejected.connect(self.close)
+        layout.addWidget(buttons)
+
+        self._line.connect(self._append_line)
+        self._finished.connect(self._on_finished)
+
+    # ---- gọi được từ luồng mạng (chỉ phát signal) ----
+    def on_event(self, key: str, message: str) -> None:
+        self._line.emit(key, message)
+
+    def on_done(self, describe: str, ok: int, failures) -> None:
+        self._finished.emit(describe, ok, list(failures))
+
+    # ---- chạy ở luồng chính ----
+    def _append_line(self, key: str, message: str) -> None:
+        mark = "✗" if message.startswith("LỖI") else "•"
+        if key and key != "*":
+            self._done += 1
+            self.status.setText(f"Đã xong {self._done}/{self._total} máy…")
+        self.log.appendPlainText(f"{mark} {key}: {message}")
+
+    def _on_finished(self, describe: str, ok: int, failures) -> None:
+        if failures:
+            self.status.setText(
+                f"{describe}: xong {ok}/{self._total} máy — {len(failures)} máy lỗi"
+            )
+            self.log.appendPlainText("")
+            self.log.appendPlainText(f"— {len(failures)} máy lỗi —")
+            for key, reason in failures:
+                self.log.appendPlainText(f"  ✗ {key}: {reason}")
+        else:
+            self.status.setText(f"{describe}: xong cả {ok}/{self._total} máy ✓")
+
 
 class ScriptDialog(QDialog):
     """Soạn và chạy kịch bản trên các máy đang chọn."""
+
+    apps_loaded = Signal(str, object, str)  # key, apps, error; an toàn qua thread Qt
 
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
@@ -244,13 +368,73 @@ class ScriptDialog(QDialog):
         self.setWindowTitle("Kịch bản tự động")
         self.resize(720, 620)
         self.running = False
+        self._app_pending: set[str] = set()
+        self._app_results: dict[str, object] = {}
+        self._app_errors: dict[str, str] = {}
+        self.apps_loaded.connect(self._on_script_apps_loaded)
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Lệnh: tap · swipe · text · key · wait · shot · repeat\n"
-            "Cử chỉ iOS: home · switcher · spotlight · openapp <tên> · "
-            "closeapp · closeall <số> · applibrary"
+            "Toạ độ là TỈ LỆ màn hình (0..1). Chọn một lệnh bên dưới để chèn "
+            "mẫu vào ô soạn:"
         ))
+
+        cmd_row = QHBoxLayout()
+        cmd_row.addWidget(QLabel("Chèn lệnh:"))
+        self.cmd_combo = QComboBox()
+        self.cmd_combo.setMinimumWidth(440)
+        self.cmd_combo.setMaxVisibleItems(20)
+        self.cmd_combo.addItem("— chọn lệnh để chèn —", "")
+        for template, desc in SCRIPT_COMMANDS:
+            first = template.splitlines()[0]
+            self.cmd_combo.addItem(f"{first}   —   {desc}", template)
+        self.cmd_combo.activated.connect(self._insert_command_template)
+        cmd_row.addWidget(self.cmd_combo, 1)
+        layout.addLayout(cmd_row)
+
+        app_row = QHBoxLayout()
+        self.load_apps_button = QPushButton("Lấy danh sách app")
+        self.load_apps_button.setToolTip(
+            "Hỏi tất cả máy đang chọn và hợp nhất danh sách theo bundle ID"
+        )
+        self.load_apps_button.clicked.connect(self._load_script_apps)
+        app_row.addWidget(self.load_apps_button)
+        self.app_combo = QComboBox()
+        self.app_combo.setMinimumWidth(300)
+        self.app_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.app_combo.setPlaceholderText("Chưa lấy danh sách app")
+        app_row.addWidget(self.app_combo, 1)
+        for label, command, tip in [
+            ("Chèn mở", "launchapp", "Chèn lệnh mở app theo bundle ID"),
+            ("Chèn đóng", "killapp", "Chèn lệnh đóng app theo bundle ID"),
+            ("Chèn mở lại", "restartapp", "Chèn lệnh đóng rồi mở lại app"),
+        ]:
+            button = QPushButton(label)
+            button.setToolTip(tip)
+            button.clicked.connect(
+                lambda _checked=False, cmd=command: self._insert_app_command(cmd)
+            )
+            app_row.addWidget(button)
+        layout.addLayout(app_row)
+
+        lib_row = QHBoxLayout()
+        lib_row.addWidget(QLabel("Kịch bản đã lưu:"))
+        self.script_combo = QComboBox()
+        self.script_combo.setMinimumWidth(240)
+        self.script_combo.setToolTip("Chọn để nạp một kịch bản đã lưu vào ô soạn")
+        self.script_combo.activated.connect(self._load_saved_script)
+        lib_row.addWidget(self.script_combo, 1)
+        save_named = QPushButton("Lưu…")
+        save_named.setToolTip("Lưu kịch bản trong ô soạn với một cái tên")
+        save_named.clicked.connect(self._save_named_script)
+        lib_row.addWidget(save_named)
+        delete_named = QPushButton("Xoá")
+        delete_named.setToolTip("Xoá kịch bản đã chọn khỏi thư viện")
+        delete_named.clicked.connect(self._delete_named_script)
+        lib_row.addWidget(delete_named)
+        layout.addLayout(lib_row)
+        self._reload_script_names()
+
         self.editor = QPlainTextEdit(SAMPLE_SCRIPT)
         self.editor.setStyleSheet("font-family: Consolas, monospace;")
         layout.addWidget(self.editor, 3)
@@ -267,12 +451,6 @@ class ScriptDialog(QDialog):
         self.check_button = QPushButton("Kiểm tra")
         self.check_button.clicked.connect(self._check)
         row.addWidget(self.check_button)
-        self.open_button = QPushButton("Mở…")
-        self.open_button.clicked.connect(self._open)
-        row.addWidget(self.open_button)
-        self.save_button = QPushButton("Lưu…")
-        self.save_button.clicked.connect(self._save)
-        row.addWidget(self.save_button)
         row.addStretch(1)
         self.run_button = QPushButton("Chạy")
         self.run_button.clicked.connect(self._run)
@@ -287,15 +465,109 @@ class ScriptDialog(QDialog):
 
     def refresh_targets(self) -> None:
         targets = self.window.action_targets()
-        self.target_label.setText(
-            f"Sẽ chạy song song trên {len(targets)} máy đang chọn."
-            if targets else
-            "Chưa chọn máy nào — hãy chọn ở lưới bên trái (hoặc Chọn tất cả)."
-        )
+        if not targets:
+            text = "Chưa chọn máy nào — hãy chọn ở lưới bên trái (hoặc Chọn tất cả)."
+        elif len(targets) == 1:
+            text = "Sẽ chạy trên 1 máy đang chọn."
+        else:
+            text = (f"Sẽ chạy đồng thời trên {len(targets)} máy đang chọn "
+                    "(mỗi máy một luồng riêng).")
+        self.target_label.setText(text)
         self.run_button.setEnabled(bool(targets) and not self.running)
 
     def append(self, message: str) -> None:
         self.log.appendPlainText(message)
+
+    def _insert_command_template(self, _index: int) -> None:
+        template = self.cmd_combo.currentData()
+        if not template:
+            return
+        cursor = self.editor.textCursor()
+        before = self.editor.toPlainText()[:cursor.position()]
+        if before and not before.endswith("\n"):
+            cursor.insertText("\n")
+        cursor.insertText(template + "\n")
+        self.editor.setTextCursor(cursor)
+        self.cmd_combo.setCurrentIndex(0)      # trả về placeholder
+        self.editor.setFocus()
+
+    def _load_script_apps(self) -> None:
+        targets = self.window.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn ít nhất một máy.")
+            return
+        if not self.window.registry.settings.control_token:
+            QMessageBox.warning(
+                self, "Thiếu control token",
+                "Đặt control_token trong config/devices.json để lấy danh sách app.",
+            )
+            return
+
+        self._app_pending = set(targets)
+        self._app_results = {}
+        self._app_errors = {}
+        self.app_combo.clear()
+        self.app_combo.setPlaceholderText(f"Đang hỏi {len(targets)} máy…")
+        self.load_apps_button.setEnabled(False)
+        for key in targets:
+            self.window.pool.list_apps(
+                key,
+                on_done=lambda k, apps, error: self.apps_loaded.emit(
+                    k, apps, error or ""
+                ),
+            )
+
+    def _on_script_apps_loaded(self, key: str, apps, error: str) -> None:
+        if key not in self._app_pending:
+            return
+        self._app_pending.discard(key)
+        if error:
+            self._app_errors[key] = error
+        else:
+            self._app_results[key] = apps
+        if self._app_pending:
+            self.app_combo.setPlaceholderText(f"Còn {len(self._app_pending)} máy…")
+            return
+
+        # bundle id -> [AppInfo đại diện, số máy có app]. Kết quả là hợp của
+        # mọi máy, nên vẫn tìm thấy app chỉ được cài trên một phần thiết bị.
+        merged: dict[str, list] = {}
+        for device_apps in self._app_results.values():
+            for info in device_apps:
+                if info.bundle_id not in merged:
+                    merged[info.bundle_id] = [info, 0]
+                merged[info.bundle_id][1] += 1
+
+        total = len(self._app_results) + len(self._app_errors)
+        for bundle_id, (info, count) in sorted(
+            merged.items(), key=lambda item: item[1][0].display_name.lower()
+        ):
+            coverage = f"{count}/{total} máy"
+            self.app_combo.addItem(
+                f"{info.display_name} — {bundle_id} — {coverage}", bundle_id
+            )
+        self.load_apps_button.setEnabled(True)
+        self.app_combo.setPlaceholderText("Không tìm thấy app" if not merged else "Chọn app…")
+        self.append(
+            f"Danh sách app: {len(merged)} bundle · "
+            f"{len(self._app_results)}/{total} máy trả lời"
+        )
+        if self._app_errors:
+            self.append(f"Không lấy được từ {len(self._app_errors)} máy.")
+
+    def _insert_app_command(self, command: str) -> None:
+        bundle_id = self.app_combo.currentData()
+        if not bundle_id:
+            QMessageBox.information(
+                self, "Chưa chọn app", "Bấm Lấy danh sách app rồi chọn một app."
+            )
+            return
+        suffix = " 1" if command == "restartapp" else ""
+        cursor = self.editor.textCursor()
+        if cursor.position() and not self.editor.toPlainText()[:cursor.position()].endswith("\n"):
+            cursor.insertText("\n")
+        cursor.insertText(f"{command} {bundle_id}{suffix}\n")
+        self.editor.setTextCursor(cursor)
 
     # ------------------------------------------------------------------ actions
 
@@ -336,20 +608,69 @@ class ScriptDialog(QDialog):
         self.stop_button.setEnabled(running)
         self.editor.setReadOnly(running)
 
-    def _open(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Mở kịch bản", str(CAPTURES_DIR.parent), "Kịch bản (*.txt);;All files (*)"
-        )
-        if path:
-            self.editor.setPlainText(Path(path).read_text(encoding="utf-8"))
+    # ------------------------------------------------------- thư viện kịch bản
 
-    def _save(self) -> None:
-        path, _ = QFileDialog.getSaveFileName(
-            self, "Lưu kịch bản", str(CAPTURES_DIR.parent / "kichban.txt"),
-            "Kịch bản (*.txt)"
+    def _reload_script_names(self, select: str = "") -> None:
+        """Nạp lại danh sách tên từ config/scripts.json vào combo."""
+
+        self._saved_scripts = load_named_scripts()
+        self.script_combo.blockSignals(True)
+        self.script_combo.clear()
+        self.script_combo.addItem("— chọn để nạp —", "")
+        for name in sorted(self._saved_scripts, key=str.lower):
+            self.script_combo.addItem(name, name)
+        if select:
+            index = self.script_combo.findData(select)
+            if index >= 0:
+                self.script_combo.setCurrentIndex(index)
+        self.script_combo.blockSignals(False)
+
+    def _load_saved_script(self, _index: int) -> None:
+        name = self.script_combo.currentData()
+        if not name:
+            return
+        body = self._saved_scripts.get(name)
+        if body is None:
+            return
+        self.editor.setPlainText(body)
+        self.append(f"Đã nạp kịch bản “{name}”.")
+
+    def _save_named_script(self) -> None:
+        current = self.script_combo.currentData() or ""
+        name, ok = QInputDialog.getText(
+            self, "Lưu kịch bản", "Tên kịch bản:", text=current
         )
-        if path:
-            Path(path).write_text(self.editor.toPlainText(), encoding="utf-8")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if name in self._saved_scripts and QMessageBox.question(
+            self, "Ghi đè", f"Kịch bản “{name}” đã có. Ghi đè?"
+        ) != QMessageBox.Yes:
+            return
+        self._saved_scripts[name] = self.editor.toPlainText()
+        try:
+            save_named_scripts(self._saved_scripts)
+        except OSError as exc:
+            QMessageBox.warning(self, "Lỗi lưu", str(exc))
+            return
+        self._reload_script_names(select=name)
+        self.append(f"Đã lưu kịch bản “{name}”.")
+
+    def _delete_named_script(self) -> None:
+        name = self.script_combo.currentData()
+        if not name:
+            QMessageBox.information(self, "Chưa chọn", "Chọn một kịch bản đã lưu để xoá.")
+            return
+        if QMessageBox.question(self, "Xoá kịch bản", f"Xoá “{name}”?") != QMessageBox.Yes:
+            return
+        self._saved_scripts.pop(name, None)
+        try:
+            save_named_scripts(self._saved_scripts)
+        except OSError as exc:
+            QMessageBox.warning(self, "Lỗi lưu", str(exc))
+            return
+        self._reload_script_names()
+        self.append(f"Đã xoá kịch bản “{name}”.")
 
     def closeEvent(self, event) -> None:
         if self.running:
@@ -381,9 +702,24 @@ class MainWindow(QMainWindow):
 
         self.grid = DeviceGrid(tile_width=150)
         self.detail = DetailView()
+
+        # Khung lớn có nhãn tên máy ở trên để biết đang điều khiển máy nào.
+        detail_pane = QWidget()
+        detail_layout = QVBoxLayout(detail_pane)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(2)
+        self.detail_title = QLabel("")
+        self.detail_title.setAlignment(Qt.AlignCenter)
+        self.detail_title.setStyleSheet(
+            "font-weight: bold; padding: 3px; background: rgba(0,0,0,0.06);"
+        )
+        self.detail_title.setVisible(False)
+        detail_layout.addWidget(self.detail_title)
+        detail_layout.addWidget(self.detail, 1)
+
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.grid)
-        self.splitter.addWidget(self.detail)
+        self.splitter.addWidget(detail_pane)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 0)
         self.splitter.setChildrenCollapsible(False)
@@ -446,6 +782,14 @@ class MainWindow(QMainWindow):
         self.detail.keys_pressed.connect(self._press_keys)
 
         self.pool.start()
+
+        # Chế độ USB: dựng lại relay cho các máy USB đã lưu (mở lại app là chạy).
+        from ..usb import UsbRelayManager
+        self.usb_relays = UsbRelayManager()
+        usb_devices = [d for d in self.registry.devices if d.is_usb and d.udid]
+        if usb_devices:
+            self.usb_relays.restore(usb_devices)
+
         self._apply_page()
         self._fit_detail_pane()
 
@@ -456,17 +800,28 @@ class MainWindow(QMainWindow):
     # ---------------------------------------------------------------- toolbar
 
     def _build_toolbar(self) -> None:
-        bar = QToolBar("Chính")
-        bar.setMovable(False)
-        self.addToolBar(bar)
+        # Chia thành hai hàng theo nhiệm vụ. QToolBar không tự wrap nên dồn mọi
+        # thứ vào một hàng sẽ làm Qt giấu các action cuối sau nút » trên màn
+        # hình 1366/1500 px.
+        navigation_bar = QToolBar("Thiết bị và bố cục")
+        navigation_bar.setObjectName("navigation-toolbar")
+        navigation_bar.setMovable(False)
+        self.addToolBar(navigation_bar)
+        bar = navigation_bar
 
         scan = QAction("Quét mạng", self)
         scan.triggered.connect(self._scan)
         bar.addAction(scan)
 
-        load = QAction("Nạp danh sách…", self)
+        load = QAction("Nạp file…", self)
+        load.setToolTip("Nạp danh sách IP từ file txt (mỗi dòng một IP hoặc ip:port)")
         load.triggered.connect(self._load_list)
         bar.addAction(load)
+
+        usb = QAction("Quét USB", self)
+        usb.setToolTip("Tìm iPhone đang cắm USB và điều khiển qua cáp (cần tidevice)")
+        usb.triggered.connect(self._scan_usb)
+        bar.addAction(usb)
 
         bar.addSeparator()
         bar.addWidget(QLabel(" Trang: "))
@@ -505,8 +860,7 @@ class MainWindow(QMainWindow):
         clear.triggered.connect(self.grid.clear_selection)
         bar.addAction(clear)
 
-        bar.addSeparator()
-        self.grid_control_box = QCheckBox("Điều khiển thẳng trên lưới")
+        self.grid_control_box = QCheckBox("Điều khiển lưới")
         self.grid_control_box.setToolTip(
             "Bấm và kéo thẳng vào ô nhỏ để điều khiển máy đó, khỏi phải mở "
             "khung riêng. Ctrl/Shift+bấm vẫn để chọn máy."
@@ -514,17 +868,27 @@ class MainWindow(QMainWindow):
         self.grid_control_box.toggled.connect(self.grid.set_control_enabled)
         bar.addWidget(self.grid_control_box)
 
-        self.broadcast_box = QCheckBox("Gửi thao tác tới các máy đã chọn")
+        self.addToolBarBreak()
+        actions_bar = QToolBar("Thao tác")
+        actions_bar.setObjectName("actions-toolbar")
+        actions_bar.setMovable(False)
+        self.addToolBar(actions_bar)
+        bar = actions_bar
+
+        self.broadcast_box = QCheckBox("Phát đa máy")
+        self.broadcast_box.setToolTip(
+            "Gửi thao tác chuột/phím ở máy đang điều khiển tới tất cả máy đã chọn"
+        )
         self.broadcast_box.toggled.connect(self._set_broadcast)
         bar.addWidget(self.broadcast_box)
 
-        quality = QAction("Chất lượng…", self)
+        quality = QAction("Chất lượng", self)
         quality.setToolTip("Tốc độ khung hình và độ nét — áp dụng ngay")
         quality.triggered.connect(self._open_quality_dialog)
         bar.addAction(quality)
 
         bar.addSeparator()
-        send_text = QAction("Gõ chữ…", self)
+        send_text = QAction("Gõ chữ", self)
         send_text.setToolTip("Gõ một đoạn chữ vào các máy đang chọn")
         send_text.triggered.connect(self._send_text_dialog)
         bar.addAction(send_text)
@@ -551,6 +915,23 @@ class MainWindow(QMainWindow):
         self.record_action.toggled.connect(self._toggle_recording)
         bar.addAction(self.record_action)
 
+        save_photo = QAction("Ảnh/Video", self)
+        save_photo.setToolTip(
+            "Đẩy ảnh hoặc video từ PC rồi nạp thẳng vào Thư viện Ảnh của các máy "
+            "đang chọn. Video lạ định dạng được tự chuẩn hoá cho iOS. Cần "
+            "TrollVNC đã vá và control_token"
+        )
+        save_photo.triggered.connect(self._push_photo)
+        bar.addAction(save_photo)
+
+        respring = QAction("Respring", self)
+        respring.setToolTip(
+            "Khởi động lại SpringBoard trên các máy đang chọn — gỡ giao diện treo, "
+            "không mất jailbreak"
+        )
+        respring.triggered.connect(self._respring_selected)
+        bar.addAction(respring)
+
         self.apps_action = self.apps_dock.toggleViewAction()
         self.apps_action.setText("Ứng dụng")
         self.apps_action.setToolTip(
@@ -568,7 +949,8 @@ class MainWindow(QMainWindow):
         script_action.triggered.connect(self._open_script_dialog)
         bar.addAction(script_action)
 
-        open_folder = QAction("Mở thư mục ảnh", self)
+        open_folder = QAction("Thư mục", self)
+        open_folder.setToolTip("Mở thư mục captures chứa ảnh/ghi hình/kịch bản")
         open_folder.triggered.connect(self._open_captures_folder)
         bar.addAction(open_folder)
 
@@ -591,6 +973,7 @@ class MainWindow(QMainWindow):
         self.grid.set_devices(devices)
         self.pool.set_devices(devices)
         self.detail.set_device(None)
+        self._update_detail_title(None)
         self.grid.set_focus_key(None)
         self.page_label.setText(f" {self.page + 1}/{self._pages()} ")
         self.prev_button.setEnabled(self.page > 0)
@@ -607,6 +990,45 @@ class MainWindow(QMainWindow):
             self._apply_page()
 
     # ------------------------------------------------------------------ device
+
+    def _scan_usb(self) -> None:
+        """Tìm iPhone cắm USB, dựng relay và nạp vào lưới (chạy qua cáp)."""
+
+        from ..usb import list_usb_devices, tidevice_available, UsbRelayManager
+        if not tidevice_available():
+            QMessageBox.warning(
+                self, "Thiếu tidevice",
+                "Chưa có tidevice. Cài bằng: .venv\\Scripts\\python.exe -m pip "
+                "install tidevice (cần Apple Mobile Device Support / iTunes).",
+            )
+            return
+
+        devices = list_usb_devices()
+        if not devices:
+            QMessageBox.information(
+                self, "Quét USB",
+                "Không thấy iPhone nào cắm USB. Kiểm tra dây, và bấm Tin cậy trên máy.",
+            )
+            return
+
+        # Dựng lại từ đầu: tắt relay cũ, bỏ máy USB cũ, thêm máy đang cắm.
+        self.usb_relays.stop()
+        self.usb_relays = UsbRelayManager()
+        self.registry.devices = [d for d in self.registry.devices if not d.is_usb]
+
+        specs = self.usb_relays.start_for(devices)
+        for s in specs:
+            self.registry.devices.append(DeviceSpec(
+                host=s["host"], port=s["port"], name=s["name"], group=s["group"],
+                control_port=s["control_port"], ssh_port=s["ssh_port"], udid=s["udid"],
+            ))
+        self.registry.save(self.registry_path)
+        self._apply_page()
+        QMessageBox.information(
+            self, "Quét USB",
+            f"Tìm thấy {len(devices)} máy USB, đã dựng relay và nạp vào lưới.\n"
+            "Ô có nhóm 'usb', kết nối qua cáp (không cần WiFi).",
+        )
 
     def _scan(self) -> None:
         dialog = ScanDialog(DEFAULT_PORT, self)
@@ -635,7 +1057,22 @@ class MainWindow(QMainWindow):
         self.detail.set_device(key)
         self.grid.set_focus_key(key)
         self.detail.setFocus()
+        self._update_detail_title(key)
         self._fit_detail_pane()
+
+    def _device_name(self, key: str) -> str:
+        for device in self.registry.devices:
+            if device.key == key:
+                return device.name or device.host
+        return key or ""
+
+    def _update_detail_title(self, key: Optional[str]) -> None:
+        if key:
+            self.detail_title.setText(f"🖥  {self._device_name(key)}   ·   {key}")
+            self.detail_title.setVisible(True)
+        else:
+            self.detail_title.clear()
+            self.detail_title.setVisible(False)
 
     # ------------------------------------------------------------------ bố cục
 
@@ -722,6 +1159,7 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
 
     def _open_quality_dialog(self) -> None:
+        old_scale = self.registry.settings.device_scale
         dialog = QualityDialog(self.registry.settings, self)
         if dialog.exec() != QDialog.Accepted:
             return
@@ -729,9 +1167,27 @@ class MainWindow(QMainWindow):
         # Phiên đọc Settings ở mỗi vòng nhịp nên đổi là ăn ngay, khỏi nối lại.
         self.registry.save(self.registry_path)
         settings = self.registry.settings
+
+        # Scale đi qua control socket của từng máy (không phải Settings phía PC),
+        # nên phải phát riêng — và chỉ khi thật sự đổi để tránh nối lại vô cớ.
+        if abs(settings.device_scale - old_scale) > 1e-6:
+            targets = self.pool.online_keys()
+            if not settings.control_token:
+                QMessageBox.warning(
+                    self, "Thiếu control token",
+                    "Đổi scale cần control_token trong config/devices.json.",
+                )
+            elif targets:
+                dlg = BulkResultDialog(
+                    f"Đặt scale {settings.device_scale:.2f}", len(targets), self)
+                dlg.show()
+                self.pool.set_scale(targets, settings.device_scale,
+                                    on_event=dlg.on_event, on_done=dlg.on_done)
+
         self.statusBar().showMessage(
             f"Đã áp dụng: {settings.live_fps:g} hình/giây · "
-            f"{'gốc' if not settings.live_long_edge else str(settings.live_long_edge) + 'px'}",
+            f"{'gốc' if not settings.live_long_edge else str(settings.live_long_edge) + 'px'}"
+            f" · scale {settings.device_scale:.2f}",
             6000,
         )
 
@@ -803,6 +1259,56 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đang đẩy {Path(path).name} tới {len(targets)} máy", 6000
         )
+
+    def _push_photo(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        if not self.registry.settings.control_token:
+            QMessageBox.warning(
+                self, "Thiếu control token",
+                "Đặt control_token trong config/devices.json để nạp ảnh.",
+            )
+            return
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Chọn ảnh hoặc video cần nạp vào Thư viện",
+            filter=("Ảnh & video (*.png *.jpg *.jpeg *.heic *.gif *.mp4 *.mov "
+                    "*.m4v *.mkv *.avi *.webm);;Tất cả (*.*)"),
+        )
+        if not path:
+            return
+
+        dialog = BulkResultDialog(f"Nạp {Path(path).name}", len(targets), self)
+        dialog.show()
+        self.pool.push_photo(
+            targets, Path(path),
+            on_event=dialog.on_event, on_done=dialog.on_done,
+        )
+        self.statusBar().showMessage(
+            f"Đang nạp {Path(path).name} vào Thư viện của {len(targets)} máy", 6000
+        )
+
+    def _respring_selected(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        if not self.registry.settings.control_token:
+            QMessageBox.warning(self, "Thiếu control token",
+                                "Đặt control_token trong config/devices.json.")
+            return
+        if QMessageBox.question(
+            self, "Respring",
+            f"Khởi động lại SpringBoard trên {len(targets)} máy?\n"
+            "Gỡ giao diện treo, không mất jailbreak.",
+        ) != QMessageBox.Yes:
+            return
+        dialog = BulkResultDialog("Respring", len(targets), self)
+        dialog.show()
+        self.pool.respring(targets, on_event=dialog.on_event, on_done=dialog.on_done)
+        self.statusBar().showMessage(f"Đang respring {len(targets)} máy", 5000)
 
     def _run_device_gesture(self, gesture: str) -> None:
         """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.
@@ -1119,12 +1625,38 @@ class MainWindow(QMainWindow):
         dialog = SendTextDialog(len(targets), self)
         if dialog.exec() != QDialog.Accepted:
             return
-        text, press_enter = dialog.result_text()
-        if text:
+        text, use_clipboard, paste_after = dialog.delivery()
+        _, press_enter = dialog.result_text()
+        if text and use_clipboard:
+            if not self.registry.settings.control_token:
+                QMessageBox.warning(
+                    self, "Thiếu control token",
+                    "Đặt control_token trong config/devices.json để dùng clipboard.",
+                )
+                return
+            def _after_clipboard(_desc, ok_count: int, _fails) -> None:
+                # Chạy SAU khi clipboard đã đặt xong trên máy — nếu không, Cmd+V
+                # bắn trước lúc clipboard kịp cập nhật và dán nhầm nội dung cũ.
+                if not ok_count:
+                    return
+                if paste_after:
+                    self.pool.press_keys(targets, "Super_L", "v")
+                if press_enter:
+                    self.pool.press_keys(targets, "Return")
+
+            self.pool.set_clipboard(
+                targets, text,
+                on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+                on_done=_after_clipboard,
+            )
+        elif text:
             self.pool.type_text(targets, text, on_skipped=self._on_skipped_chars)
-        if press_enter:
+            if press_enter:
+                self.pool.press_keys(targets, "Return")
+        elif press_enter:
             self.pool.press_keys(targets, "Return")
-        self.statusBar().showMessage(f"Đã gửi chữ tới {len(targets)} máy", 4000)
+        verb = "Đã đặt clipboard cho" if use_clipboard else "Đã gửi chữ tới"
+        self.statusBar().showMessage(f"{verb} {len(targets)} máy", 4000)
 
     # ------------------------------------------------------------------ frames
 
@@ -1153,6 +1685,8 @@ class MainWindow(QMainWindow):
             self.pool.stop_recording(self.recording_id)
         self.pool.cancel_script()
         self.pool.stop()
+        if getattr(self, "usb_relays", None):
+            self.usb_relays.stop()   # tắt các tiến trình relay USB
         super().closeEvent(event)
 
 

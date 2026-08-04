@@ -8,9 +8,18 @@ from __future__ import annotations
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
+    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox, QFormLayout,
     QGroupBox, QHBoxLayout, QLabel, QPushButton, QSpinBox, QVBoxLayout,
 )
+
+# Mức scale khung hình máy gửi về (nhãn, hệ số).
+SCALE_LEVELS = [
+    ("Gốc (nét nhất)", 1.0),
+    ("0.85×", 0.85),
+    ("0.75×", 0.75),
+    ("0.5× (nhẹ nhất)", 0.5),
+    ("0.35×", 0.35),
+]
 
 from ..config import Settings
 
@@ -96,11 +105,22 @@ class QualityDialog(QDialog):
             "dừng chụp hình. Cuộn tới thì tự nối lại."
         )
         idle_form.addRow("Ngắt máy không xem sau:", self.idle_after)
+
+        self.scale_combo = QComboBox()
+        for label, value in SCALE_LEVELS:
+            self.scale_combo.addItem(label, value)
+        self.scale_combo.setToolTip(
+            "Máy gửi khung nhỏ hơn -> nén nhẹ hơn -> MƯỢT hơn trên máy đời cũ "
+            "(iPhone 6s...), đổi lại kém nét. Đây là cách giảm tải THẬT (trên "
+            "máy), khác với Độ nét ở trên (chỉ thu nhỏ ở PC). Cần TrollVNC đã vá."
+        )
+        idle_form.addRow("Scale khung máy gửi:", self.scale_combo)
         layout.addWidget(idle_box)
 
         note = QLabel(
-            "Thay đổi có hiệu lực ngay, không phải nối lại máy nào.\n"
-            "Muốn giảm tải sâu hơn nữa thì build TrollVNC với frame_rate_spec thấp."
+            "Tốc độ/độ nét có hiệu lực ngay, không phải nối lại máy.\n"
+            "Đổi Scale khung máy gửi sẽ làm mỗi máy nối lại một nhịp (như xoay "
+            "máy) và cần TrollVNC đã vá."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #9aa4b2;")
@@ -126,6 +146,13 @@ class QualityDialog(QDialog):
         self.live_edge.setValue(self.settings.live_long_edge or 900)
         self.live_edge.setDisabled(full)
         self.idle_after.setValue(int(self.settings.idle_disconnect_after))
+        self._select_scale(self.settings.device_scale)
+
+    def _select_scale(self, value: float) -> None:
+        # Chọn mức gần nhất với giá trị hiện có.
+        best = min(range(self.scale_combo.count()),
+                   key=lambda i: abs(self.scale_combo.itemData(i) - value))
+        self.scale_combo.setCurrentIndex(best)
 
     def apply(self) -> None:
         self.settings.live_fps = self.live_fps.value()
@@ -134,6 +161,10 @@ class QualityDialog(QDialog):
         self.settings.live_long_edge = 0 if self.live_full.isChecked() \
             else self.live_edge.value()
         self.settings.idle_disconnect_after = float(self.idle_after.value())
+        self.settings.device_scale = float(self.scale_combo.currentData())
+
+    def scale_value(self) -> float:
+        return float(self.scale_combo.currentData())
 
     def _apply_preset(self, live_fps: float, live_edge: int,
                       grid_fps: float, thumb_edge: int) -> None:

@@ -89,6 +89,32 @@ class WindowTest(unittest.TestCase):
             window.close()
             registry_path.unlink(missing_ok=True)
 
+    def test_toolbars_are_split_so_all_actions_fit_at_1600px(self) -> None:
+        # Hai hàng công cụ phải chứa hết action mà không giấu sau nút » ở bề rộng
+        # màn hình phổ biến cho một bảng điều khiển farm (1600px). Đã nhiều tính
+        # năng hơn (Ảnh/Video, Respring) nên ngưỡng nâng từ 1500 lên 1600.
+        from PySide6.QtWidgets import QToolBar, QToolButton
+
+        registry_path = Path(__file__).parent / "_toolbar_devices.json"
+        Registry().save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window.resize(1600, 700)
+            window.show()
+            app.processEvents()
+
+            bars = {bar.objectName(): bar for bar in window.findChildren(QToolBar)}
+            self.assertIn("navigation-toolbar", bars)
+            self.assertIn("actions-toolbar", bars)
+            for name in ("navigation-toolbar", "actions-toolbar"):
+                bar = bars[name]
+                extension = bar.findChild(QToolButton, "qt_toolbar_ext_button")
+                self.assertTrue(extension is None or not extension.isVisible(),
+                                f"{name} vẫn còn nút tràn »")
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
 
 class LayoutTest(unittest.TestCase):
     """Lưới phải chia hết bề rộng, không cắt ô, không cuộn ngang."""
@@ -306,6 +332,159 @@ class ScriptDialogTest(unittest.TestCase):
         self.assertEqual([s.op for s in steps], ["tap", "wait"])
         self.assertTrue(dialog.running)
         self.assertTrue(dialog.stop_button.isEnabled())
+
+    def test_load_apps_merges_bundle_ids_from_all_selected_devices(self) -> None:
+        from controlios.control_channel import AppInfo
+        from controlios.ui.app import ScriptDialog
+
+        self.window.registry.settings.control_token = "test-token"
+        self.window.grid.select_all()
+        replies = {
+            "10.0.0.1:5901": [
+                AppInfo("com.zing.zalo", "Zalo", "User", "1"),
+                AppInfo("com.facebook.Facebook", "Facebook", "User", "1"),
+            ],
+            "10.0.0.2:5901": [
+                AppInfo("com.zing.zalo", "Zalo", "User", "2"),
+            ],
+        }
+
+        def list_apps(key, on_done, user_only=False):
+            on_done(key, replies[key], None)
+
+        self.window.pool.list_apps = list_apps
+        dialog = ScriptDialog(self.window)
+        dialog._load_script_apps()
+
+        self.assertEqual(dialog.app_combo.count(), 2)
+        labels = [dialog.app_combo.itemText(i) for i in range(dialog.app_combo.count())]
+        self.assertTrue(any("Zalo" in label and "2/2 máy" in label for label in labels))
+        self.assertTrue(any("Facebook" in label and "1/2 máy" in label for label in labels))
+
+    def test_selected_app_command_is_inserted_with_bundle_id(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        dialog = ScriptDialog(self.window)
+        dialog.editor.clear()
+        dialog.app_combo.addItem("Zalo — com.zing.zalo — 2/2 máy", "com.zing.zalo")
+        dialog._insert_app_command("restartapp")
+        self.assertEqual(dialog.editor.toPlainText(), "restartapp com.zing.zalo 1\n")
+
+    def test_send_text_clipboard_mode_reports_content_and_paste(self) -> None:
+        from controlios.ui.app import SendTextDialog
+
+        dialog = SendTextDialog(3, self.window)
+        dialog.editor.setPlainText("Bình luận đủ dấu 😀")
+        # Mặc định: gõ từng phím, không dán.
+        text, use_clipboard, paste = dialog.delivery()
+        self.assertEqual(text, "Bình luận đủ dấu 😀")
+        self.assertFalse(use_clipboard)
+        self.assertFalse(paste)
+        self.assertFalse(dialog.paste_after.isVisible())
+
+        dialog.use_clipboard.setChecked(True)
+        dialog.paste_after.setChecked(True)
+        _, use_clipboard, paste = dialog.delivery()
+        self.assertTrue(use_clipboard)
+        self.assertTrue(paste)
+
+    def test_send_text_clipboard_needs_control_token(self) -> None:
+        from controlios.ui.app import SendTextDialog
+
+        from PySide6.QtWidgets import QDialog
+
+        self.window.registry.settings.control_token = ""
+        self.window.broadcast = True          # để _targets() lấy từ selection
+        self.window.grid.select_all()
+        called = []
+        self.window.pool.set_clipboard = lambda *a, **k: called.append(a)
+
+        def fake_exec(dialog):
+            dialog.editor.setPlainText("Nội dung")
+            dialog.use_clipboard.setChecked(True)
+            return QDialog.Accepted
+
+        with unittest.mock.patch.object(SendTextDialog, "exec", fake_exec), \
+                unittest.mock.patch("controlios.ui.app.QMessageBox.warning") as warn, \
+                unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window._send_text_dialog()
+        warn.assert_called_once()
+        self.assertFalse(called, "không được đặt clipboard khi thiếu control_token")
+
+    def test_push_photo_needs_selection_and_token(self) -> None:
+        called = []
+        self.window.pool.push_photo = lambda *a, **k: called.append(a)
+        self.window.registry.settings.control_token = "test-token"
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window._push_photo()
+        self.assertFalse(called)
+
+        self.window.grid.select_all()
+        with unittest.mock.patch(
+            "controlios.ui.app.QFileDialog.getOpenFileName",
+            return_value=("D:/anh.png", ""),
+        ):
+            self.window._push_photo()
+        self.assertEqual(len(called), 1)
+        self.assertEqual(len(called[0][0]), 2)
+
+    def test_respring_needs_selection_and_confirmation(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        called = []
+        self.window.pool.respring = lambda *a, **k: called.append(a)
+        self.window.registry.settings.control_token = "tok"
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window._respring_selected()
+        self.assertFalse(called)
+
+        self.window.grid.select_all()
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.question",
+                                 return_value=QMessageBox.Yes):
+            self.window._respring_selected()
+        self.assertEqual(len(called), 1)
+        self.assertEqual(len(called[0][0]), 2)
+
+    def test_saved_scripts_round_trip_in_the_dialog(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        scripts_path = Path(__file__).parent / "_scripts_lib.json"
+        scripts_path.unlink(missing_ok=True)
+        try:
+            with unittest.mock.patch("controlios.config.DEFAULT_SCRIPTS", scripts_path):
+                dialog = ScriptDialog(self.window)
+                dialog.editor.setPlainText("tap 0.5 0.5\nwait 1\n")
+                with unittest.mock.patch(
+                    "controlios.ui.app.QInputDialog.getText",
+                    return_value=("Kịch bản A", True),
+                ):
+                    dialog._save_named_script()
+
+                # Xuất hiện trong combo của một hộp thoại mới mở.
+                dialog2 = ScriptDialog(self.window)
+                index = dialog2.script_combo.findData("Kịch bản A")
+                self.assertGreater(index, 0)
+                dialog2.script_combo.setCurrentIndex(index)
+                dialog2._load_saved_script(index)
+                self.assertEqual(dialog2.editor.toPlainText(), "tap 0.5 0.5\nwait 1\n")
+        finally:
+            scripts_path.unlink(missing_ok=True)
+
+    def test_command_palette_inserts_template(self) -> None:
+        from controlios.ui.app import ScriptDialog
+
+        dialog = ScriptDialog(self.window)
+        dialog.editor.clear()
+        idx = next(i for i in range(dialog.cmd_combo.count())
+                   if (dialog.cmd_combo.itemData(i) or "").startswith("tap"))
+        dialog.cmd_combo.setCurrentIndex(idx)
+        dialog._insert_command_template(idx)
+        self.assertIn("tap 0.5 0.85", dialog.editor.toPlainText())
+        self.assertEqual(dialog.cmd_combo.currentIndex(), 0)  # trả về placeholder
 
     def test_capture_needs_a_selection(self) -> None:
         called = []
