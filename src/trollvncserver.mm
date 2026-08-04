@@ -4163,77 +4163,44 @@ static NSData *tvCtlRespring(void) {
 // SDK iOS ẩn/đánh dấu reboot() là unavailable; khai báo thẳng cho fallback.
 extern "C" int reboot(int howto);
 
-// Khai báo tối thiểu hai lớp private để gọi đường reboot "chuẩn" của iOS.
-// Class resolve bằng NSClassFromString lúc chạy nên KHÔNG tạo phụ thuộc link.
-@interface SBSRelaunchAction : NSObject
-+ (instancetype)actionWithReason:(NSString *)reason
-                         options:(NSUInteger)options
-                       targetURL:(NSURL *)targetURL;
-@end
-
-@interface FBSSystemService : NSObject
-+ (instancetype)sharedService;
-- (void)sendActions:(NSSet *)actions withResult:(id)result;
-@end
-
-// Reboot đúng chuẩn iOS: gửi SBSRelaunchAction cờ RebootPending (1<<2) qua
-// FBSSystemService. Dùng entitlement com.apple.frontboard.shutdown (đã có sẵn) —
-// đây là cách các tiện ích jailbreak reboot thật sự dùng, khác với syscall
-// reboot() vốn bị AMFI chặn (EPERM). Trả YES nếu đã gửi được lệnh.
-static BOOL tvFrontBoardReboot(void) {
-    Class actCls = NSClassFromString(@"SBSRelaunchAction");
-    Class svcCls = NSClassFromString(@"FBSSystemService");
-    if (!actCls || !svcCls) {
-        TVLog(@"reboot: thiếu SBSRelaunchAction/FBSSystemService");
-        return NO;
-    }
-    @try {
-        NSUInteger kRebootPending = (1 << 2); // SBSRelaunchActionOptionsRebootPending
-        id action = [actCls actionWithReason:@"ControlIOS reboot"
-                                     options:kRebootPending
-                                   targetURL:nil];
-        if (!action)
-            return NO;
-        id svc = [svcCls sharedService];
-        if (!svc)
-            return NO;
-        [svc sendActions:[NSSet setWithObject:action] withResult:nil];
-        TVLog(@"reboot: đã gửi FrontBoard reboot action");
-        return YES;
-    } @catch (NSException *ex) {
-        TVLog(@"reboot: FrontBoard exception %@", ex.reason);
-        return NO;
-    }
-}
-
-// `reboot` — khởi động lại máy. Ưu tiên đường FrontBoard; syscall chỉ là fallback
-// chẩn đoán (thường EPERM trên iOS).
+// `reboot` — khởi động lại máy thật sự.
+//
+// Trên iOS reboot(2) BSD bị AMFI chặn (EPERM) dù root; còn reboot3() thì GỌI
+// ĐƯỢC (không EPERM) nhưng phải đúng cờ mới reboot. Thử lần lượt vài cờ ứng viên
+// của RB2_FULLREBOOT: cái nào đúng thì tiến trình chết theo máy ngay tại đó; cái
+// nào sai thì trả về và ta ghi lại để biết.
 // CẢNH BÁO: máy semi-untethered (Dopamine) sẽ MẤT jailbreak tới khi chạy lại app
 // jailbreak. TrollVNC/VNC vẫn tự chạy lại sau boot (cài qua TrollStore).
 static NSData *tvCtlReboot(void) {
     TVLog(@"Control socket: reboot requested");
     sync();
 
-    if (tvFrontBoardReboot()) {
-        // Reboot chạy bất đồng bộ; máy sẽ tắt sau giây lát. Trả OK ngay.
-        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
-    }
-
-    int rc = reboot(0); // RB_AUTOBOOT
-    int e = errno;
-    int rc3 = -2, e3 = 0;
+    NSMutableString *diag = [NSMutableString string];
     int (*rb3)(uint64_t) = (int (*)(uint64_t))dlsym(RTLD_DEFAULT, "reboot3");
     if (rb3) {
-        errno = 0;
-        rc3 = rb3(0);
-        e3 = errno;
+        // Các ứng viên RB2_FULLREBOOT hay gặp trong mã reboot của iOS.
+        uint64_t cands[] = {
+            0x1ULL,
+            0x08000000ULL,
+            0x8000000000000000ULL,
+            0x100000000ULL,
+        };
+        for (unsigned i = 0; i < sizeof(cands) / sizeof(cands[0]); i++) {
+            errno = 0;
+            int rc = rb3(cands[i]); // reboot thật -> tiến trình chết tại đây
+            [diag appendFormat:@"reboot3(0x%llx)=%d(errno=%d) ",
+                               (unsigned long long)cands[i], rc, errno];
+        }
+    } else {
+        [diag appendString:@"reboot3=missing "];
     }
 
-    TVLog(@"Control socket: reboot fallback rc=%d(errno=%d) reboot3=%d(errno=%d)",
-          rc, e, rc3, e3);
-    NSString *msg = [NSString stringWithFormat:
-                     @"ERR RebootFailed frontboard=no reboot=%d(errno=%d) reboot3=%d(errno=%d)\n",
-                     rc, e, rc3, e3];
+    errno = 0;
+    int rc = reboot(0);
+    [diag appendFormat:@"reboot(0)=%d(errno=%d)", rc, errno];
+
+    TVLog(@"Control socket: reboot fallback: %@", diag);
+    NSString *msg = [NSString stringWithFormat:@"ERR RebootFailed %@\n", diag];
     return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
