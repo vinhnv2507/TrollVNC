@@ -715,6 +715,10 @@ class MainWindow(QMainWindow):
         self.detail_title.setStyleSheet(
             "font-weight: bold; padding: 3px; background: rgba(0,0,0,0.06);"
         )
+        # Không để nhãn (tên máy có thể dài) kéo giãn bề rộng khung một máy — khung
+        # đó phải rộng đúng bằng một chiếc iPhone, không theo độ dài chữ.
+        from PySide6.QtWidgets import QSizePolicy
+        self.detail_title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         self.detail_title.setVisible(False)
         detail_layout.addWidget(self.detail_title)
         detail_layout.addWidget(self.detail, 1)

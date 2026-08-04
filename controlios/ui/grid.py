@@ -33,6 +33,10 @@ class DeviceGrid(QScrollArea):
 
     # Bề rộng ô tối thiểu khi tự chia cột, và khoảng cách giữa các ô.
     MIN_TILE_WIDTH = 120
+    # Bề rộng ô tối đa: khi ít máy (1-2), đừng để ô giãn hết bề rộng cửa sổ rồi
+    # phóng to ảnh thu nhỏ lên thành mờ tịt. Nhiều máy thì mỗi ô vẫn nhỏ hơn mức
+    # này nên vẫn chia đều khít.
+    MAX_TILE_WIDTH = 300
     SPACING = 8
     MARGIN = 8
 
@@ -174,9 +178,10 @@ class DeviceGrid(QScrollArea):
             columns = max(1, min(columns, len(self.order)))
 
             # Chia đều bề rộng còn lại cho các cột: ô giãn cho vừa khít thay vì
-            # để trống một dải bên phải, và không bao giờ rộng hơn khung.
+            # để trống một dải bên phải, và không bao giờ rộng hơn khung. Nhưng
+            # chặn ở MAX_TILE_WIDTH để 1-2 máy không bị phóng to đầy màn hình.
             tile_width = (available - self.SPACING * (columns - 1)) // columns
-            tile_width = max(60, tile_width)
+            tile_width = max(60, min(tile_width, self.MAX_TILE_WIDTH))
 
             for tile in self.tiles.values():
                 tile.set_tile_width(tile_width)
