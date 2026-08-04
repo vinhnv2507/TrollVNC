@@ -555,7 +555,9 @@ class ScriptDialog(QDialog):
             f"{len(self._app_results)}/{total} máy trả lời"
         )
         if self._app_errors:
-            self.append(f"Không lấy được từ {len(self._app_errors)} máy.")
+            self.append(f"Không lấy được từ {len(self._app_errors)} máy:")
+            for key, reason in self._app_errors.items():
+                self.append(f"  ✗ {key}: {reason}")
 
     def _insert_app_command(self, command: str) -> None:
         bundle_id = self.app_combo.currentData()
