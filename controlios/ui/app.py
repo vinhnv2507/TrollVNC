@@ -311,7 +311,7 @@ class BulkResultDialog(QDialog):
         self.setWindowTitle(title)
         self.resize(600, 440)
         self._total = total
-        self._done = 0
+        self._seen: set[str] = set()   # đếm theo MÁY, không theo số dòng log
 
         layout = QVBoxLayout(self)
         self.status = QLabel(f"Đang chạy trên {total} máy…")
@@ -340,8 +340,8 @@ class BulkResultDialog(QDialog):
     def _append_line(self, key: str, message: str) -> None:
         mark = "✗" if message.startswith("LỖI") else "•"
         if key and key != "*":
-            self._done += 1
-            self.status.setText(f"Đã xong {self._done}/{self._total} máy…")
+            self._seen.add(key)     # nhiều dòng cùng một máy vẫn tính là một
+            self.status.setText(f"Đã xử lý {len(self._seen)}/{self._total} máy…")
         self.log.appendPlainText(f"{mark} {key}: {message}")
 
     def _on_finished(self, describe: str, ok: int, failures) -> None:

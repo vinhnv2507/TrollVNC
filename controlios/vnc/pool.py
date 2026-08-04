@@ -492,13 +492,17 @@ class DevicePool:
             async def one(key: str) -> None:
                 try:
                     await self._channel(key).set_scale(factor)
-                    succeeded.append(key)
                     if on_event:
                         on_event(key, f"đã đặt scale {factor:.2f}, đang nối lại…")
                     session = self._sessions.get(key)
                     if session:
                         await asyncio.sleep(1.5)   # chờ máy đổi framebuffer
                         session.request_resync()
+                        ok = await self._wait_reconnect(session, timeout=15.0)
+                        if on_event:
+                            on_event(key, "đã nối lại ✓" if ok
+                                     else "nối lại chậm — thử lại nếu hình chưa đúng")
+                    succeeded.append(key)
                 except Exception as exc:
                     failures.append((key, str(exc)))
                     if on_event:
@@ -509,6 +513,19 @@ class DevicePool:
                 on_done(f"Scale {factor:.2f}", len(succeeded), failures)
 
         self._call_coro(run())
+
+    async def _wait_reconnect(self, session, timeout: float) -> bool:
+        """Chờ một phiên rời ONLINE rồi ONLINE trở lại (sau khi resync)."""
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout
+        # Chờ rời ONLINE (bắt đầu nối lại).
+        while session.state is State.ONLINE and loop.time() < deadline:
+            await asyncio.sleep(0.1)
+        # Rồi chờ ONLINE trở lại.
+        while session.state is not State.ONLINE and loop.time() < deadline:
+            await asyncio.sleep(0.1)
+        return session.state is State.ONLINE
 
     def set_clipboard(self, keys: Iterable[str], text: str,
                       on_event=None, on_done=None) -> None:
