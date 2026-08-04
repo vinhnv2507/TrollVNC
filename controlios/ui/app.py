@@ -1072,6 +1072,16 @@ class MainWindow(QMainWindow):
                 return device.name or device.host
         return key or ""
 
+    def _reset_detail_view(self, key: str) -> None:
+        """Xoá sạch khung lớn rồi nạp lại — bỏ pixel cũ sau khi framebuffer đổi cỡ."""
+        if self.detail.key != key:
+            return
+        self.detail.set_device(None)
+        self.detail.set_device(key)
+        self._update_detail_title(key)
+        self._detail_aspect = -1.0        # buộc refit ở khung kế
+        self._fit_detail_pane()
+
     def _update_detail_title(self, key: Optional[str]) -> None:
         if key:
             self.detail_title.setText(f"🖥  {self._device_name(key)}   ·   {key}")
@@ -1193,6 +1203,11 @@ class MainWindow(QMainWindow):
                 dlg.show()
                 self.pool.set_scale(targets, settings.device_scale,
                                     on_event=dlg.on_event, on_done=dlg.on_done)
+                # Khung lớn giữ pixel cũ khi framebuffer đổi cỡ -> reset hẳn sau khi
+                # phiên nối lại (xoá ảnh cũ, buộc refit) để hết lồng/quá màn.
+                if self.detail.key and self.detail.key in targets:
+                    key = self.detail.key
+                    QTimer.singleShot(4000, lambda k=key: self._reset_detail_view(k))
 
         self.statusBar().showMessage(
             f"Đã áp dụng: {settings.live_fps:g} hình/giây · "
