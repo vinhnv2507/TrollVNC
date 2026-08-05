@@ -59,6 +59,22 @@ app), không phải xoá dấu vết thiết bị.
   restore com.zing.zalo       # hoặc quay lại bản đã lưu
   ```
 
+## Thao tác NGAY TRÊN máy (trong app TrollVNC)
+
+Ngoài điều khiển từ PC, app TrollVNC trên máy có thêm nút **"App Data"** trên
+thanh điều hướng (hiện cả ở màn hình *managed*). Bấm vào → liệt kê app người dùng
+(app hỏi daemon `apps` qua control socket loopback `46752`, không cần auth) → chạm
+một app → **Lưu snapshot / Xoá dữ liệu / Khôi phục** (Xoá và Khôi phục có xác
+nhận). App tự đóng app đích trước, rồi gửi lệnh xuống daemon (root) làm việc thật.
+Chỉ tác động **chính máy đó** — hàng loạt vẫn dùng Control IOS trên PC.
+
+Thay đổi nằm ở `app/TrollVNC/TrollVNC/`:
+- `TVNCClientListController.{h,m}`: thêm lớp `TVNCAppDataController` (tái dùng
+  `TVNCConnect/TVNCSendLine/TVNCReadAll` sẵn có). Đặt chung file để khỏi sửa
+  `project.pbxproj`.
+- `TVNCRootListController.m`: nút "App Data" (đặt **trước** nhánh managed để hiện
+  cả ở màn quản lý) + `showAppData` mở màn hình đó.
+
 ## Build và thử
 
 Run workflow → cài lại. Thử một máy từ dòng lệnh:
