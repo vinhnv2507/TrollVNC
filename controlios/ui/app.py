@@ -399,12 +399,14 @@ class SnapshotDialog(QDialog):
         self.new_button = row.addButton("Lưu bản mới…", QDialogButtonBox.ActionRole)
         self.restore_button = row.addButton("Khôi phục", QDialogButtonBox.AcceptRole)
         self.delete_button = row.addButton("Xoá bản này", QDialogButtonBox.DestructiveRole)
+        self.clear_button = row.addButton("Xoá tất cả", QDialogButtonBox.DestructiveRole)
         row.addButton(QDialogButtonBox.Close)
         layout.addWidget(row)
 
         self.new_button.clicked.connect(self._save_new)
         self.restore_button.clicked.connect(self._restore_selected)
         self.delete_button.clicked.connect(self._delete_selected)
+        self.clear_button.clicked.connect(self._clear_all)
         row.rejected.connect(self.close)
 
         self.restore_button.setEnabled(False)
@@ -511,6 +513,22 @@ class SnapshotDialog(QDialog):
                 self.window.bridge.bulk_done.emit(d, okc, fails),
                 self.reload()))
         self.status.setText(f"Đang xoá “{name}”…")
+
+    def _clear_all(self) -> None:
+        answer = QMessageBox.warning(
+            self, "Xoá tất cả snapshot",
+            f"Xoá <b>tất cả</b> bản snapshot của {self.bundle_id} trên "
+            f"<b>{len(self.targets)} máy</b>? (Dọn luôn dữ liệu sót của bản cũ.)",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self.window.pool.clear_snapshots(
+            self.targets, self.bundle_id,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, okc, fails: (
+                self.window.bridge.bulk_done.emit(d, okc, fails),
+                self.reload()))
+        self.status.setText("Đang xoá tất cả snapshot…")
 
 
 class ScriptDialog(QDialog):

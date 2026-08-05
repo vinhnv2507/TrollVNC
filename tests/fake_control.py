@@ -258,6 +258,13 @@ class FakeControlServer:
             )
             return rows.encode()
 
+        if cmd.startswith("snapclear "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle = cmd[len("snapclear "):].strip()
+            self.snapshots.pop(bundle, None)
+            return b"OK\n"
+
         if cmd.startswith("snapdel "):
             if self.unpatched:
                 return b"ERR Unknown\n"

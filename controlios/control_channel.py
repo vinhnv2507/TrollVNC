@@ -252,6 +252,14 @@ class ControlChannel:
         if not head.startswith("OK"):
             raise ControlError(f"Không xoá được snapshot {name!r}: {head}")
 
+    async def clear_snapshots(self, bundle_id: str) -> None:
+        """Xoá TẤT CẢ snapshot của một app (dọn luôn rác của bản cũ nếu còn)."""
+
+        text = await self.command(f"snapclear {bundle_id}", read_timeout=60)
+        head = text.strip()
+        if not head.startswith("OK"):
+            raise ControlError(f"Không xoá được snapshot của {bundle_id}: {head}")
+
     async def put_file(self, local: Path | str, remote: str,
                        progress=None) -> int:
         """Đẩy một file lên máy. Trả về số byte máy xác nhận đã ghi.

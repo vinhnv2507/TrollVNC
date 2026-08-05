@@ -191,6 +191,16 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         snaps = await self.channel.list_snapshots("com.golike.app")
         self.assertEqual(snaps, [])
 
+    async def test_clear_snapshots_removes_all(self) -> None:
+        await self.channel.snapshot_app("com.golike.app", "a")
+        await self.channel.snapshot_app("com.golike.app", "b")
+        await self.channel.clear_snapshots("com.golike.app")
+        self.assertEqual(await self.channel.list_snapshots("com.golike.app"), [])
+
+    async def test_clear_snapshots_ok_when_none(self) -> None:
+        # Không có bản nào vẫn trả về OK (không lỗi).
+        await self.channel.clear_snapshots("com.honeygain.app")
+
     async def test_restore_missing_name_is_reported(self) -> None:
         with self.assertRaises(ControlError) as ctx:
             await self.channel.restore_app("com.honeygain.app", "khong-co")

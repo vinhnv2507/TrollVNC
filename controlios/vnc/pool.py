@@ -521,6 +521,17 @@ class DevicePool:
         self._bulk_app_action(keys, f"Xoá snapshot {bundle_id} ({name})", action,
                               on_event, on_done)
 
+    def clear_snapshots(self, keys: Iterable[str], bundle_id: str,
+                        on_event=None, on_done=None) -> None:
+        """Xoá tất cả snapshot của một app trên nhiều máy."""
+
+        async def action(channel):
+            await channel.clear_snapshots(bundle_id)
+            return "đã xoá tất cả snapshot"
+
+        self._bulk_app_action(keys, f"Xoá tất cả snapshot {bundle_id}", action,
+                              on_event, on_done)
+
     def list_snapshots(self, key: str, bundle_id: str, on_done) -> None:
         """Liệt kê snapshot của một app trên MỘT máy.
 
