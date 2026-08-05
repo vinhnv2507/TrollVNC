@@ -84,8 +84,12 @@ class ControlChannel:
             return ""
         return f"auth {self.token} "
 
-    async def command(self, line: str) -> str:
-        """Gửi một lệnh, trả về nguyên văn phần trả lời."""
+    async def command(self, line: str, read_timeout: Optional[float] = None) -> str:
+        """Gửi một lệnh, trả về nguyên văn phần trả lời.
+
+        ``read_timeout`` nới thời gian CHỜ TRẢ LỜI cho các lệnh chạy lâu (chép dữ
+        liệu app lớn); mặc định dùng ``self.timeout``.
+        """
 
         payload = f"{self._auth_prefix()}{line}\n"
         try:
@@ -101,7 +105,8 @@ class ControlChannel:
         try:
             writer.write(payload.encode("utf-8"))
             await writer.drain()
-            data = await asyncio.wait_for(reader.read(), timeout=self.timeout)
+            data = await asyncio.wait_for(
+                reader.read(), timeout=read_timeout or self.timeout)
         except (OSError, asyncio.TimeoutError) as exc:
             raise ControlError(f"{self.host}: mất kết nối giữa chừng ({exc})") from None
         finally:
@@ -174,7 +179,7 @@ class ControlChannel:
         :meth:`terminate` app trước khi gọi.
         """
 
-        text = await self.command(f"wipeapp {bundle_id}")
+        text = await self.command(f"wipeapp {bundle_id}", read_timeout=180)
         head = text.strip()
         if head.startswith("NOT_FOUND"):
             raise ControlError(f"Máy không có app {bundle_id}")
@@ -190,7 +195,7 @@ class ControlChannel:
         """
 
         line = f"snapshot {bundle_id}" + (f" {name}" if name else "")
-        text = await self.command(line)
+        text = await self.command(line, read_timeout=180)
         head = text.strip()
         if head.startswith("NOT_FOUND"):
             raise ControlError(f"Máy không có app {bundle_id}")
@@ -226,7 +231,7 @@ class ControlChannel:
 
         if not name:
             raise ValueError("restore cần tên snapshot")
-        text = await self.command(f"restore {bundle_id} {name}")
+        text = await self.command(f"restore {bundle_id} {name}", read_timeout=180)
         head = text.strip()
         if head.startswith("NOT_FOUND"):
             raise ControlError(f"Máy không có app {bundle_id}")
