@@ -649,6 +649,15 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
 }
 
+// Màn danh sách snapshot của một app: chọn bản để khôi phục / xoá, lưu bản mới,
+// hoặc xoá dữ liệu app. Đẩy ra từ TVNCAppDataController khi chạm một app.
+@interface TVNCSnapshotListController : UITableViewController
+@property(nonatomic, copy) NSString *appBundle;
+@property(nonatomic, copy) NSString *appName;
+@property(nonatomic, strong) UIColor *primaryColor;
+@property(nonatomic, strong) UINotificationFeedbackGenerator *notificationGenerator;
+@end
+
 @interface TVNCAppDataController ()
 @property(nonatomic, strong) NSArray<NSDictionary *> *apps; // {bundle,name}
 @end
@@ -751,40 +760,173 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
         return;
 
     NSDictionary *app = self.apps[indexPath.row];
-    NSString *bundle = app[@"bundle"];
-    NSString *name = app[@"name"];
+    TVNCSnapshotListController *vc =
+        [[TVNCSnapshotListController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    vc.appBundle = app[@"bundle"];
+    vc.appName = app[@"name"];
+    vc.primaryColor = self.primaryColor;
+    vc.notificationGenerator = self.notificationGenerator;
+    [self.navigationController pushViewController:vc animated:YES];
+}
 
-    UIAlertController *sheet =
-        [UIAlertController alertControllerWithTitle:name
-                                            message:bundle
-                                     preferredStyle:UIAlertControllerStyleActionSheet];
+@end
 
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Lưu snapshot"
-                                              style:UIAlertActionStyleDefault
-                                            handler:^(UIAlertAction *a) {
-                                                [self runOp:@"snapshot" bundle:bundle name:name];
-                                            }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Xoá dữ liệu (như cài lại)"
+#pragma mark - Snapshot List
+
+@interface TVNCSnapshotListController ()
+@property(nonatomic, strong) NSArray<NSDictionary *> *snaps; // {name,epoch,size}
+@end
+
+@implementation TVNCSnapshotListController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = self.appName ?: self.appBundle;
+    self.snaps = @[];
+
+    UIRefreshControl *rc = [UIRefreshControl new];
+    [rc addTarget:self action:@selector(reload) forControlEvents:UIControlEventValueChanged];
+    self.refreshControl = rc;
+
+    [self reload];
+}
+
+- (void)reload {
+    NSString *bundle = self.appBundle;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *tsv = TVNCRunCommand([NSString stringWithFormat:@"snaplist %@", bundle], 5.0);
+        NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+        for (NSString *ln in [tsv componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+            if (ln.length == 0)
+                continue;
+            NSArray<NSString *> *cols = [ln componentsSeparatedByString:@"\t"];
+            if (cols.count < 1 || cols[0].length == 0)
+                continue;
+            [rows addObject:@{
+                @"name" : cols[0],
+                @"epoch" : @(cols.count > 1 ? [cols[1] longLongValue] : 0),
+                @"size" : @(cols.count > 2 ? [cols[2] longLongValue] : 0),
+            }];
+        }
+        // Mới nhất lên đầu.
+        [rows sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [b[@"epoch"] compare:a[@"epoch"]];
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.snaps = rows;
+            [self.refreshControl endRefreshing];
+            [self.tableView reloadData];
+        });
+    });
+}
+
+#pragma mark - Table
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 2; // 0: thao tác, 1: danh sách snapshot
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    if (section == 0)
+        return 2;
+    return self.snaps.count ?: 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return section == 0 ? @"Thao tác" : @"Bản snapshot (chạm để khôi phục / xoá)";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    if (section == 0)
+        return @"Wipe = xoá dữ liệu như cài lại (giữ keychain). App sẽ được đóng trước.";
+    return nil;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    if (indexPath.section == 0) {
+        static NSString *const kA = @"TVNCSnapActionCell";
+        UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kA];
+        if (!cell)
+            cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:kA];
+        if (indexPath.row == 0) {
+            cell.textLabel.text = @"Lưu snapshot mới…";
+            cell.textLabel.textColor = self.primaryColor ?: [UIColor labelColor];
+        } else {
+            cell.textLabel.text = @"Xoá dữ liệu app (như cài lại)";
+            cell.textLabel.textColor = [UIColor systemRedColor];
+        }
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        return cell;
+    }
+
+    static NSString *const kS = @"TVNCSnapCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kS];
+    if (!cell)
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:kS];
+
+    if (self.snaps.count == 0) {
+        cell.textLabel.text = @"Chưa có bản snapshot nào";
+        cell.textLabel.textColor = [UIColor secondaryLabelColor];
+        cell.detailTextLabel.text = nil;
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        return cell;
+    }
+
+    NSDictionary *s = self.snaps[indexPath.row];
+    cell.textLabel.text = s[@"name"];
+    cell.textLabel.textColor = [UIColor labelColor];
+
+    static NSDateFormatter *fmt;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        fmt = [NSDateFormatter new];
+        fmt.dateFormat = @"dd/MM HH:mm";
+    });
+    long long epoch = [s[@"epoch"] longLongValue];
+    NSString *when = epoch > 0 ? [fmt stringFromDate:[NSDate dateWithTimeIntervalSince1970:epoch]] : @"—";
+    double mb = [s[@"size"] longLongValue] / (1024.0 * 1024.0);
+    cell.detailTextLabel.text = [NSString stringWithFormat:@"%@ · %.1f MB", when, mb];
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+
+    if (indexPath.section == 0) {
+        if (indexPath.row == 0)
+            [self promptSaveSnapshot];
+        else
+            [self confirmWipe];
+        return;
+    }
+
+    if (self.snaps.count == 0)
+        return;
+    NSDictionary *s = self.snaps[indexPath.row];
+    NSString *name = s[@"name"];
+
+    UIAlertController *sheet = [UIAlertController alertControllerWithTitle:name
+                                                                  message:nil
+                                                           preferredStyle:UIAlertControllerStyleActionSheet];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Khôi phục về bản này"
                                               style:UIAlertActionStyleDestructive
                                             handler:^(UIAlertAction *a) {
-                                                [self confirmDestructive:@"wipeapp"
-                                                                  bundle:bundle
-                                                                    name:name
-                                                                 message:@"Xoá sạch dữ liệu app này? "
-                                                                          "Không hoàn tác (trừ khi đã có snapshot)."];
+                                                [self confirmRestore:name];
                                             }]];
-    [sheet addAction:[UIAlertAction actionWithTitle:@"Khôi phục về snapshot"
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Xoá bản này"
                                               style:UIAlertActionStyleDestructive
                                             handler:^(UIAlertAction *a) {
-                                                [self confirmDestructive:@"restore"
-                                                                  bundle:bundle
-                                                                    name:name
-                                                                 message:@"Thay dữ liệu hiện tại bằng bản "
-                                                                          "snapshot đã lưu? Dữ liệu hiện tại sẽ mất."];
+                                                [self runControl:[NSString stringWithFormat:@"snapdel %@ %@",
+                                                                                            self.appBundle, name]
+                                                  terminateFirst:NO
+                                                            verb:@"Xoá snapshot"
+                                                     reloadAfter:YES];
                                             }]];
     [sheet addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
 
-    // iPad: action sheet cần điểm neo.
     UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
     sheet.popoverPresentationController.sourceView = cell;
     sheet.popoverPresentationController.sourceRect = cell.bounds;
@@ -793,35 +935,88 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
 
 #pragma mark - Ops
 
-- (void)confirmDestructive:(NSString *)op bundle:(NSString *)bundle name:(NSString *)name message:(NSString *)message {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:name
-                                                                  message:message
-                                                           preferredStyle:UIAlertControllerStyleAlert];
+- (void)promptSaveSnapshot {
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"Lưu snapshot mới"
+                                            message:@"Đặt tên (để trống = tự đặt theo giờ). Không dùng '/'."
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"tên bản (tuỳ chọn)";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    }];
     [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
-    [alert addAction:[UIAlertAction actionWithTitle:@"Đồng ý"
-                                              style:UIAlertActionStyleDestructive
+    [alert addAction:[UIAlertAction actionWithTitle:@"Lưu"
+                                              style:UIAlertActionStyleDefault
                                             handler:^(UIAlertAction *a) {
-                                                [self runOp:op bundle:bundle name:name];
+                                                NSString *nm = [alert.textFields.firstObject.text
+                                                    stringByTrimmingCharactersInSet:[NSCharacterSet
+                                                                                        whitespaceCharacterSet]];
+                                                NSString *cmd = nm.length
+                                                    ? [NSString stringWithFormat:@"snapshot %@ %@", self.appBundle, nm]
+                                                    : [NSString stringWithFormat:@"snapshot %@", self.appBundle];
+                                                [self runControl:cmd terminateFirst:YES verb:@"Lưu snapshot"
+                                                     reloadAfter:YES];
                                             }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
 
-- (void)runOp:(NSString *)op bundle:(NSString *)bundle name:(NSString *)name {
+- (void)confirmWipe {
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Xoá dữ liệu app"
+                         message:@"Xoá sạch dữ liệu app này (như cài lại)? Không hoàn tác trừ khi đã có snapshot."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Xoá"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *a) {
+                                                [self runControl:[NSString stringWithFormat:@"wipeapp %@",
+                                                                                            self.appBundle]
+                                                  terminateFirst:YES
+                                                            verb:@"Xoá dữ liệu"
+                                                     reloadAfter:NO];
+                                            }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)confirmRestore:(NSString *)name {
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Khôi phục"
+                         message:[NSString stringWithFormat:@"Thay dữ liệu hiện tại bằng bản “%@”? "
+                                                            @"Dữ liệu hiện tại sẽ mất.",
+                                                            name]
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Khôi phục"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *a) {
+                                                [self runControl:[NSString stringWithFormat:@"restore %@ %@",
+                                                                                            self.appBundle, name]
+                                                  terminateFirst:YES
+                                                            verb:@"Khôi phục"
+                                                     reloadAfter:NO];
+                                            }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)runControl:(NSString *)command
+    terminateFirst:(BOOL)term
+              verb:(NSString *)verb
+       reloadAfter:(BOOL)reloadAfter {
+    NSString *bundle = self.appBundle;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-        // Đóng app trước để file được ghi/nhả (giống bên PC).
-        (void)TVNCRunCommand([NSString stringWithFormat:@"terminate %@", bundle], 4.0);
-        NSString *reply = TVNCRunCommand([NSString stringWithFormat:@"%@ %@", op, bundle], 30.0);
+        if (term) // đóng app trước để file được ghi/nhả (giống bên PC)
+            (void)TVNCRunCommand([NSString stringWithFormat:@"terminate %@", bundle], 4.0);
+        NSString *reply = TVNCRunCommand(command, 30.0);
         NSString *head = [reply stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         BOOL ok = [head hasPrefix:@"OK"];
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.notificationGenerator)
                 [self.notificationGenerator notificationOccurred:ok ? UINotificationFeedbackTypeSuccess
                                                                     : UINotificationFeedbackTypeError];
-            NSString *verb = [op isEqualToString:@"snapshot"] ? @"Lưu snapshot"
-                             : [op isEqualToString:@"wipeapp"] ? @"Xoá dữ liệu"
-                                                               : @"Khôi phục";
-            NSString *msg = ok ? [NSString stringWithFormat:@"%@ %@: xong.", verb, name]
-                               : [NSString stringWithFormat:@"%@ %@ thất bại: %@", verb, name,
+            if (reloadAfter)
+                [self reload];
+            NSString *msg = ok ? [NSString stringWithFormat:@"%@: xong.", verb]
+                               : [NSString stringWithFormat:@"%@ thất bại: %@", verb,
                                                             head.length ? head : @"máy không trả lời"];
             UIAlertController *done = [UIAlertController alertControllerWithTitle:(ok ? @"Xong" : @"Lỗi")
                                                                          message:msg

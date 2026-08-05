@@ -4473,21 +4473,64 @@ static NSData *tvCtlWipeApp(NSString *bundleId) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
-// `snapshot <bundle id>` — lưu bản sao dữ liệu app hiện tại vào
-// /var/mobile/controlios-snap/<bundle id>/ để `restore` quay lại sau này. Bản
+// Tên snapshot hợp lệ: không rỗng, không quá dài, không chứa '/' hay '..' và
+// không bắt đầu bằng '.' (chặn thoát thư mục và file ẩn).
+static BOOL tvValidSnapName(NSString *name) {
+    if (name.length == 0 || name.length > 64)
+        return NO;
+    if ([name rangeOfString:@"/"].location != NSNotFound)
+        return NO;
+    if ([name rangeOfString:@".."].location != NSNotFound)
+        return NO;
+    if ([name hasPrefix:@"."])
+        return NO;
+    return YES;
+}
+
+// Tên tự sinh theo thời gian máy khi người dùng không đặt tên.
+static NSString *tvTimestampName(void) {
+    NSDateFormatter *f = [NSDateFormatter new];
+    f.dateFormat = @"yyyyMMdd-HHmmss";
+    f.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+    return [f stringFromDate:[NSDate date]];
+}
+
+// Tổng cỡ (byte) mọi file thường bên trong một thư mục.
+static unsigned long long tvDirSize(NSString *path, NSFileManager *fm) {
+    unsigned long long total = 0;
+    NSDirectoryEnumerator *e = [fm enumeratorAtPath:path];
+    for (NSString *sub in e) {
+        (void)sub;
+        NSDictionary *a = [e fileAttributes];
+        if ([a.fileType isEqualToString:NSFileTypeRegular])
+            total += a.fileSize;
+    }
+    return total;
+}
+
+// `snapshot <bundle id> [tên]` — lưu bản sao dữ liệu app hiện tại vào
+// /var/mobile/controlios-snap/<bundle id>/<tên>/. Không đặt tên thì tự sinh theo
+// thời gian. NHIỀU bản cùng lúc, mỗi tên một bản; cùng tên thì GHI ĐÈ. Bản
 // snapshot nằm NGAY TRÊN MÁY nên không phải truyền qua PC.
-static NSData *tvCtlSnapshotApp(NSString *bundleId) {
+static NSData *tvCtlSnapshotApp(NSString *bundleId, NSString *snapName) {
     bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    snapName = [snapName stringByTrimmingCharactersInSet:
                              [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (bundleId.length == 0)
         return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if (snapName.length == 0)
+        snapName = tvTimestampName();
+    else if (!tvValidSnapName(snapName))
+        return [@"ERR BadName\n" dataUsingEncoding:NSUTF8StringEncoding];
+
     NSString *data = tvDataContainerPath(bundleId);
     if (!data)
         return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *snap = tvSnapshotDir(bundleId);
-    [fm removeItemAtPath:snap error:NULL]; // bỏ bản cũ nếu có
+    NSString *snap = [tvSnapshotDir(bundleId) stringByAppendingPathComponent:snapName];
+    [fm removeItemAtPath:snap error:NULL]; // trùng tên -> ghi đè
     NSError *e = nil;
     if (![fm createDirectoryAtPath:snap
        withIntermediateDirectories:YES
@@ -4507,30 +4550,66 @@ static NSData *tvCtlSnapshotApp(NSString *bundleId) {
         NSString *dst = [snap stringByAppendingPathComponent:sub];
         NSError *ce = nil;
         if (![fm copyItemAtPath:src toPath:dst error:&ce]) {
-            TVLog(@"Control socket: snapshot %@ %@ FAIL: %@", bundleId, sub,
+            TVLog(@"Control socket: snapshot %@/%@ %@ FAIL: %@", bundleId, snapName, sub,
                   ce.localizedDescription);
             ok = NO;
         }
     }
 
-    TVLog(@"Control socket: snapshot %@ -> %@", bundleId, ok ? @"OK" : @"PARTIAL");
-    const char *raw = ok ? "OK\n" : "ERR Partial\n";
-    return [NSData dataWithBytes:raw length:strlen(raw)];
+    TVLog(@"Control socket: snapshot %@ '%@' -> %@", bundleId, snapName, ok ? @"OK" : @"PARTIAL");
+    if (!ok)
+        return [@"ERR Partial\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *okmsg = [NSString stringWithFormat:@"OK %@\n", snapName];
+    return [okmsg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-// `restore <bundle id>` — thay dữ liệu app hiện tại bằng bản snapshot đã lưu.
-// Nên `terminate` app trước, và relaunch sau. File chép vào được chown về mobile.
-static NSData *tvCtlRestoreApp(NSString *bundleId) {
+// `snaplist <bundle id>` — TSV các bản snapshot: tên, thời điểm (epoch giây), cỡ
+// byte. Chưa có bản nào thì trả về rỗng.
+static NSData *tvCtlSnapshotList(NSString *bundleId) {
     bundleId = [bundleId stringByTrimmingCharactersInSet:
                              [NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (bundleId.length == 0)
         return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = tvSnapshotDir(bundleId);
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:root isDirectory:&isDir] || !isDir)
+        return [NSData data]; // chưa có bản nào
+
+    NSMutableString *out = [NSMutableString string];
+    for (NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL]) {
+        NSString *full = [root stringByAppendingPathComponent:name];
+        BOOL d = NO;
+        if (![fm fileExistsAtPath:full isDirectory:&d] || !d)
+            continue;
+        NSDictionary *attrs = [fm attributesOfItemAtPath:full error:NULL];
+        long long epoch = (long long)[attrs.fileModificationDate timeIntervalSince1970];
+        unsigned long long size = tvDirSize(full, fm);
+        [out appendFormat:@"%@\t%lld\t%llu\n",
+                          [name stringByReplacingOccurrencesOfString:@"\t" withString:@" "],
+                          epoch, size];
+    }
+    return [out dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+// `restore <bundle id> <tên>` — thay dữ liệu app hiện tại bằng đúng bản snapshot
+// tên đó. Nên `terminate` app trước, relaunch sau. File chép vào chown về mobile.
+static NSData *tvCtlRestoreApp(NSString *bundleId, NSString *snapName) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    snapName = [snapName stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0 || snapName.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if (!tvValidSnapName(snapName))
+        return [@"ERR BadName\n" dataUsingEncoding:NSUTF8StringEncoding];
     NSString *data = tvDataContainerPath(bundleId);
     if (!data)
         return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    NSString *snap = tvSnapshotDir(bundleId);
+    NSString *snap = [tvSnapshotDir(bundleId) stringByAppendingPathComponent:snapName];
     BOOL isDir = NO;
     if (![fm fileExistsAtPath:snap isDirectory:&isDir] || !isDir)
         return [@"ERR NoSnapshot\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -4545,7 +4624,7 @@ static NSData *tvCtlRestoreApp(NSString *bundleId) {
         [fm removeItemAtPath:dst error:NULL]; // bỏ dữ liệu hiện tại
         NSError *ce = nil;
         if (![fm copyItemAtPath:src toPath:dst error:&ce]) {
-            TVLog(@"Control socket: restore %@ %@ FAIL: %@", bundleId, sub,
+            TVLog(@"Control socket: restore %@/%@ %@ FAIL: %@", bundleId, snapName, sub,
                   ce.localizedDescription);
             ok = NO;
             continue;
@@ -4553,9 +4632,35 @@ static NSData *tvCtlRestoreApp(NSString *bundleId) {
         tvChownTree(dst, fm); // root vừa chép -> trả quyền về mobile
     }
 
-    TVLog(@"Control socket: restore %@ -> %@", bundleId, ok ? @"OK" : @"PARTIAL");
+    TVLog(@"Control socket: restore %@ '%@' -> %@", bundleId, snapName, ok ? @"OK" : @"PARTIAL");
     const char *raw = ok ? "OK\n" : "ERR Partial\n";
     return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
+// `snapdel <bundle id> <tên>` — xoá một bản snapshot.
+static NSData *tvCtlSnapshotDelete(NSString *bundleId, NSString *snapName) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    snapName = [snapName stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0 || snapName.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if (!tvValidSnapName(snapName))
+        return [@"ERR BadName\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *snap = [tvSnapshotDir(bundleId) stringByAppendingPathComponent:snapName];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:snap isDirectory:&isDir] || !isDir)
+        return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSError *e = nil;
+    if (![fm removeItemAtPath:snap error:&e]) {
+        NSString *msg = [NSString stringWithFormat:@"ERR %@\n",
+                                                   e.localizedDescription ?: @"CannotDelete"];
+        return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    TVLog(@"Control socket: snapdel %@ '%@' -> OK", bundleId, snapName);
+    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
@@ -4705,9 +4810,28 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     } else if ([cmd hasPrefix:@"wipeapp "]) {
         resp = tvCtlWipeApp([cmd substringFromIndex:8]);
     } else if ([cmd hasPrefix:@"snapshot "]) {
-        resp = tvCtlSnapshotApp([cmd substringFromIndex:9]);
+        NSString *rest = [[cmd substringFromIndex:9]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSRange sp = [rest rangeOfString:@" "];
+        NSString *bid = (sp.location == NSNotFound) ? rest : [rest substringToIndex:sp.location];
+        NSString *nm = (sp.location == NSNotFound) ? @"" : [rest substringFromIndex:sp.location + 1];
+        resp = tvCtlSnapshotApp(bid, nm);
+    } else if ([cmd hasPrefix:@"snaplist "]) {
+        resp = tvCtlSnapshotList([cmd substringFromIndex:9]);
+    } else if ([cmd hasPrefix:@"snapdel "]) {
+        NSString *rest = [[cmd substringFromIndex:8]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSRange sp = [rest rangeOfString:@" "];
+        NSString *bid = (sp.location == NSNotFound) ? rest : [rest substringToIndex:sp.location];
+        NSString *nm = (sp.location == NSNotFound) ? @"" : [rest substringFromIndex:sp.location + 1];
+        resp = tvCtlSnapshotDelete(bid, nm);
     } else if ([cmd hasPrefix:@"restore "]) {
-        resp = tvCtlRestoreApp([cmd substringFromIndex:8]);
+        NSString *rest = [[cmd substringFromIndex:8]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        NSRange sp = [rest rangeOfString:@" "];
+        NSString *bid = (sp.location == NSNotFound) ? rest : [rest substringToIndex:sp.location];
+        NSString *nm = (sp.location == NSNotFound) ? @"" : [rest substringFromIndex:sp.location + 1];
+        resp = tvCtlRestoreApp(bid, nm);
     } else {
         resp = [@"ERR Unknown\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
