@@ -1006,7 +1006,8 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         if (term) // đóng app trước để file được ghi/nhả (giống bên PC)
             (void)TVNCRunCommand([NSString stringWithFormat:@"terminate %@", bundle], 4.0);
-        NSString *reply = TVNCRunCommand(command, 30.0);
+        // App lớn (Shopee ~700MB) chép lâu; daemon chỉ trả lời sau khi xong.
+        NSString *reply = TVNCRunCommand(command, 180.0);
         NSString *head = [reply stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         BOOL ok = [head hasPrefix:@"OK"];
         dispatch_async(dispatch_get_main_queue(), ^{

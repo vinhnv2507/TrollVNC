@@ -4451,6 +4451,43 @@ static void tvChownTree(NSString *path, NSFileManager *fm) {
     }
 }
 
+// Chép cây thư mục CHỊU LỖI: bỏ qua từng file không chép được (socket/fifo,
+// cache đang khoá, file thiếu quyền) thay vì để copyItemAtPath hỏng CẢ bản. App
+// lớn (Shopee...) hay có file như vậy trong Library/Caches và tmp. Trả về YES
+// miễn tạo được thư mục đích; file lẻ bỏ qua chỉ ghi log.
+static BOOL tvCopyTree(NSString *src, NSString *dst, NSFileManager *fm) {
+    NSDictionary *attrs = [fm attributesOfItemAtPath:src error:NULL];
+    NSString *type = attrs.fileType;
+    if ([type isEqualToString:NSFileTypeDirectory]) {
+        NSError *de = nil;
+        if (![fm createDirectoryAtPath:dst withIntermediateDirectories:YES
+                            attributes:nil error:&de]) {
+            TVLog(@"Control socket: copy không tạo được %@: %@", dst, de.localizedDescription);
+            return NO;
+        }
+        for (NSString *child in [fm contentsOfDirectoryAtPath:src error:NULL])
+            tvCopyTree([src stringByAppendingPathComponent:child],
+                       [dst stringByAppendingPathComponent:child], fm);
+        return YES;
+    }
+    if ([type isEqualToString:NSFileTypeRegular] || [type isEqualToString:NSFileTypeSymbolicLink]) {
+        NSError *e = nil;
+        if (![fm copyItemAtPath:src toPath:dst error:&e])
+            TVLog(@"Control socket: copy bỏ qua %@ (%@)", src, e.localizedDescription);
+        return YES; // file lẻ hỏng không làm hỏng cả bản
+    }
+    return YES; // socket/fifo/device: bỏ qua
+}
+
+// Các thư mục con dữ liệu — dùng để LỌC khỏi danh sách snapshot: bản snapshot cũ
+// (kiểu một-bản) để lẫn 4 thư mục này ngay dưới <bundle>/ nên đừng coi là snapshot.
+static BOOL tvIsReservedSubdir(NSString *name) {
+    for (NSString *sub in tvAppDataSubdirs())
+        if ([name isEqualToString:sub])
+            return YES;
+    return NO;
+}
+
 // `wipeapp <bundle id>` — xoá dữ liệu app (Documents/Library/tmp/SystemData) như
 // vừa cài lại, nhưng GIỮ container. Nên `terminate` app trước khi gọi. Lưu ý:
 // KHÔNG đụng keychain — token/khoá trong keychain vẫn còn.
@@ -4541,24 +4578,16 @@ static NSData *tvCtlSnapshotApp(NSString *bundleId, NSString *snapName) {
         return [msg dataUsingEncoding:NSUTF8StringEncoding];
     }
 
-    BOOL ok = YES;
     for (NSString *sub in tvAppDataSubdirs()) {
         NSString *src = [data stringByAppendingPathComponent:sub];
         BOOL isDir = NO;
         if (![fm fileExistsAtPath:src isDirectory:&isDir] || !isDir)
             continue; // subdir chưa tồn tại thì bỏ qua
-        NSString *dst = [snap stringByAppendingPathComponent:sub];
-        NSError *ce = nil;
-        if (![fm copyItemAtPath:src toPath:dst error:&ce]) {
-            TVLog(@"Control socket: snapshot %@/%@ %@ FAIL: %@", bundleId, snapName, sub,
-                  ce.localizedDescription);
-            ok = NO;
-        }
+        // Chép chịu lỗi: bỏ qua file lẻ (socket/cache khoá) thay vì hỏng cả bản.
+        tvCopyTree(src, [snap stringByAppendingPathComponent:sub], fm);
     }
 
-    TVLog(@"Control socket: snapshot %@ '%@' -> %@", bundleId, snapName, ok ? @"OK" : @"PARTIAL");
-    if (!ok)
-        return [@"ERR Partial\n" dataUsingEncoding:NSUTF8StringEncoding];
+    TVLog(@"Control socket: snapshot %@ '%@' -> OK", bundleId, snapName);
     NSString *okmsg = [NSString stringWithFormat:@"OK %@\n", snapName];
     return [okmsg dataUsingEncoding:NSUTF8StringEncoding];
 }
@@ -4579,6 +4608,8 @@ static NSData *tvCtlSnapshotList(NSString *bundleId) {
 
     NSMutableString *out = [NSMutableString string];
     for (NSString *name in [fm contentsOfDirectoryAtPath:root error:NULL]) {
+        if (tvIsReservedSubdir(name))
+            continue; // sót lại từ bản snapshot cũ (một-bản) -> không phải snapshot
         NSString *full = [root stringByAppendingPathComponent:name];
         BOOL d = NO;
         if (![fm fileExistsAtPath:full isDirectory:&d] || !d)
@@ -4622,10 +4653,8 @@ static NSData *tvCtlRestoreApp(NSString *bundleId, NSString *snapName) {
             continue;
         NSString *dst = [data stringByAppendingPathComponent:sub];
         [fm removeItemAtPath:dst error:NULL]; // bỏ dữ liệu hiện tại
-        NSError *ce = nil;
-        if (![fm copyItemAtPath:src toPath:dst error:&ce]) {
-            TVLog(@"Control socket: restore %@/%@ %@ FAIL: %@", bundleId, snapName, sub,
-                  ce.localizedDescription);
+        if (!tvCopyTree(src, dst, fm)) {
+            TVLog(@"Control socket: restore %@/%@ %@ FAIL", bundleId, snapName, sub);
             ok = NO;
             continue;
         }
