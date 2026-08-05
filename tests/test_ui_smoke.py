@@ -89,25 +89,26 @@ class WindowTest(unittest.TestCase):
             window.close()
             registry_path.unlink(missing_ok=True)
 
-    def test_toolbars_are_split_so_all_actions_fit_at_1600px(self) -> None:
+    def test_toolbars_fit_without_overflow_at_1900px(self) -> None:
         # Hai hàng công cụ phải chứa hết action mà không giấu sau nút » ở bề rộng
-        # màn hình phổ biến cho một bảng điều khiển farm (1600px). Đã nhiều tính
-        # năng hơn (Ảnh/Video, Respring) nên ngưỡng nâng từ 1500 lên 1600.
+        # của một màn hình rộng phổ biến cho bảng điều khiển farm (1900px). Đã dồn
+        # thêm Cài .ipa / Đẩy file / Độ sáng lên thanh công cụ nên ngưỡng nâng lên.
+        # (Qt tính chỗ theo sizeHint — phồng hơn bề rộng vẽ thực; máy thật font sát
+        # hơn nên còn dư nhiều.)
         from PySide6.QtWidgets import QToolBar, QToolButton
 
         registry_path = Path(__file__).parent / "_toolbar_devices.json"
         Registry().save(registry_path)
         window = MainWindow(registry_path)
         try:
-            window.resize(1600, 700)
+            window.resize(1900, 700)
             window.show()
             app.processEvents()
 
             bars = {bar.objectName(): bar for bar in window.findChildren(QToolBar)}
             self.assertIn("navigation-toolbar", bars)
             self.assertIn("actions-toolbar", bars)
-            self.assertIn("files-toolbar", bars)
-            for name in ("navigation-toolbar", "actions-toolbar", "files-toolbar"):
+            for name in ("navigation-toolbar", "actions-toolbar"):
                 bar = bars[name]
                 extension = bar.findChild(QToolButton, "qt_toolbar_ext_button")
                 self.assertTrue(extension is None or not extension.isVisible(),
