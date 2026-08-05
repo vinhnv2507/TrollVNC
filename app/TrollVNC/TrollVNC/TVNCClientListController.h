@@ -27,4 +27,15 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+/// Reset dữ liệu app ngay trên máy: liệt kê app đã cài (hỏi daemon qua control
+/// socket loopback) rồi Snapshot / Wipe / Restore từng app. Mọi việc nặng do
+/// daemon (root) làm; controller này chỉ gửi lệnh và hiện kết quả.
+@interface TVNCAppDataController : UITableViewController
+
+@property(nonatomic, strong) NSBundle *bundle;
+@property(nonatomic, strong) UIColor *primaryColor;
+@property(nonatomic, strong) UINotificationFeedbackGenerator *notificationGenerator;
+
+@end
+
 NS_ASSUME_NONNULL_END

@@ -631,3 +631,205 @@ static int TVNCConnect(void) {
 }
 
 @end
+
+#pragma mark - App Data Reset
+
+// Gửi một lệnh control (loopback) và trả về nguyên văn phần trả lời, hoặc nil nếu
+// không nối được. Dùng chung TVNCConnect/TVNCSendLine/TVNCReadAll ở trên.
+static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
+    int fd = TVNCConnect();
+    if (fd < 0)
+        return nil;
+    if (TVNCSendLine(fd, line) < 0) {
+        close(fd);
+        return nil;
+    }
+    NSData *data = TVNCReadAll(fd, timeoutSec);
+    close(fd);
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+}
+
+@interface TVNCAppDataController ()
+@property(nonatomic, strong) NSArray<NSDictionary *> *apps; // {bundle,name}
+@end
+
+@implementation TVNCAppDataController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"App Data";
+    self.apps = @[];
+
+    self.navigationItem.rightBarButtonItem =
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose
+                                                      target:self
+                                                      action:@selector(dismissSelf)];
+
+    UIRefreshControl *rc = [UIRefreshControl new];
+    [rc addTarget:self action:@selector(reload) forControlEvents:UIControlEventValueChanged];
+    self.refreshControl = rc;
+
+    [self reload];
+}
+
+- (void)dismissSelf {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+#pragma mark - Load app list
+
+- (void)reload {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *tsv = TVNCRunCommand(@"apps", 4.0);
+        NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+        // `apps` trả về bundle\tname\ttype\tver mỗi dòng, KHÔNG có header. Chỉ lấy
+        // app người dùng (type == User).
+        for (NSString *ln in [tsv componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+            if (ln.length == 0)
+                continue;
+            NSArray<NSString *> *cols = [ln componentsSeparatedByString:@"\t"];
+            if (cols.count < 3)
+                continue;
+            if (![cols[2] isEqualToString:@"User"])
+                continue;
+            NSString *name = cols[1].length ? cols[1] : cols[0];
+            [rows addObject:@{@"bundle" : cols[0], @"name" : name}];
+        }
+        [rows sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+            return [a[@"name"] localizedCaseInsensitiveCompare:b[@"name"]];
+        }];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.apps = rows;
+            [self.refreshControl endRefreshing];
+            [self.tableView reloadData];
+        });
+    });
+}
+
+#pragma mark - Table
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.apps.count ?: 1; // 1 dòng placeholder khi rỗng
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    return @"Chọn app để reset dữ liệu (chỉ máy này)";
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForFooterInSection:(NSInteger)section {
+    return @"Wipe = xoá dữ liệu như cài lại (giữ keychain). Snapshot lưu bản hiện "
+           @"tại trên máy; Restore quay về bản đã lưu. App sẽ được đóng trước.";
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    static NSString *const kReuse = @"TVNCAppDataCell";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:kReuse];
+    if (!cell)
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:kReuse];
+
+    if (self.apps.count == 0) {
+        cell.textLabel.text = @"Không lấy được danh sách app";
+        cell.detailTextLabel.text = @"Kéo xuống để thử lại — cần TrollVNC đã vá";
+        cell.textLabel.textColor = [UIColor secondaryLabelColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+        cell.accessoryType = UITableViewCellAccessoryNone;
+        return cell;
+    }
+
+    NSDictionary *app = self.apps[indexPath.row];
+    cell.textLabel.text = app[@"name"];
+    cell.textLabel.textColor = [UIColor labelColor];
+    cell.detailTextLabel.text = app[@"bundle"];
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (self.apps.count == 0)
+        return;
+
+    NSDictionary *app = self.apps[indexPath.row];
+    NSString *bundle = app[@"bundle"];
+    NSString *name = app[@"name"];
+
+    UIAlertController *sheet =
+        [UIAlertController alertControllerWithTitle:name
+                                            message:bundle
+                                     preferredStyle:UIAlertControllerStyleActionSheet];
+
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Lưu snapshot"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *a) {
+                                                [self runOp:@"snapshot" bundle:bundle name:name];
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Xoá dữ liệu (như cài lại)"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *a) {
+                                                [self confirmDestructive:@"wipeapp"
+                                                                  bundle:bundle
+                                                                    name:name
+                                                                 message:@"Xoá sạch dữ liệu app này? "
+                                                                          "Không hoàn tác (trừ khi đã có snapshot)."];
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Khôi phục về snapshot"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *a) {
+                                                [self confirmDestructive:@"restore"
+                                                                  bundle:bundle
+                                                                    name:name
+                                                                 message:@"Thay dữ liệu hiện tại bằng bản "
+                                                                          "snapshot đã lưu? Dữ liệu hiện tại sẽ mất."];
+                                            }]];
+    [sheet addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+
+    // iPad: action sheet cần điểm neo.
+    UITableViewCell *cell = [tableView cellForRowAtIndexPath:indexPath];
+    sheet.popoverPresentationController.sourceView = cell;
+    sheet.popoverPresentationController.sourceRect = cell.bounds;
+    [self presentViewController:sheet animated:YES completion:nil];
+}
+
+#pragma mark - Ops
+
+- (void)confirmDestructive:(NSString *)op bundle:(NSString *)bundle name:(NSString *)name message:(NSString *)message {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:name
+                                                                  message:message
+                                                           preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Đồng ý"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *a) {
+                                                [self runOp:op bundle:bundle name:name];
+                                            }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)runOp:(NSString *)op bundle:(NSString *)bundle name:(NSString *)name {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        // Đóng app trước để file được ghi/nhả (giống bên PC).
+        (void)TVNCRunCommand([NSString stringWithFormat:@"terminate %@", bundle], 4.0);
+        NSString *reply = TVNCRunCommand([NSString stringWithFormat:@"%@ %@", op, bundle], 30.0);
+        NSString *head = [reply stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        BOOL ok = [head hasPrefix:@"OK"];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.notificationGenerator)
+                [self.notificationGenerator notificationOccurred:ok ? UINotificationFeedbackTypeSuccess
+                                                                    : UINotificationFeedbackTypeError];
+            NSString *verb = [op isEqualToString:@"snapshot"] ? @"Lưu snapshot"
+                             : [op isEqualToString:@"wipeapp"] ? @"Xoá dữ liệu"
+                                                               : @"Khôi phục";
+            NSString *msg = ok ? [NSString stringWithFormat:@"%@ %@: xong.", verb, name]
+                               : [NSString stringWithFormat:@"%@ %@ thất bại: %@", verb, name,
+                                                            head.length ? head : @"máy không trả lời"];
+            UIAlertController *done = [UIAlertController alertControllerWithTitle:(ok ? @"Xong" : @"Lỗi")
+                                                                         message:msg
+                                                                  preferredStyle:UIAlertControllerStyleAlert];
+            [done addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:done animated:YES completion:nil];
+        });
+    });
+}
+
+@end

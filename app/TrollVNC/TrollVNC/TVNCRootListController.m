@@ -282,7 +282,17 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                                                             action:nil];
     self.navigationItem.backBarButtonItem.tintColor = _primaryColor;
 
+    // Nút "App Data" (reset dữ liệu app trên chính máy này). Đặt TRƯỚC nhánh
+    // managed để nó hiện cả ở màn hình quản lý — nơi các nút khác bị bỏ qua bởi
+    // return sớm bên dưới.
+    UIBarButtonItem *appDataItem = [[UIBarButtonItem alloc] initWithTitle:@"App Data"
+                                                                   style:UIBarButtonItemStylePlain
+                                                                  target:self
+                                                                  action:@selector(showAppData)];
+    appDataItem.tintColor = _primaryColor;
+
     if ([self hasManagedConfiguration]) {
+        self.navigationItem.rightBarButtonItem = appDataItem;
         return;
     }
 
@@ -308,12 +318,13 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
     BOOL isPad = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad);
     if (isApp || isPad) {
-        self.navigationItem.leftBarButtonItem = clientsItem;
+        self.navigationItem.leftBarButtonItems = @[ clientsItem, appDataItem ];
         self.navigationItem.rightBarButtonItem = applyItem;
     } else {
         self.navigationItem.rightBarButtonItems = @[
             applyItem,
             clientsItem,
+            appDataItem,
         ];
     }
 
@@ -339,6 +350,15 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
 - (void)showClients {
     TVNCClientListController *vc = [[TVNCClientListController alloc] init];
+    vc.bundle = self.bundle;
+    vc.primaryColor = self.primaryColor;
+    vc.notificationGenerator = self.notificationGenerator;
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.navigationController presentViewController:navController animated:YES completion:nil];
+}
+
+- (void)showAppData {
+    TVNCAppDataController *vc = [[TVNCAppDataController alloc] init];
     vc.bundle = self.bundle;
     vc.primaryColor = self.primaryColor;
     vc.notificationGenerator = self.notificationGenerator;
