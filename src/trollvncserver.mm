@@ -4692,6 +4692,30 @@ static NSData *tvCtlSnapshotDelete(NSString *bundleId, NSString *snapName) {
     return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+// `snapclear <bundle id>` — xoá TẤT CẢ snapshot của một app (cả thư mục
+// /var/mobile/controlios-snap/<bundle id>/). Cũng dọn luôn dữ liệu sót của bản
+// snapshot cũ (kiểu một-bản) nếu còn.
+static NSData *tvCtlSnapshotClear(NSString *bundleId) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = tvSnapshotDir(bundleId);
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:root isDirectory:&isDir] || !isDir)
+        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding]; // vốn không có gì
+    NSError *e = nil;
+    if (![fm removeItemAtPath:root error:&e]) {
+        NSString *msg = [NSString stringWithFormat:@"ERR %@\n",
+                                                   e.localizedDescription ?: @"CannotDelete"];
+        return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    TVLog(@"Control socket: snapclear %@ -> OK", bundleId);
+    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // Log peer and set short timeouts
     char ipbuf[INET_ADDRSTRLEN] = {0};
@@ -4847,6 +4871,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlSnapshotApp(bid, nm);
     } else if ([cmd hasPrefix:@"snaplist "]) {
         resp = tvCtlSnapshotList([cmd substringFromIndex:9]);
+    } else if ([cmd hasPrefix:@"snapclear "]) {
+        resp = tvCtlSnapshotClear([cmd substringFromIndex:10]);
     } else if ([cmd hasPrefix:@"snapdel "]) {
         NSString *rest = [[cmd substringFromIndex:8]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];

@@ -828,7 +828,7 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if (section == 0)
-        return 2;
+        return 3; // Lưu bản mới · Xoá dữ liệu app · Xoá tất cả snapshot
     return self.snaps.count ?: 1;
 }
 
@@ -851,8 +851,11 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
         if (indexPath.row == 0) {
             cell.textLabel.text = @"Lưu snapshot mới…";
             cell.textLabel.textColor = self.primaryColor ?: [UIColor labelColor];
-        } else {
+        } else if (indexPath.row == 1) {
             cell.textLabel.text = @"Xoá dữ liệu app (như cài lại)";
+            cell.textLabel.textColor = [UIColor systemRedColor];
+        } else {
+            cell.textLabel.text = @"Xoá tất cả snapshot";
             cell.textLabel.textColor = [UIColor systemRedColor];
         }
         cell.accessoryType = UITableViewCellAccessoryNone;
@@ -898,8 +901,10 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
     if (indexPath.section == 0) {
         if (indexPath.row == 0)
             [self promptSaveSnapshot];
-        else
+        else if (indexPath.row == 1)
             [self confirmWipe];
+        else
+            [self confirmClearAll];
         return;
     }
 
@@ -974,6 +979,24 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
                                                   terminateFirst:YES
                                                             verb:@"Xoá dữ liệu"
                                                      reloadAfter:NO];
+                                            }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)confirmClearAll {
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Xoá tất cả snapshot"
+                         message:@"Xoá tất cả bản snapshot của app này? (Dọn luôn dữ liệu sót của bản cũ.)"
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Xoá tất cả"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *a) {
+                                                [self runControl:[NSString stringWithFormat:@"snapclear %@",
+                                                                                            self.appBundle]
+                                                  terminateFirst:NO
+                                                            verb:@"Xoá tất cả snapshot"
+                                                     reloadAfter:YES];
                                             }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
