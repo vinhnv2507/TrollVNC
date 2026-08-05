@@ -72,6 +72,9 @@ SCRIPT_COMMANDS = [
     ("restartapp {bundle id} 2", "đóng, chờ 2s, mở lại"),
     ("openurl {url}", "mở URL bằng app mặc định"),
     ("openurlin {bundle id} {url}", "mở URL bằng đúng app chỉ định"),
+    ("wipeapp {bundle id}", "xoá dữ liệu app như cài lại (giữ keychain) — đóng app trước"),
+    ("snapshot {bundle id}", "lưu bản dữ liệu app hiện tại (ngay trên máy)"),
+    ("restore {bundle id}", "khôi phục dữ liệu app về bản snapshot đã lưu"),
     ("brightness min", "độ sáng: min · max · up [nấc] · down [nấc]"),
     ("volume mute", "âm lượng: mute · up · down"),
     ("repeat 3\n    swipe 0.5 0.75 0.5 0.25 0.3\n    wait 1", "lặp khối thụt lề bên dưới N lần"),
@@ -749,6 +752,9 @@ class MainWindow(QMainWindow):
         self.apps_panel.refresh_requested.connect(self._reload_apps)
         self.apps_panel.launch_requested.connect(self._launch_app)
         self.apps_panel.terminate_requested.connect(self._terminate_app)
+        self.apps_panel.wipe_requested.connect(self._wipe_app)
+        self.apps_panel.snapshot_requested.connect(self._snapshot_app)
+        self.apps_panel.restore_requested.connect(self._restore_app)
         self.apps_panel.gesture_requested.connect(self._run_device_gesture)
         self.apps_panel.install_ipa_requested.connect(self._install_ipa)
         self.apps_panel.push_file_requested.connect(self._push_file)
@@ -1428,6 +1434,61 @@ class MainWindow(QMainWindow):
             return
         self.apps_panel.set_busy(f"Đang đóng {bundle_id} trên {len(targets)} máy…")
         self.pool.terminate_app(
+            targets, bundle_id,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
+
+    def _wipe_app(self, bundle_id: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        answer = QMessageBox.warning(
+            self, "Xoá dữ liệu app",
+            f"Xoá sạch dữ liệu của <b>{bundle_id}</b> trên <b>{len(targets)} máy</b> "
+            "(Documents/Library/tmp), như vừa cài lại?<br><br>"
+            "App sẽ được đóng trước. Keychain KHÔNG bị đụng — token cũ vẫn còn. "
+            "Thao tác không hoàn tác được (trừ khi bạn đã lưu snapshot).",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.apps_panel.set_busy(f"Đang xoá dữ liệu {bundle_id} trên {len(targets)} máy…")
+        self.pool.wipe_app(
+            targets, bundle_id,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
+
+    def _snapshot_app(self, bundle_id: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        self.apps_panel.set_busy(f"Đang lưu snapshot {bundle_id} trên {len(targets)} máy…")
+        self.pool.snapshot_app(
+            targets, bundle_id,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
+
+    def _restore_app(self, bundle_id: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        answer = QMessageBox.warning(
+            self, "Khôi phục dữ liệu app",
+            f"Thay dữ liệu hiện tại của <b>{bundle_id}</b> trên <b>{len(targets)} máy</b> "
+            "bằng bản snapshot đã lưu?<br><br>"
+            "Dữ liệu hiện tại sẽ mất. Máy nào chưa có snapshot sẽ báo lỗi (bỏ qua).",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        self.apps_panel.set_busy(f"Đang khôi phục {bundle_id} trên {len(targets)} máy…")
+        self.pool.restore_app(
             targets, bundle_id,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),

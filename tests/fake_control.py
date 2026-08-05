@@ -43,6 +43,10 @@ class FakeControlServer:
     saved_photos: List[str] = field(default_factory=list)
     respring_count: int = 0
     scale: float = 1.0
+    #: bundle id đã bị xoá dữ liệu / đã khôi phục; và bundle đang có snapshot
+    wiped: List[str] = field(default_factory=list)
+    restored: List[str] = field(default_factory=list)
+    snapshots: Set[str] = field(default_factory=set)
     unauthorized: int = 0
     #: Đặt True để giả lập bản TrollVNC gốc (chưa vá).
     unpatched: bool = False
@@ -217,6 +221,35 @@ class FakeControlServer:
                 return b"NOT_RUNNING\n"
             self.running.discard(bundle)
             self.terminated.append(bundle)
+            return b"OK\n"
+
+        if cmd.startswith("wipeapp "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle = cmd[len("wipeapp "):].strip()
+            if bundle not in self.apps:
+                return b"NOT_FOUND\n"
+            self.wiped.append(bundle)
+            return b"OK\n"
+
+        if cmd.startswith("snapshot "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle = cmd[len("snapshot "):].strip()
+            if bundle not in self.apps:
+                return b"NOT_FOUND\n"
+            self.snapshots.add(bundle)
+            return b"OK\n"
+
+        if cmd.startswith("restore "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle = cmd[len("restore "):].strip()
+            if bundle not in self.apps:
+                return b"NOT_FOUND\n"
+            if bundle not in self.snapshots:
+                return b"ERR NoSnapshot\n"
+            self.restored.append(bundle)
             return b"OK\n"
 
         return b"ERR Unknown\n"

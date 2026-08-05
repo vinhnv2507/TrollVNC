@@ -160,7 +160,7 @@ Cả ba kênh đều là TCP nên **forward được qua dây USB** bằng usbmu
 cụ: tìm iPhone đang cắm, tự dựng relay (`tidevice`) cho cả VNC lẫn control socket
 lẫn SSH, rồi nạp vào lưới ở nhóm `usb`. Máy USB nhớ **cổng riêng từng kênh**
 (`127.0.0.1:<cổng>`) trong `DeviceSpec` nên **mọi tính năng chạy y như qua mạng**
-— xem/điều khiển, app, clipboard, nạp ảnh, respring, scale, SSH.
+— xem/điều khiển, app, clipboard, nạp ảnh, reset dữ liệu app, respring, scale, SSH.
 
 Ưu điểm: không phụ thuộc WiFi, độ trễ thấp hơn, hết nghẽn router. Cần `tidevice`
 (đi kèm khi cài project) và Apple Mobile Device Support đang chạy. Relay tự tắt
@@ -548,6 +548,9 @@ openurl https://example.com       # mở URL bằng app mặc định
 openurlin com.zing.zalo zalo://home # mở URL bằng đúng app chỉ định
 clipboard Xin chào bạn            # đặt clipboard máy (UTF-8, kênh điều khiển)
 savephoto /var/mobile/Media/x.jpg # nạp ảnh đã có trên máy vào Thư viện Ảnh
+snapshot com.zing.zalo            # lưu bản dữ liệu app hiện tại (trên máy)
+wipeapp com.zing.zalo             # xoá dữ liệu app như cài lại (giữ keychain)
+restore com.zing.zalo             # khôi phục dữ liệu app về bản snapshot
 shot ket-qua                      # chụp màn hình, file có hậu tố ket-qua
 repeat 3                          # lặp khối thụt lề bên dưới 3 lần
     swipe 0.5 0.75 0.5 0.25 0.3

@@ -156,6 +156,30 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.channel.set_scale(0.0)
 
+    async def test_wipe_app_clears_data(self) -> None:
+        await self.channel.wipe_app("com.golike.app")
+        self.assertEqual(self.server.wiped, ["com.golike.app"])
+
+    async def test_wipe_unknown_bundle_raises(self) -> None:
+        with self.assertRaises(ControlError):
+            await self.channel.wipe_app("com.khong.co")
+
+    async def test_snapshot_then_restore_round_trips(self) -> None:
+        await self.channel.snapshot_app("com.golike.app")
+        self.assertIn("com.golike.app", self.server.snapshots)
+        await self.channel.restore_app("com.golike.app")
+        self.assertEqual(self.server.restored, ["com.golike.app"])
+
+    async def test_restore_without_snapshot_is_reported(self) -> None:
+        with self.assertRaises(ControlError) as ctx:
+            await self.channel.restore_app("com.honeygain.app")
+        self.assertIn("snapshot", str(ctx.exception).lower())
+
+    async def test_reset_commands_fail_clearly_on_unpatched(self) -> None:
+        self.server.unpatched = True
+        with self.assertRaises(NotPatchedError):
+            await self.channel.wipe_app("com.golike.app")
+
     async def test_push_photo_uploads_then_imports(self) -> None:
         import tempfile
 
@@ -226,6 +250,19 @@ class ScriptAppCommandTest(unittest.TestCase):
     def test_savephoto_rejects_relative_path(self) -> None:
         with self.assertRaisesRegex(script.ScriptError, "đường dẫn tuyệt đối"):
             script.parse("savephoto anh.png")
+
+    def test_parses_data_reset_commands(self) -> None:
+        steps = script.parse(
+            "wipeapp com.zing.zalo\n"
+            "snapshot com.zing.zalo\n"
+            "restore com.zing.zalo"
+        )
+        self.assertEqual([s.op for s in steps], ["wipeapp", "snapshot", "restore"])
+        self.assertEqual(steps[0].args, ("com.zing.zalo",))
+
+    def test_data_reset_rejects_display_name(self) -> None:
+        with self.assertRaises(script.ScriptError):
+            script.parse("wipeapp Zalo")
 
 
 class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
@@ -302,6 +339,30 @@ class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
             self.server.opened_in,
             [("com.honeygain.app", "honeygain://dashboard")],
         )
+
+    async def test_runner_wipes_and_restores_via_control_channel(self) -> None:
+        self.server.running.add("com.honeygain.app")
+        steps = script.parse(
+            "snapshot com.honeygain.app\n"
+            "wipeapp com.honeygain.app\n"
+            "restore com.honeygain.app"
+        )
+        await script.run_on_session(
+            self._FakeSession(), steps, lambda k, m: None, control=self.channel
+        )
+        # Mỗi lệnh đóng app trước rồi mới thao tác dữ liệu (server chỉ ghi lần
+        # đóng đầu, các lần sau app vốn đã tắt).
+        self.assertIn("com.honeygain.app", self.server.snapshots)
+        self.assertEqual(self.server.wiped, ["com.honeygain.app"])
+        self.assertEqual(self.server.restored, ["com.honeygain.app"])
+        self.assertIn("com.honeygain.app", self.server.terminated)
+
+    async def test_runner_data_reset_needs_channel(self) -> None:
+        steps = script.parse("wipeapp com.honeygain.app")
+        with self.assertRaises(ConnectionError):
+            await script.run_on_session(
+                self._FakeSession(), steps, lambda k, m: None, control=None
+            )
 
     async def test_retry_is_independent_per_session(self) -> None:
         class FlakyControl:

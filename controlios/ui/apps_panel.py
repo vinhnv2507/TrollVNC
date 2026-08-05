@@ -76,6 +76,9 @@ DEVICE_ACTIONS = [
 class AppsPanel(QWidget):
     launch_requested = Signal(str)       # bundle id
     terminate_requested = Signal(str)
+    wipe_requested = Signal(str)         # xoá dữ liệu app (như cài lại)
+    snapshot_requested = Signal(str)     # lưu snapshot dữ liệu app
+    restore_requested = Signal(str)      # khôi phục dữ liệu app từ snapshot
     refresh_requested = Signal()
     gesture_requested = Signal(str)      # tên cử chỉ: home / switcher / lock
     install_ipa_requested = Signal()
@@ -274,6 +277,20 @@ class AppsPanel(QWidget):
         close_action = QAction(f"Đóng {item.text()}", menu)
         close_action.triggered.connect(lambda: self.terminate_requested.emit(bundle))
         menu.addAction(close_action)
+
+        menu.addSeparator()
+        # Reset dữ liệu app (chỉ đụng /var — chạy cả trên máy chỉ có TrollStore).
+        wipe_action = QAction("Xoá dữ liệu (như cài lại)", menu)
+        wipe_action.triggered.connect(lambda: self.wipe_requested.emit(bundle))
+        menu.addAction(wipe_action)
+
+        snapshot_action = QAction("Lưu snapshot dữ liệu", menu)
+        snapshot_action.triggered.connect(lambda: self.snapshot_requested.emit(bundle))
+        menu.addAction(snapshot_action)
+
+        restore_action = QAction("Khôi phục về snapshot", menu)
+        restore_action.triggered.connect(lambda: self.restore_requested.emit(bundle))
+        menu.addAction(restore_action)
 
         menu.addSeparator()
         copy_action = QAction("Chép bundle id", menu)

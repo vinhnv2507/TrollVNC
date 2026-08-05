@@ -466,6 +466,46 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
+    def wipe_app(self, keys: Iterable[str], bundle_id: str,
+                 on_event=None, on_done=None) -> None:
+        """Xoá dữ liệu app trên nhiều máy như vừa cài lại (giữ container).
+
+        Đóng app trước để nó ghi/nhả file, rồi mới xoá. KHÔNG đụng keychain —
+        token/khoá cũ vẫn còn (xem docs).
+        """
+
+        async def action(channel):
+            await channel.terminate(bundle_id)
+            await channel.wipe_app(bundle_id)
+            return f"đã xoá dữ liệu {bundle_id}"
+
+        self._bulk_app_action(keys, f"Xoá dữ liệu {bundle_id}", action,
+                              on_event, on_done)
+
+    def snapshot_app(self, keys: Iterable[str], bundle_id: str,
+                     on_event=None, on_done=None) -> None:
+        """Lưu bản snapshot dữ liệu app hiện tại (ngay trên mỗi máy)."""
+
+        async def action(channel):
+            await channel.terminate(bundle_id)   # đóng để chụp trạng thái nhất quán
+            await channel.snapshot_app(bundle_id)
+            return f"đã lưu snapshot {bundle_id}"
+
+        self._bulk_app_action(keys, f"Snapshot {bundle_id}", action,
+                              on_event, on_done)
+
+    def restore_app(self, keys: Iterable[str], bundle_id: str,
+                    on_event=None, on_done=None) -> None:
+        """Khôi phục dữ liệu app về bản snapshot đã lưu, trên nhiều máy."""
+
+        async def action(channel):
+            await channel.terminate(bundle_id)
+            await channel.restore_app(bundle_id)
+            return f"đã khôi phục {bundle_id}"
+
+        self._bulk_app_action(keys, f"Khôi phục {bundle_id}", action,
+                              on_event, on_done)
+
     def respring(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
         """Khởi động lại SpringBoard trên nhiều máy (không mất jailbreak)."""
 

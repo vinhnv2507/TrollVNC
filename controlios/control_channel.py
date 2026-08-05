@@ -153,6 +153,45 @@ class ControlChannel:
             return False
         raise ControlError(f"Không đóng được {bundle_id}: {head}")
 
+    async def wipe_app(self, bundle_id: str) -> None:
+        """Xoá dữ liệu app (Documents/Library/tmp/SystemData) như vừa cài lại.
+
+        GIỮ container và KHÔNG đụng keychain — token/khoá trong keychain vẫn còn,
+        nên đây là "clear data" ở mức file, không phải "máy chưa từng cài". Nên
+        :meth:`terminate` app trước khi gọi.
+        """
+
+        text = await self.command(f"wipeapp {bundle_id}")
+        head = text.strip()
+        if head.startswith("NOT_FOUND"):
+            raise ControlError(f"Máy không có app {bundle_id}")
+        if not head.startswith("OK"):
+            raise ControlError(f"Không xoá được dữ liệu {bundle_id}: {head}")
+
+    async def snapshot_app(self, bundle_id: str) -> None:
+        """Lưu bản sao dữ liệu app hiện tại NGAY TRÊN MÁY để :meth:`restore_app`
+        quay lại sau. Mỗi máy giữ bản snapshot của riêng nó."""
+
+        text = await self.command(f"snapshot {bundle_id}")
+        head = text.strip()
+        if head.startswith("NOT_FOUND"):
+            raise ControlError(f"Máy không có app {bundle_id}")
+        if not head.startswith("OK"):
+            raise ControlError(f"Không lưu được snapshot {bundle_id}: {head}")
+
+    async def restore_app(self, bundle_id: str) -> None:
+        """Thay dữ liệu app hiện tại bằng bản snapshot đã lưu bằng
+        :meth:`snapshot_app`. Nên :meth:`terminate` trước, rồi mở lại app sau."""
+
+        text = await self.command(f"restore {bundle_id}")
+        head = text.strip()
+        if head.startswith("NOT_FOUND"):
+            raise ControlError(f"Máy không có app {bundle_id}")
+        if head.startswith("ERR NoSnapshot"):
+            raise ControlError(f"Chưa có snapshot cho {bundle_id} — hãy lưu snapshot trước.")
+        if not head.startswith("OK"):
+            raise ControlError(f"Không khôi phục được {bundle_id}: {head}")
+
     async def put_file(self, local: Path | str, remote: str,
                        progress=None) -> int:
         """Đẩy một file lên máy. Trả về số byte máy xác nhận đã ghi.

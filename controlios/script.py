@@ -207,6 +207,11 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             )
         return Step(op, (path,), line_no=line_no), index
 
+    if op in ("wipeapp", "snapshot", "restore"):
+        if len(args) != 1 or "." not in args[0]:
+            raise ScriptError(line_no, f"cú pháp: {op} <bundle id>, ví dụ com.zing.zalo")
+        return Step(op, (args[0],), line_no=line_no), index
+
     if op == "text":
         payload = text[len(parts[0]):].strip()
         if not payload:
@@ -243,7 +248,8 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
     known = ", ".join(["tap", "button", "swipe", "text", "key", "wait", "shot",
                        "repeat", "retry", "brightness", "volume", "launchapp",
                        "killapp", "restartapp", "openurl", "openurlin",
-                       "clipboard", "savephoto"]
+                       "clipboard", "savephoto", "wipeapp", "snapshot",
+                       "restore"]
                       + sorted(gestures))
     raise ScriptError(line_no, f"lệnh không hiểu: {parts[0]!r}. Lệnh có: {known}")
 
@@ -395,6 +401,12 @@ def describe(steps: Sequence[Step]) -> List[str]:
                 out.append(f"{indent}đặt clipboard máy = {step.args[0]!r}")
             elif step.op == "savephoto":
                 out.append(f"{indent}nạp {step.args[0]} vào Thư viện Ảnh")
+            elif step.op == "wipeapp":
+                out.append(f"{indent}xoá dữ liệu app {step.args[0]} (như cài lại)")
+            elif step.op == "snapshot":
+                out.append(f"{indent}lưu snapshot dữ liệu app {step.args[0]}")
+            elif step.op == "restore":
+                out.append(f"{indent}khôi phục dữ liệu app {step.args[0]} từ snapshot")
             elif step.op == "text":
                 out.append(f"{indent}gõ {step.args[0]!r}")
             elif step.op == "key":
@@ -507,6 +519,20 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                     await control.set_clipboard(step.args[0])
                 else:
                     await control.save_photo(step.args[0])
+            elif step.op in ("wipeapp", "snapshot", "restore"):
+                if control is None:
+                    raise ConnectionError(
+                        f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
+                        "trong config/devices.json và dùng TrollVNC đã vá"
+                    )
+                bundle = step.args[0]
+                await control.terminate(bundle)   # đóng app để file được nhả trước
+                if step.op == "wipeapp":
+                    await control.wipe_app(bundle)
+                elif step.op == "snapshot":
+                    await control.snapshot_app(bundle)
+                else:
+                    await control.restore_app(bundle)
             elif step.op == "text":
                 session.type_text(step.args[0])
                 await asyncio.sleep(0.05)
