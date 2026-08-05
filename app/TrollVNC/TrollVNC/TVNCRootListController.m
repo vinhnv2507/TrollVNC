@@ -266,6 +266,7 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 - (void)viewDidLoad {
     [super viewDidLoad];
 
+    self.title = @"ControlIOS"; // tiêu đề màn hình (đổi thương hiệu từ TrollVNC)
     _notificationGenerator = [[UINotificationFeedbackGenerator alloc] init];
     _primaryColor = [UIColor colorWithRed:35 / 255.0 green:158 / 255.0 blue:171 / 255.0 alpha:1.0];
     [[UISwitch appearanceWhenContainedInInstancesOfClasses:@[
@@ -276,7 +277,7 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     ]] setMinimumTrackTintColor:_primaryColor];
     [self.view setTintColor:_primaryColor];
 
-    self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"TrollVNC"
+    self.navigationItem.backBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"ControlIOS"
                                                                              style:UIBarButtonItemStylePlain
                                                                             target:nil
                                                                             action:nil];
@@ -368,22 +369,9 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
 - (NSString *)defaultFooterText {
     if (!_defaultFooterText) {
-        NSString *packageScheme = MYNSSTRINGIFY(THEOS_PACKAGE_SCHEME);
-        if (!packageScheme.length) {
-            packageScheme = @"legacy";
-        }
-
-        NSString *versionString;
-#ifdef THEBOOTSTRAP
-        versionString = [[GitHubReleaseUpdater shared] currentVersion];
-#else
-        versionString = @PACKAGE_VERSION;
-#endif
-
-        NSString *footerText = [NSString
-            stringWithFormat:NSLocalizedStringFromTableInBundle(@"TrollVNC (%@) v%@", @"Localizable", self.bundle, nil),
-                             packageScheme, versionString];
-        _defaultFooterText = footerText;
+        // Đổi thương hiệu: hiển thị gọn "ControlIOS v1.0" thay cho
+        // "TrollVNC (bootstrap) v3.2-272".
+        _defaultFooterText = @"ControlIOS v1.0";
     }
     return _defaultFooterText;
 }
@@ -711,7 +699,7 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
 - (void)_reallyGenerateKeys {
     NSString *randomUUID = [[[NSUUID UUID] UUIDString] substringFromIndex:28];
-    NSString *commonName = [NSString stringWithFormat:@"TrollVNC %@", randomUUID];
+    NSString *commonName = [NSString stringWithFormat:@"ControlIOS %@", randomUUID];
 
     ZTSelfSignedCertificate *ca = [ZTSelfSignedCertificate generateWithCommonName:commonName];
     if (!ca) {
