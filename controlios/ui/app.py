@@ -14,8 +14,9 @@ from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
-    QSplitter, QStatusBar, QToolBar, QVBoxLayout, QWidget,
+    QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
+    QPushButton, QSplitter, QStatusBar, QToolBar, QToolButton, QVBoxLayout,
+    QWidget,
 )
 
 from .. import script as script_lang
@@ -25,7 +26,7 @@ from ..config import (
 )
 from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
-from ..vnc.session import Frame, State, Tier
+from ..vnc.session import BRIGHTNESS_STEPS, Frame, State, Tier
 from .apps_panel import AppsPanel
 from .detail import DetailView
 from .grid import DeviceGrid
@@ -927,9 +928,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.snapshot_requested.connect(self._snapshot_app)
         self.apps_panel.restore_requested.connect(self._restore_app)
         self.apps_panel.gesture_requested.connect(self._run_device_gesture)
-        self.apps_panel.install_ipa_requested.connect(self._install_ipa)
-        self.apps_panel.push_file_requested.connect(self._push_file)
-        self.apps_panel.media_key_requested.connect(self._send_media_key)
+        # Cài .ipa / Độ sáng / Đẩy file đã chuyển ra thanh công cụ chính.
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
@@ -1138,6 +1137,46 @@ class MainWindow(QMainWindow):
         open_folder.setToolTip("Mở thư mục captures chứa ảnh/ghi hình/kịch bản")
         open_folder.triggered.connect(self._open_captures_folder)
         bar.addAction(open_folder)
+
+        # Hàng thứ ba: thao tác tệp/thiết bị (trước đây nằm trong bảng Ứng dụng).
+        # Tách riêng để hai hàng trên không bị tràn sau nút » ở màn hình 1600px.
+        self.addToolBarBreak()
+        files_bar = QToolBar("Tệp và thiết bị")
+        files_bar.setObjectName("files-toolbar")
+        files_bar.setMovable(False)
+        self.addToolBar(files_bar)
+        bar = files_bar
+
+        install_ipa = QAction("Cài .ipa…", self)
+        install_ipa.setToolTip(
+            "Phục vụ file .ipa từ PC rồi nhờ TrollStore trên các máy đang chọn tải về cài")
+        install_ipa.triggered.connect(self._install_ipa)
+        bar.addAction(install_ipa)
+
+        push_file = QAction("Đẩy file…", self)
+        push_file.setToolTip("Chép một file từ PC sang các máy đang chọn")
+        push_file.triggered.connect(self._push_file)
+        bar.addAction(push_file)
+
+        bar.addSeparator()
+        # Độ sáng: một nút gộp menu (min/−/+/max) cho gọn.
+        bright_button = QToolButton()
+        bright_button.setText("Độ sáng")
+        bright_button.setToolTip("Chỉnh độ sáng màn hình các máy đang chọn "
+                                 "(hạ thấp để tiết kiệm pin, VNC vẫn chạy)")
+        bright_button.setPopupMode(QToolButton.InstantPopup)
+        bright_menu = QMenu(bright_button)
+        for label, key, repeat in [
+            ("▁ Tối đa (tối nhất)", "brightness_down", BRIGHTNESS_STEPS),
+            ("− Giảm một nấc", "brightness_down", 1),
+            ("+ Tăng một nấc", "brightness_up", 1),
+            ("▔ Sáng nhất", "brightness_up", BRIGHTNESS_STEPS),
+        ]:
+            act = bright_menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, k=key, r=repeat: self._send_media_key(k, r))
+        bright_button.setMenu(bright_menu)
+        bar.addWidget(bright_button)
 
     # ------------------------------------------------------------------ paging
 

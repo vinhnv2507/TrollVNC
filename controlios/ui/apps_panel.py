@@ -17,7 +17,6 @@ from PySide6.QtWidgets import (
 )
 
 from ..control_channel import AppInfo
-from ..vnc.session import BRIGHTNESS_STEPS
 
 ICON_SIZE = 34
 
@@ -81,9 +80,6 @@ class AppsPanel(QWidget):
     restore_requested = Signal(str)      # khôi phục dữ liệu app từ snapshot
     refresh_requested = Signal()
     gesture_requested = Signal(str)      # tên cử chỉ: home / switcher / lock
-    install_ipa_requested = Signal()
-    push_file_requested = Signal()
-    media_key_requested = Signal(str, int)   # tên keysym, số lần
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -136,42 +132,7 @@ class AppsPanel(QWidget):
         self.list.itemClicked.connect(self._on_activated)
         layout.addWidget(self.list, 1)
 
-        # Độ sáng: dùng qua VNC nên màn hình sáng chỉ tốn pin. Hạ xuống đáy vẫn
-        # giữ được luồng hình, khác với tắt hẳn màn hình (xem README).
-        brightness_row = QHBoxLayout()
-        brightness_row.setSpacing(4)
-        brightness_row.addWidget(QLabel("Độ sáng:"))
-        for label, key, repeat, tip in [
-            ("▁ Tối đa", "brightness_down", BRIGHTNESS_STEPS,
-             "Hạ độ sáng xuống thấp nhất — tiết kiệm pin, VNC vẫn chạy bình thường"),
-            ("−", "brightness_down", 1, "Giảm một nấc"),
-            ("+", "brightness_up", 1, "Tăng một nấc"),
-            ("▔ Sáng", "brightness_up", BRIGHTNESS_STEPS, "Đưa lên sáng nhất"),
-        ]:
-            button = QPushButton(label)
-            button.setToolTip(tip)
-            button.setMaximumWidth(90)
-            button.clicked.connect(
-                lambda _checked=False, k=key, r=repeat:
-                self.media_key_requested.emit(k, r)
-            )
-            brightness_row.addWidget(button)
-        layout.addLayout(brightness_row)
-
-        transfer_row = QHBoxLayout()
-        transfer_row.setSpacing(4)
-        self.install_button = QPushButton("⤓ Cài .ipa…")
-        self.install_button.setToolTip(
-            "Phục vụ file .ipa từ PC rồi nhờ TrollStore trên máy tải về và cài"
-        )
-        self.install_button.clicked.connect(self.install_ipa_requested)
-        transfer_row.addWidget(self.install_button)
-
-        self.push_button = QPushButton("⬆ Đẩy file…")
-        self.push_button.setToolTip("Chép một file từ PC sang máy")
-        self.push_button.clicked.connect(self.push_file_requested)
-        transfer_row.addWidget(self.push_button)
-        layout.addLayout(transfer_row)
+        # Độ sáng / Cài .ipa / Đẩy file đã chuyển ra thanh công cụ chính.
 
         self.status = QLabel("Chọn một máy rồi bấm Nạp danh sách.")
         self.status.setWordWrap(True)

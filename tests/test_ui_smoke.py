@@ -106,7 +106,8 @@ class WindowTest(unittest.TestCase):
             bars = {bar.objectName(): bar for bar in window.findChildren(QToolBar)}
             self.assertIn("navigation-toolbar", bars)
             self.assertIn("actions-toolbar", bars)
-            for name in ("navigation-toolbar", "actions-toolbar"):
+            self.assertIn("files-toolbar", bars)
+            for name in ("navigation-toolbar", "actions-toolbar", "files-toolbar"):
                 bar = bars[name]
                 extension = bar.findChild(QToolButton, "qt_toolbar_ext_button")
                 self.assertTrue(extension is None or not extension.isVisible(),

@@ -249,7 +249,7 @@ class WindowIntegrationTest(unittest.TestCase):
         self.window.grid.clear_selection()
         self.window.detail.set_device(None)
         with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
-            self.window.apps_panel.install_button.click()
+            self.window._install_ipa()
         self.assertFalse(sent)
 
     def test_install_ipa_asks_before_touching_every_device(self) -> None:
@@ -266,14 +266,14 @@ class WindowIntegrationTest(unittest.TestCase):
                                      return_value=(str(ipa), "")), \
                  unittest.mock.patch("controlios.ui.app.QMessageBox.question",
                                      return_value=unittest.mock.sentinel.no):
-                self.window.apps_panel.install_button.click()
+                self.window._install_ipa()
             self.assertFalse(sent, "từ chối xác nhận thì không được cài")
 
             with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
                                      return_value=(str(ipa), "")), \
                  unittest.mock.patch("controlios.ui.app.QMessageBox.question",
                                      return_value=QMessageBox.Yes):
-                self.window.apps_panel.install_button.click()
+                self.window._install_ipa()
             self.assertEqual(len(sent), 1)
             keys, chosen = sent[0]
             self.assertEqual(len(keys), 2)
@@ -292,7 +292,7 @@ class WindowIntegrationTest(unittest.TestCase):
                                  return_value=(r"C:\tmp\anh.jpg", "")), \
              unittest.mock.patch("controlios.ui.app.QInputDialog.getText",
                                  return_value=("/var/mobile/Documents/anh.jpg", True)):
-            self.window.apps_panel.push_button.click()
+            self.window._push_file()
 
         self.assertEqual(sent, [(sent[0][0], "anh.jpg", "/var/mobile/Documents/anh.jpg")])
         self.assertEqual(len(sent[0][0]), 2)
@@ -304,7 +304,7 @@ class WindowIntegrationTest(unittest.TestCase):
 
         with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
                                  return_value=("", "")):
-            self.window.apps_panel.push_button.click()
+            self.window._push_file()
         self.assertFalse(sent)
 
     def test_error_from_the_network_thread_reaches_the_panel(self) -> None:
