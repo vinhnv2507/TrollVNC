@@ -164,15 +164,36 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ControlError):
             await self.channel.wipe_app("com.khong.co")
 
-    async def test_snapshot_then_restore_round_trips(self) -> None:
-        await self.channel.snapshot_app("com.golike.app")
-        self.assertIn("com.golike.app", self.server.snapshots)
-        await self.channel.restore_app("com.golike.app")
-        self.assertEqual(self.server.restored, ["com.golike.app"])
+    async def test_snapshot_named_then_restore_round_trips(self) -> None:
+        saved = await self.channel.snapshot_app("com.golike.app", "sach")
+        self.assertEqual(saved, "sach")
+        self.assertIn("sach", self.server.snapshots.get("com.golike.app", {}))
+        await self.channel.restore_app("com.golike.app", "sach")
+        self.assertEqual(self.server.restored, [("com.golike.app", "sach")])
 
-    async def test_restore_without_snapshot_is_reported(self) -> None:
+    async def test_snapshot_auto_names_when_blank(self) -> None:
+        saved = await self.channel.snapshot_app("com.golike.app")
+        self.assertTrue(saved, "phải trả về tên tự sinh")
+        self.assertIn(saved, self.server.snapshots.get("com.golike.app", {}))
+
+    async def test_list_snapshots_newest_first(self) -> None:
+        await self.channel.snapshot_app("com.golike.app", "mot")
+        await self.channel.snapshot_app("com.golike.app", "hai")
+        snaps = await self.channel.list_snapshots("com.golike.app")
+        self.assertEqual({s.name for s in snaps}, {"mot", "hai"})
+        # epoch tăng dần theo thứ tự lưu -> "hai" mới hơn, phải đứng trước.
+        self.assertEqual(snaps[0].name, "hai")
+
+    async def test_delete_snapshot_removes_it(self) -> None:
+        await self.channel.snapshot_app("com.golike.app", "tam")
+        await self.channel.delete_snapshot("com.golike.app", "tam")
+        self.assertNotIn("tam", self.server.snapshots.get("com.golike.app", {}))
+        snaps = await self.channel.list_snapshots("com.golike.app")
+        self.assertEqual(snaps, [])
+
+    async def test_restore_missing_name_is_reported(self) -> None:
         with self.assertRaises(ControlError) as ctx:
-            await self.channel.restore_app("com.honeygain.app")
+            await self.channel.restore_app("com.honeygain.app", "khong-co")
         self.assertIn("snapshot", str(ctx.exception).lower())
 
     async def test_reset_commands_fail_clearly_on_unpatched(self) -> None:
@@ -255,10 +276,19 @@ class ScriptAppCommandTest(unittest.TestCase):
         steps = script.parse(
             "wipeapp com.zing.zalo\n"
             "snapshot com.zing.zalo\n"
-            "restore com.zing.zalo"
+            "snapshot com.zing.zalo sach\n"
+            "restore com.zing.zalo sach"
         )
-        self.assertEqual([s.op for s in steps], ["wipeapp", "snapshot", "restore"])
+        self.assertEqual([s.op for s in steps],
+                         ["wipeapp", "snapshot", "snapshot", "restore"])
         self.assertEqual(steps[0].args, ("com.zing.zalo",))
+        self.assertEqual(steps[1].args, ("com.zing.zalo", ""))       # tên tự sinh
+        self.assertEqual(steps[2].args, ("com.zing.zalo", "sach"))
+        self.assertEqual(steps[3].args, ("com.zing.zalo", "sach"))
+
+    def test_restore_requires_a_snapshot_name(self) -> None:
+        with self.assertRaisesRegex(script.ScriptError, "tên snapshot"):
+            script.parse("restore com.zing.zalo")
 
     def test_data_reset_rejects_display_name(self) -> None:
         with self.assertRaises(script.ScriptError):
@@ -343,18 +373,18 @@ class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
     async def test_runner_wipes_and_restores_via_control_channel(self) -> None:
         self.server.running.add("com.honeygain.app")
         steps = script.parse(
-            "snapshot com.honeygain.app\n"
+            "snapshot com.honeygain.app sach\n"
             "wipeapp com.honeygain.app\n"
-            "restore com.honeygain.app"
+            "restore com.honeygain.app sach"
         )
         await script.run_on_session(
             self._FakeSession(), steps, lambda k, m: None, control=self.channel
         )
         # Mỗi lệnh đóng app trước rồi mới thao tác dữ liệu (server chỉ ghi lần
         # đóng đầu, các lần sau app vốn đã tắt).
-        self.assertIn("com.honeygain.app", self.server.snapshots)
+        self.assertIn("sach", self.server.snapshots.get("com.honeygain.app", {}))
         self.assertEqual(self.server.wiped, ["com.honeygain.app"])
-        self.assertEqual(self.server.restored, ["com.honeygain.app"])
+        self.assertEqual(self.server.restored, [("com.honeygain.app", "sach")])
         self.assertIn("com.honeygain.app", self.server.terminated)
 
     async def test_runner_data_reset_needs_channel(self) -> None:

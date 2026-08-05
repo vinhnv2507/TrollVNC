@@ -207,10 +207,21 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             )
         return Step(op, (path,), line_no=line_no), index
 
-    if op in ("wipeapp", "snapshot", "restore"):
+    if op == "wipeapp":
         if len(args) != 1 or "." not in args[0]:
-            raise ScriptError(line_no, f"cú pháp: {op} <bundle id>, ví dụ com.zing.zalo")
+            raise ScriptError(line_no, "cú pháp: wipeapp <bundle id>, ví dụ com.zing.zalo")
         return Step(op, (args[0],), line_no=line_no), index
+
+    if op == "snapshot":
+        if len(args) not in (1, 2) or "." not in args[0]:
+            raise ScriptError(line_no, "cú pháp: snapshot <bundle id> [tên]")
+        name = args[1] if len(args) == 2 else ""
+        return Step(op, (args[0], name), line_no=line_no), index
+
+    if op == "restore":
+        if len(args) != 2 or "." not in args[0]:
+            raise ScriptError(line_no, "cú pháp: restore <bundle id> <tên snapshot>")
+        return Step(op, (args[0], args[1]), line_no=line_no), index
 
     if op == "text":
         payload = text[len(parts[0]):].strip()
@@ -404,9 +415,10 @@ def describe(steps: Sequence[Step]) -> List[str]:
             elif step.op == "wipeapp":
                 out.append(f"{indent}xoá dữ liệu app {step.args[0]} (như cài lại)")
             elif step.op == "snapshot":
-                out.append(f"{indent}lưu snapshot dữ liệu app {step.args[0]}")
+                label = f" tên “{step.args[1]}”" if len(step.args) > 1 and step.args[1] else " (tên tự sinh)"
+                out.append(f"{indent}lưu snapshot dữ liệu app {step.args[0]}{label}")
             elif step.op == "restore":
-                out.append(f"{indent}khôi phục dữ liệu app {step.args[0]} từ snapshot")
+                out.append(f"{indent}khôi phục dữ liệu app {step.args[0]} về snapshot “{step.args[1]}”")
             elif step.op == "text":
                 out.append(f"{indent}gõ {step.args[0]!r}")
             elif step.op == "key":
@@ -530,9 +542,9 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 if step.op == "wipeapp":
                     await control.wipe_app(bundle)
                 elif step.op == "snapshot":
-                    await control.snapshot_app(bundle)
+                    await control.snapshot_app(bundle, step.args[1])
                 else:
-                    await control.restore_app(bundle)
+                    await control.restore_app(bundle, step.args[1])
             elif step.op == "text":
                 session.type_text(step.args[0])
                 await asyncio.sleep(0.05)

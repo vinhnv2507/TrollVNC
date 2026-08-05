@@ -474,6 +474,38 @@ class ScriptDialogTest(unittest.TestCase):
         finally:
             scripts_path.unlink(missing_ok=True)
 
+    def test_snapshot_dialog_lists_newest_first_and_restores(self) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from controlios.ui.app import SnapshotDialog
+        from controlios.control_channel import Snapshot
+
+        self.window.grid.select_all()
+
+        def list_snaps(key, bundle, on_done):
+            on_done(key, [Snapshot("sach", 1_700_000_000, 4096),
+                          Snapshot("cu", 1_699_990_000, 2048)], None)
+
+        self.window.pool.list_snapshots = list_snaps
+        targets = self.window.action_targets()
+        dialog = SnapshotDialog(self.window, "com.zing.zalo", targets, targets[0])
+        try:
+            self.assertEqual(dialog.list.count(), 2)
+            self.assertEqual(dialog.list.item(0).data(Qt.UserRole), "sach")
+
+            sent = []
+            self.window.pool.restore_app = (
+                lambda keys, bundle, name, **kw: sent.append((list(keys), bundle, name)))
+            dialog.list.setCurrentRow(0)
+            with unittest.mock.patch("controlios.ui.app.QMessageBox.warning",
+                                     return_value=QMessageBox.Yes):
+                dialog._restore_selected()
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0][1], "com.zing.zalo")
+            self.assertEqual(sent[0][2], "sach")
+            self.assertEqual(len(sent[0][0]), 2)
+        finally:
+            dialog.close()
+
     def test_command_palette_inserts_template(self) -> None:
         from controlios.ui.app import ScriptDialog
 

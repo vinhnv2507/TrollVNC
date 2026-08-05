@@ -284,11 +284,11 @@ class AppsPanel(QWidget):
         wipe_action.triggered.connect(lambda: self.wipe_requested.emit(bundle))
         menu.addAction(wipe_action)
 
-        snapshot_action = QAction("Lưu snapshot dữ liệu", menu)
+        snapshot_action = QAction("Lưu snapshot dữ liệu…", menu)
         snapshot_action.triggered.connect(lambda: self.snapshot_requested.emit(bundle))
         menu.addAction(snapshot_action)
 
-        restore_action = QAction("Khôi phục về snapshot", menu)
+        restore_action = QAction("Snapshot & khôi phục…", menu)
         restore_action.triggered.connect(lambda: self.restore_requested.emit(bundle))
         menu.addAction(restore_action)
 

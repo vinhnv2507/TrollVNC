@@ -43,10 +43,12 @@ class FakeControlServer:
     saved_photos: List[str] = field(default_factory=list)
     respring_count: int = 0
     scale: float = 1.0
-    #: bundle id đã bị xoá dữ liệu / đã khôi phục; và bundle đang có snapshot
+    #: bundle id đã bị xoá dữ liệu; (bundle, tên) đã khôi phục
     wiped: List[str] = field(default_factory=list)
-    restored: List[str] = field(default_factory=list)
-    snapshots: Set[str] = field(default_factory=set)
+    restored: List[Tuple[str, str]] = field(default_factory=list)
+    #: bundle -> {tên snapshot: (epoch, size)}
+    snapshots: Dict[str, Dict[str, Tuple[int, int]]] = field(default_factory=dict)
+    _snap_counter: int = 0
     unauthorized: int = 0
     #: Đặt True để giả lập bản TrollVNC gốc (chưa vá).
     unpatched: bool = False
@@ -235,21 +237,47 @@ class FakeControlServer:
         if cmd.startswith("snapshot "):
             if self.unpatched:
                 return b"ERR Unknown\n"
-            bundle = cmd[len("snapshot "):].strip()
+            rest = cmd[len("snapshot "):].strip()
+            bundle, _, name = rest.partition(" ")
+            name = name.strip()
             if bundle not in self.apps:
                 return b"NOT_FOUND\n"
-            self.snapshots.add(bundle)
+            self._snap_counter += 1     # tăng mọi lần -> epoch tăng dần theo thứ tự lưu
+            if not name:
+                name = f"snap-{self._snap_counter}"
+            self.snapshots.setdefault(bundle, {})[name] = (1_700_000_000 + self._snap_counter, 4096)
+            return f"OK {name}\n".encode()
+
+        if cmd.startswith("snaplist "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle = cmd[len("snaplist "):].strip()
+            rows = "".join(
+                f"{name}\t{epoch}\t{size}\n"
+                for name, (epoch, size) in self.snapshots.get(bundle, {}).items()
+            )
+            return rows.encode()
+
+        if cmd.startswith("snapdel "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle, _, name = cmd[len("snapdel "):].strip().partition(" ")
+            name = name.strip()
+            if name not in self.snapshots.get(bundle, {}):
+                return b"NOT_FOUND\n"
+            del self.snapshots[bundle][name]
             return b"OK\n"
 
         if cmd.startswith("restore "):
             if self.unpatched:
                 return b"ERR Unknown\n"
-            bundle = cmd[len("restore "):].strip()
+            bundle, _, name = cmd[len("restore "):].strip().partition(" ")
+            name = name.strip()
             if bundle not in self.apps:
                 return b"NOT_FOUND\n"
-            if bundle not in self.snapshots:
+            if name not in self.snapshots.get(bundle, {}):
                 return b"ERR NoSnapshot\n"
-            self.restored.append(bundle)
+            self.restored.append((bundle, name))
             return b"OK\n"
 
         return b"ERR Unknown\n"

@@ -482,29 +482,59 @@ class DevicePool:
         self._bulk_app_action(keys, f"Xoá dữ liệu {bundle_id}", action,
                               on_event, on_done)
 
-    def snapshot_app(self, keys: Iterable[str], bundle_id: str,
+    def snapshot_app(self, keys: Iterable[str], bundle_id: str, name: str = "",
                      on_event=None, on_done=None) -> None:
-        """Lưu bản snapshot dữ liệu app hiện tại (ngay trên mỗi máy)."""
+        """Lưu một bản snapshot dữ liệu app (ngay trên mỗi máy).
+
+        ``name`` trống thì mỗi máy tự đặt tên theo thời gian. Muốn khôi phục hàng
+        loạt về sau thì nên đặt tên chung để mọi máy có cùng một tên.
+        """
 
         async def action(channel):
             await channel.terminate(bundle_id)   # đóng để chụp trạng thái nhất quán
-            await channel.snapshot_app(bundle_id)
-            return f"đã lưu snapshot {bundle_id}"
+            saved = await channel.snapshot_app(bundle_id, name)
+            return f"đã lưu snapshot “{saved}”"
 
-        self._bulk_app_action(keys, f"Snapshot {bundle_id}", action,
-                              on_event, on_done)
+        label = f"Snapshot {bundle_id}" + (f" ({name})" if name else "")
+        self._bulk_app_action(keys, label, action, on_event, on_done)
 
-    def restore_app(self, keys: Iterable[str], bundle_id: str,
+    def restore_app(self, keys: Iterable[str], bundle_id: str, name: str,
                     on_event=None, on_done=None) -> None:
-        """Khôi phục dữ liệu app về bản snapshot đã lưu, trên nhiều máy."""
+        """Khôi phục dữ liệu app về bản snapshot ``name``, trên nhiều máy."""
 
         async def action(channel):
             await channel.terminate(bundle_id)
-            await channel.restore_app(bundle_id)
-            return f"đã khôi phục {bundle_id}"
+            await channel.restore_app(bundle_id, name)
+            return f"đã khôi phục về “{name}”"
 
-        self._bulk_app_action(keys, f"Khôi phục {bundle_id}", action,
+        self._bulk_app_action(keys, f"Khôi phục {bundle_id} ({name})", action,
                               on_event, on_done)
+
+    def delete_snapshot(self, keys: Iterable[str], bundle_id: str, name: str,
+                        on_event=None, on_done=None) -> None:
+        """Xoá một bản snapshot trên nhiều máy."""
+
+        async def action(channel):
+            await channel.delete_snapshot(bundle_id, name)
+            return f"đã xoá snapshot “{name}”"
+
+        self._bulk_app_action(keys, f"Xoá snapshot {bundle_id} ({name})", action,
+                              on_event, on_done)
+
+    def list_snapshots(self, key: str, bundle_id: str, on_done) -> None:
+        """Liệt kê snapshot của một app trên MỘT máy.
+
+        on_done(key, danh sách Snapshot, error) — chạy trên luồng mạng.
+        """
+
+        async def run() -> None:
+            try:
+                snaps = await self._channel(key).list_snapshots(bundle_id)
+                on_done(key, snaps, None)
+            except Exception as exc:
+                on_done(key, [], str(exc))
+
+        self._call_coro(run())
 
     def respring(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
         """Khởi động lại SpringBoard trên nhiều máy (không mất jailbreak)."""

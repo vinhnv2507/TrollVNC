@@ -13,9 +13,9 @@ from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
-    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMainWindow,
-    QMessageBox, QPlainTextEdit, QPushButton, QSplitter, QStatusBar, QToolBar,
-    QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QListWidgetItem, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton,
+    QSplitter, QStatusBar, QToolBar, QVBoxLayout, QWidget,
 )
 
 from .. import script as script_lang
@@ -73,8 +73,8 @@ SCRIPT_COMMANDS = [
     ("openurl {url}", "mở URL bằng app mặc định"),
     ("openurlin {bundle id} {url}", "mở URL bằng đúng app chỉ định"),
     ("wipeapp {bundle id}", "xoá dữ liệu app như cài lại (giữ keychain) — đóng app trước"),
-    ("snapshot {bundle id}", "lưu bản dữ liệu app hiện tại (ngay trên máy)"),
-    ("restore {bundle id}", "khôi phục dữ liệu app về bản snapshot đã lưu"),
+    ("snapshot {bundle id} {tên}", "lưu bản dữ liệu app (bỏ tên = tự đặt theo giờ)"),
+    ("restore {bundle id} {tên}", "khôi phục dữ liệu app về bản snapshot có tên đó"),
     ("brightness min", "độ sáng: min · max · up [nấc] · down [nấc]"),
     ("volume mute", "âm lượng: mute · up · down"),
     ("repeat 3\n    swipe 0.5 0.75 0.5 0.25 0.3\n    wait 1", "lặp khối thụt lề bên dưới N lần"),
@@ -116,6 +116,7 @@ class Bridge(QObject):
     message = Signal(str)          # nhật ký từ luồng mạng -> luồng giao diện
     script_done = Signal()
     apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
+    snapshots_loaded = Signal(str, object, str)  # key, danh sách Snapshot, lỗi
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
@@ -358,6 +359,158 @@ class BulkResultDialog(QDialog):
                 self.log.appendPlainText(f"  ✗ {key}: {reason}")
         else:
             self.status.setText(f"{describe}: xong cả {ok}/{self._total} máy ✓")
+
+
+class SnapshotDialog(QDialog):
+    """Danh sách snapshot của một app (lấy từ MỘT máy) để chọn khôi phục/xoá.
+
+    Khôi phục và Xoá áp cho **tất cả máy đang chọn** với đúng tên đã chọn — nên
+    danh sách hiển thị lấy từ máy đầu tiên chỉ để chọn tên; máy nào thiếu tên đó
+    sẽ báo lỗi và bị bỏ qua khi chạy hàng loạt.
+    """
+
+    def __init__(self, window, bundle_id: str, targets: List[str],
+                 primary_key: str) -> None:
+        super().__init__(window)
+        self.window = window
+        self.bundle_id = bundle_id
+        self.targets = targets
+        self.primary_key = primary_key
+        self.setWindowTitle(f"Snapshot — {bundle_id}")
+        self.resize(460, 380)
+
+        layout = QVBoxLayout(self)
+        head = f"Bản snapshot trên máy <b>{primary_key}</b>"
+        if len(targets) > 1:
+            head += f" · thao tác áp cho <b>{len(targets)} máy</b> đang chọn"
+        info = QLabel(head)
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        self.list = QListWidget()
+        layout.addWidget(self.list, 1)
+
+        self.status = QLabel("Đang tải danh sách…")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: #9aa4b2;")
+        layout.addWidget(self.status)
+
+        row = QDialogButtonBox()
+        self.new_button = row.addButton("Lưu bản mới…", QDialogButtonBox.ActionRole)
+        self.restore_button = row.addButton("Khôi phục", QDialogButtonBox.AcceptRole)
+        self.delete_button = row.addButton("Xoá bản này", QDialogButtonBox.DestructiveRole)
+        row.addButton(QDialogButtonBox.Close)
+        layout.addWidget(row)
+
+        self.new_button.clicked.connect(self._save_new)
+        self.restore_button.clicked.connect(self._restore_selected)
+        self.delete_button.clicked.connect(self._delete_selected)
+        row.rejected.connect(self.close)
+
+        self.restore_button.setEnabled(False)
+        self.delete_button.setEnabled(False)
+        self.list.itemSelectionChanged.connect(self._on_selection)
+
+        self.window.bridge.snapshots_loaded.connect(self._on_loaded)
+        self.reload()
+
+    def closeEvent(self, event) -> None:
+        try:
+            self.window.bridge.snapshots_loaded.disconnect(self._on_loaded)
+        except (RuntimeError, TypeError):
+            pass
+        super().closeEvent(event)
+
+    # ------------------------------------------------------------------ tải
+    def reload(self) -> None:
+        self.status.setText("Đang tải danh sách…")
+        self.window.pool.list_snapshots(
+            self.primary_key, self.bundle_id,
+            on_done=lambda k, snaps, err: self.window.bridge.snapshots_loaded.emit(
+                k, snaps, err or ""),
+        )
+
+    def _on_loaded(self, key: str, snaps, err: str) -> None:
+        if key != self.primary_key:
+            return
+        self.list.clear()
+        if err:
+            self.status.setText(f"Lỗi: {err}")
+            return
+        if not snaps:
+            self.status.setText("Chưa có bản snapshot nào. Bấm “Lưu bản mới…”.")
+            return
+        import datetime
+        for snap in snaps:
+            when = (datetime.datetime.fromtimestamp(snap.epoch).strftime("%d/%m %H:%M")
+                    if snap.epoch else "—")
+            item = QListWidgetItem(f"{snap.name}    ·    {when}    ·    {snap.size_mb:.1f} MB")
+            item.setData(Qt.UserRole, snap.name)
+            self.list.addItem(item)
+        self.status.setText(f"{len(snaps)} bản. Chọn một bản rồi Khôi phục hoặc Xoá.")
+
+    def _on_selection(self) -> None:
+        has = self.list.currentItem() is not None
+        self.restore_button.setEnabled(has)
+        self.delete_button.setEnabled(has)
+
+    def _selected_name(self) -> Optional[str]:
+        item = self.list.currentItem()
+        return item.data(Qt.UserRole) if item else None
+
+    # ---------------------------------------------------------------- thao tác
+    def _save_new(self) -> None:
+        name, ok = QInputDialog.getText(
+            self, "Lưu snapshot",
+            "Tên bản (để trống = tự đặt theo giờ). Không dùng dấu cách hay '/':")
+        if not ok:
+            return
+        name = name.strip()
+        self.status.setText(f"Đang lưu trên {len(self.targets)} máy…")
+        self.window.pool.snapshot_app(
+            self.targets, self.bundle_id, name,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, okc, fails: (
+                self.window.bridge.bulk_done.emit(d, okc, fails),
+                self.reload()),
+        )
+
+    def _restore_selected(self) -> None:
+        name = self._selected_name()
+        if not name:
+            return
+        answer = QMessageBox.warning(
+            self, "Khôi phục",
+            f"Thay dữ liệu hiện tại của <b>{self.bundle_id}</b> trên "
+            f"<b>{len(self.targets)} máy</b> bằng bản <b>{name}</b>?<br><br>"
+            "Dữ liệu hiện tại sẽ mất. Máy nào không có bản tên này sẽ bị bỏ qua.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self.window.pool.restore_app(
+            self.targets, self.bundle_id, name,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, okc, fails: self.window.bridge.bulk_done.emit(d, okc, fails))
+        self.status.setText(f"Đang khôi phục về “{name}”…")
+
+    def _delete_selected(self) -> None:
+        name = self._selected_name()
+        if not name:
+            return
+        answer = QMessageBox.warning(
+            self, "Xoá snapshot",
+            f"Xoá bản <b>{name}</b> của {self.bundle_id} trên "
+            f"<b>{len(self.targets)} máy</b>?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self.window.pool.delete_snapshot(
+            self.targets, self.bundle_id, name,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, okc, fails: (
+                self.window.bridge.bulk_done.emit(d, okc, fails),
+                self.reload()))
+        self.status.setText(f"Đang xoá “{name}”…")
 
 
 class ScriptDialog(QDialog):
@@ -1466,33 +1619,30 @@ class MainWindow(QMainWindow):
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
+        name, ok = QInputDialog.getText(
+            self, "Lưu snapshot",
+            f"Tên bản snapshot cho {bundle_id} (để trống = tự đặt theo giờ).\n"
+            "Không dùng dấu cách hay '/':")
+        if not ok:
+            return
+        name = name.strip()
         self.apps_panel.set_busy(f"Đang lưu snapshot {bundle_id} trên {len(targets)} máy…")
         self.pool.snapshot_app(
-            targets, bundle_id,
+            targets, bundle_id, name,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )
 
     def _restore_app(self, bundle_id: str) -> None:
+        """Mở trình quản lý snapshot: liệt kê các bản (từ máy đầu tiên) rồi chọn
+        bản để khôi phục/xoá trên tất cả máy đang chọn."""
+
         targets = self.action_targets()
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
-        answer = QMessageBox.warning(
-            self, "Khôi phục dữ liệu app",
-            f"Thay dữ liệu hiện tại của <b>{bundle_id}</b> trên <b>{len(targets)} máy</b> "
-            "bằng bản snapshot đã lưu?<br><br>"
-            "Dữ liệu hiện tại sẽ mất. Máy nào chưa có snapshot sẽ báo lỗi (bỏ qua).",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-        )
-        if answer != QMessageBox.Yes:
-            return
-        self.apps_panel.set_busy(f"Đang khôi phục {bundle_id} trên {len(targets)} máy…")
-        self.pool.restore_app(
-            targets, bundle_id,
-            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
-        )
+        dialog = SnapshotDialog(self, bundle_id, targets, targets[0])
+        dialog.show()
 
     def _on_bulk_done(self, describe: str, ok: int, failures) -> None:
         total = ok + len(failures)

@@ -1,12 +1,18 @@
 # Patch TrollVNC vòng 6: reset dữ liệu app (wipeapp / snapshot / restore)
 
-Thêm ba lệnh vào control socket để **quản lý dữ liệu app từ xa** cho cả farm:
+Thêm các lệnh vào control socket để **quản lý dữ liệu app từ xa** cho cả farm,
+hỗ trợ **nhiều bản snapshot có tên** cho mỗi app:
 
 ```
-wipeapp  <bundle id>   -> xoá dữ liệu app (Documents/Library/tmp/SystemData) như cài lại
-snapshot <bundle id>   -> lưu bản sao dữ liệu app hiện tại NGAY TRÊN MÁY
-restore  <bundle id>   -> thay dữ liệu hiện tại bằng bản snapshot đã lưu
+wipeapp  <bundle id>          -> xoá dữ liệu app (Documents/Library/tmp/SystemData) như cài lại
+snapshot <bundle id> [tên]    -> lưu một bản dữ liệu app (bỏ tên = tự đặt theo giờ)
+snaplist <bundle id>          -> TSV các bản: tên, thời điểm (epoch), cỡ byte
+restore  <bundle id> <tên>    -> thay dữ liệu hiện tại bằng đúng bản tên đó
+snapdel  <bundle id> <tên>    -> xoá một bản snapshot
 ```
+
+Bản snapshot lưu ở `/var/mobile/controlios-snap/<bundle id>/<tên>/` — mỗi app
+nhiều bản, mỗi tên một bản (trùng tên thì ghi đè).
 
 Chạy được trên **máy chỉ có TrollStore, KHÔNG cần jailbreak** — vì mọi thứ nằm ở
 `/var` (phân vùng Data), không đụng phân vùng hệ thống bị SSV niêm phong. Daemon
@@ -62,18 +68,30 @@ app), không phải xoá dấu vết thiết bị.
 ## Thao tác NGAY TRÊN máy (trong app TrollVNC)
 
 Ngoài điều khiển từ PC, app TrollVNC trên máy có thêm nút **"App Data"** trên
-thanh điều hướng (hiện cả ở màn hình *managed*). Bấm vào → liệt kê app người dùng
-(app hỏi daemon `apps` qua control socket loopback `46752`, không cần auth) → chạm
-một app → **Lưu snapshot / Xoá dữ liệu / Khôi phục** (Xoá và Khôi phục có xác
-nhận). App tự đóng app đích trước, rồi gửi lệnh xuống daemon (root) làm việc thật.
-Chỉ tác động **chính máy đó** — hàng loạt vẫn dùng Control IOS trên PC.
+thanh điều hướng (hiện cả ở màn hình *managed*). Luồng:
+
+1. Bấm **App Data** → liệt kê app người dùng (app hỏi daemon `apps` qua control
+   socket loopback `46752`, không cần auth).
+2. Chạm một app → mở **màn danh sách snapshot** của app đó:
+   - **Lưu snapshot mới…** (hỏi tên, để trống = tự đặt theo giờ).
+   - **Xoá dữ liệu app** (như cài lại, có xác nhận).
+   - Danh sách các bản đã lưu (tên · thời điểm · cỡ) — chạm một bản → **Khôi phục**
+     hoặc **Xoá bản** (có xác nhận).
+
+App tự đóng app đích trước mỗi thao tác, rồi gửi lệnh xuống daemon (root). Chỉ tác
+động **chính máy đó** — hàng loạt vẫn dùng Control IOS trên PC.
 
 Thay đổi nằm ở `app/TrollVNC/TrollVNC/`:
-- `TVNCClientListController.{h,m}`: thêm lớp `TVNCAppDataController` (tái dùng
-  `TVNCConnect/TVNCSendLine/TVNCReadAll` sẵn có). Đặt chung file để khỏi sửa
+- `TVNCClientListController.{h,m}`: thêm `TVNCAppDataController` (danh sách app) và
+  `TVNCSnapshotListController` (danh sách snapshot của một app), tái dùng
+  `TVNCConnect/TVNCSendLine/TVNCReadAll` sẵn có. Đặt chung file để khỏi sửa
   `project.pbxproj`.
 - `TVNCRootListController.m`: nút "App Data" (đặt **trước** nhánh managed để hiện
   cả ở màn quản lý) + `showAppData` mở màn hình đó.
+
+Bên **Control IOS (PC)**: chuột phải app → **Snapshot & khôi phục…** mở trình
+quản lý liệt kê các bản (lấy từ máy đầu tiên đang chọn) để chọn khôi phục/xoá/lưu
+bản mới, áp cho tất cả máy đang chọn.
 
 ## Build và thử
 

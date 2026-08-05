@@ -53,6 +53,19 @@ class AppInfo:
         return self.name or self.bundle_id
 
 
+@dataclass(frozen=True)
+class Snapshot:
+    """Một bản snapshot dữ liệu app trên máy."""
+
+    name: str
+    epoch: int          # thời điểm lưu (giây Unix), 0 nếu không rõ
+    size: int           # tổng cỡ byte
+
+    @property
+    def size_mb(self) -> float:
+        return self.size / (1024 * 1024)
+
+
 @dataclass
 class ControlChannel:
     """Một máy. Không giữ kết nối — mỗi lệnh mở một socket ngắn."""
@@ -168,29 +181,71 @@ class ControlChannel:
         if not head.startswith("OK"):
             raise ControlError(f"Không xoá được dữ liệu {bundle_id}: {head}")
 
-    async def snapshot_app(self, bundle_id: str) -> None:
-        """Lưu bản sao dữ liệu app hiện tại NGAY TRÊN MÁY để :meth:`restore_app`
-        quay lại sau. Mỗi máy giữ bản snapshot của riêng nó."""
+    async def snapshot_app(self, bundle_id: str, name: str = "") -> str:
+        """Lưu một bản snapshot dữ liệu app NGAY TRÊN MÁY. Trả về tên bản đã lưu.
 
-        text = await self.command(f"snapshot {bundle_id}")
+        Bỏ trống ``name`` thì máy tự đặt tên theo thời gian (``yyyyMMdd-HHmmss``).
+        Nhiều bản cùng lúc, mỗi tên một bản; cùng tên thì ghi đè. Dùng
+        :meth:`list_snapshots` để liệt kê và :meth:`restore_app` để chọn bản.
+        """
+
+        line = f"snapshot {bundle_id}" + (f" {name}" if name else "")
+        text = await self.command(line)
         head = text.strip()
         if head.startswith("NOT_FOUND"):
             raise ControlError(f"Máy không có app {bundle_id}")
+        if head.startswith("ERR BadName"):
+            raise ControlError("Tên snapshot không hợp lệ (không dùng '/', '..' hay dấu cách).")
         if not head.startswith("OK"):
             raise ControlError(f"Không lưu được snapshot {bundle_id}: {head}")
+        parts = head.split(maxsplit=1)
+        return parts[1] if len(parts) > 1 else name
 
-    async def restore_app(self, bundle_id: str) -> None:
-        """Thay dữ liệu app hiện tại bằng bản snapshot đã lưu bằng
-        :meth:`snapshot_app`. Nên :meth:`terminate` trước, rồi mở lại app sau."""
+    async def list_snapshots(self, bundle_id: str) -> List["Snapshot"]:
+        """Danh sách các bản snapshot của một app (tên, thời điểm, cỡ). Rỗng nếu
+        chưa có bản nào. Mới nhất lên đầu."""
 
-        text = await self.command(f"restore {bundle_id}")
+        text = await self.command(f"snaplist {bundle_id}")
+        self._raise_for_error(text, "snaplist")
+        snaps = []
+        for row in text.splitlines():
+            if not row.strip():
+                continue
+            fields = row.split("\t")
+            if not fields[0]:
+                continue
+            epoch = int(fields[1]) if len(fields) > 1 and fields[1].isdigit() else 0
+            size = int(fields[2]) if len(fields) > 2 and fields[2].isdigit() else 0
+            snaps.append(Snapshot(fields[0], epoch, size))
+        snaps.sort(key=lambda s: s.epoch, reverse=True)
+        return snaps
+
+    async def restore_app(self, bundle_id: str, name: str) -> None:
+        """Thay dữ liệu app hiện tại bằng đúng bản snapshot ``name``. Nên
+        :meth:`terminate` trước, rồi mở lại app sau."""
+
+        if not name:
+            raise ValueError("restore cần tên snapshot")
+        text = await self.command(f"restore {bundle_id} {name}")
         head = text.strip()
         if head.startswith("NOT_FOUND"):
             raise ControlError(f"Máy không có app {bundle_id}")
         if head.startswith("ERR NoSnapshot"):
-            raise ControlError(f"Chưa có snapshot cho {bundle_id} — hãy lưu snapshot trước.")
+            raise ControlError(f"Máy không có snapshot tên {name!r} cho {bundle_id}.")
         if not head.startswith("OK"):
             raise ControlError(f"Không khôi phục được {bundle_id}: {head}")
+
+    async def delete_snapshot(self, bundle_id: str, name: str) -> None:
+        """Xoá một bản snapshot."""
+
+        if not name:
+            raise ValueError("snapdel cần tên snapshot")
+        text = await self.command(f"snapdel {bundle_id} {name}")
+        head = text.strip()
+        if head.startswith("NOT_FOUND"):
+            raise ControlError(f"Máy không có snapshot tên {name!r} cho {bundle_id}.")
+        if not head.startswith("OK"):
+            raise ControlError(f"Không xoá được snapshot {name!r}: {head}")
 
     async def put_file(self, local: Path | str, remote: str,
                        progress=None) -> int:
