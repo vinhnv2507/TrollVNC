@@ -4392,6 +4392,172 @@ static NSData *tvCtlOpenURL(NSString *urlString) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
+#pragma mark - App data reset
+
+// mobile chạy uid/gid 501 trên iOS. File do root chép vào container phải được
+// trả quyền về mobile, nếu không app (chạy dưới mobile) đọc/ghi không được và
+// coi như hỏng dữ liệu.
+static const uid_t kMobileUID = 501;
+static const gid_t kMobileGID = 501;
+
+// Đường dẫn container DỮ LIỆU của một app (nơi chứa Documents/Library/tmp...).
+static NSString *tvDataContainerPath(NSString *bundleId) {
+    LSApplicationWorkspace *ws = tvAppWorkspace();
+    if (!ws)
+        return nil;
+    for (LSApplicationProxy *app in [ws allApplications]) {
+        if ([app.applicationIdentifier isEqualToString:bundleId])
+            return app.dataContainerURL.path;
+    }
+    return nil;
+}
+
+static NSString *tvSnapshotDir(NSString *bundleId) {
+    return [@"/var/mobile/controlios-snap" stringByAppendingPathComponent:bundleId];
+}
+
+// Các thư mục dữ liệu do app quản. Cố tình KHÔNG đụng tới
+// `.com.apple.mobile_container_manager.metadata.plist` ở gốc container — iOS cần
+// nó để nhận diện container; xoá đi thì app có thể không mở lại được.
+static NSArray<NSString *> *tvAppDataSubdirs(void) {
+    return @[ @"Documents", @"Library", @"tmp", @"SystemData" ];
+}
+
+// Xoá sạch nội dung bên trong một thư mục nhưng GIỮ lại chính thư mục đó (để
+// nguyên quyền sở hữu mobile của nó).
+static BOOL tvEmptyDir(NSString *dir, NSFileManager *fm) {
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:dir isDirectory:&isDir] || !isDir)
+        return YES; // không có gì để làm
+    BOOL ok = YES;
+    for (NSString *name in [fm contentsOfDirectoryAtPath:dir error:NULL]) {
+        NSError *e = nil;
+        if (![fm removeItemAtPath:[dir stringByAppendingPathComponent:name] error:&e]) {
+            TVLog(@"Control socket: wipe không xoá được %@/%@: %@", dir, name,
+                  e.localizedDescription);
+            ok = NO;
+        }
+    }
+    return ok;
+}
+
+// Trả quyền sở hữu cả cây thư mục về mobile. lchown để không đi theo symlink.
+static void tvChownTree(NSString *path, NSFileManager *fm) {
+    lchown(path.fileSystemRepresentation, kMobileUID, kMobileGID);
+    BOOL isDir = NO;
+    if ([fm fileExistsAtPath:path isDirectory:&isDir] && isDir) {
+        for (NSString *name in [fm contentsOfDirectoryAtPath:path error:NULL])
+            tvChownTree([path stringByAppendingPathComponent:name], fm);
+    }
+}
+
+// `wipeapp <bundle id>` — xoá dữ liệu app (Documents/Library/tmp/SystemData) như
+// vừa cài lại, nhưng GIỮ container. Nên `terminate` app trước khi gọi. Lưu ý:
+// KHÔNG đụng keychain — token/khoá trong keychain vẫn còn.
+static NSData *tvCtlWipeApp(NSString *bundleId) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *data = tvDataContainerPath(bundleId);
+    if (!data)
+        return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL ok = YES;
+    for (NSString *sub in tvAppDataSubdirs())
+        ok = tvEmptyDir([data stringByAppendingPathComponent:sub], fm) && ok;
+
+    TVLog(@"Control socket: wipeapp %@ -> %@", bundleId, ok ? @"OK" : @"PARTIAL");
+    const char *raw = ok ? "OK\n" : "ERR Partial\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
+// `snapshot <bundle id>` — lưu bản sao dữ liệu app hiện tại vào
+// /var/mobile/controlios-snap/<bundle id>/ để `restore` quay lại sau này. Bản
+// snapshot nằm NGAY TRÊN MÁY nên không phải truyền qua PC.
+static NSData *tvCtlSnapshotApp(NSString *bundleId) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *data = tvDataContainerPath(bundleId);
+    if (!data)
+        return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *snap = tvSnapshotDir(bundleId);
+    [fm removeItemAtPath:snap error:NULL]; // bỏ bản cũ nếu có
+    NSError *e = nil;
+    if (![fm createDirectoryAtPath:snap
+       withIntermediateDirectories:YES
+                        attributes:nil
+                             error:&e]) {
+        NSString *msg = [NSString stringWithFormat:@"ERR %@\n",
+                                                   e.localizedDescription ?: @"CannotCreate"];
+        return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    }
+
+    BOOL ok = YES;
+    for (NSString *sub in tvAppDataSubdirs()) {
+        NSString *src = [data stringByAppendingPathComponent:sub];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:src isDirectory:&isDir] || !isDir)
+            continue; // subdir chưa tồn tại thì bỏ qua
+        NSString *dst = [snap stringByAppendingPathComponent:sub];
+        NSError *ce = nil;
+        if (![fm copyItemAtPath:src toPath:dst error:&ce]) {
+            TVLog(@"Control socket: snapshot %@ %@ FAIL: %@", bundleId, sub,
+                  ce.localizedDescription);
+            ok = NO;
+        }
+    }
+
+    TVLog(@"Control socket: snapshot %@ -> %@", bundleId, ok ? @"OK" : @"PARTIAL");
+    const char *raw = ok ? "OK\n" : "ERR Partial\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
+// `restore <bundle id>` — thay dữ liệu app hiện tại bằng bản snapshot đã lưu.
+// Nên `terminate` app trước, và relaunch sau. File chép vào được chown về mobile.
+static NSData *tvCtlRestoreApp(NSString *bundleId) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                             [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *data = tvDataContainerPath(bundleId);
+    if (!data)
+        return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *snap = tvSnapshotDir(bundleId);
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:snap isDirectory:&isDir] || !isDir)
+        return [@"ERR NoSnapshot\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    BOOL ok = YES;
+    for (NSString *sub in tvAppDataSubdirs()) {
+        NSString *src = [snap stringByAppendingPathComponent:sub];
+        BOOL srcDir = NO;
+        if (![fm fileExistsAtPath:src isDirectory:&srcDir] || !srcDir)
+            continue;
+        NSString *dst = [data stringByAppendingPathComponent:sub];
+        [fm removeItemAtPath:dst error:NULL]; // bỏ dữ liệu hiện tại
+        NSError *ce = nil;
+        if (![fm copyItemAtPath:src toPath:dst error:&ce]) {
+            TVLog(@"Control socket: restore %@ %@ FAIL: %@", bundleId, sub,
+                  ce.localizedDescription);
+            ok = NO;
+            continue;
+        }
+        tvChownTree(dst, fm); // root vừa chép -> trả quyền về mobile
+    }
+
+    TVLog(@"Control socket: restore %@ -> %@", bundleId, ok ? @"OK" : @"PARTIAL");
+    const char *raw = ok ? "OK\n" : "ERR Partial\n";
+    return [NSData dataWithBytes:raw length:strlen(raw)];
+}
+
 void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // Log peer and set short timeouts
     char ipbuf[INET_ADDRSTRLEN] = {0};
@@ -4536,6 +4702,12 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     } else if ([cmd hasPrefix:@"terminate "]) {
         resp = tvCtlTerminateApp([[cmd substringFromIndex:10]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd hasPrefix:@"wipeapp "]) {
+        resp = tvCtlWipeApp([cmd substringFromIndex:8]);
+    } else if ([cmd hasPrefix:@"snapshot "]) {
+        resp = tvCtlSnapshotApp([cmd substringFromIndex:9]);
+    } else if ([cmd hasPrefix:@"restore "]) {
+        resp = tvCtlRestoreApp([cmd substringFromIndex:8]);
     } else {
         resp = [@"ERR Unknown\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
