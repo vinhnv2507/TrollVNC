@@ -1221,3 +1221,143 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
 }
 
 @end
+
+#pragma mark - Auto-click (kịch bản tự chạy)
+
+@interface TVNCAutoClickController ()
+@property(nonatomic, strong) UITextView *editor;
+@property(nonatomic, strong) UILabel *status;
+@end
+
+@implementation TVNCAutoClickController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Tự động chạm";
+    self.view.backgroundColor = [UIColor systemBackgroundColor];
+
+    self.navigationItem.leftBarButtonItem =
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose
+                                                      target:self
+                                                      action:@selector(dismissSelf)];
+    UIBarButtonItem *start = [[UIBarButtonItem alloc] initWithTitle:@"▶ Bắt đầu"
+                                                             style:UIBarButtonItemStyleDone
+                                                            target:self
+                                                            action:@selector(saveAndStart)];
+    UIBarButtonItem *stop = [[UIBarButtonItem alloc] initWithTitle:@"■ Dừng"
+                                                            style:UIBarButtonItemStylePlain
+                                                           target:self
+                                                           action:@selector(stop)];
+    self.navigationItem.rightBarButtonItems = @[ start, stop ];
+
+    UILabel *hint = [UILabel new];
+    hint.numberOfLines = 0;
+    hint.font = [UIFont systemFontOfSize:12];
+    hint.textColor = [UIColor secondaryLabelColor];
+    hint.text = @"Toạ độ theo TỈ LỆ 0..1. Lệnh: tap x y · doubletap x y · longpress x y · "
+                @"swipe x1 y1 x2 y2 [giây] · wait giây (hoặc a-b) · home · key <ký tự>. "
+                @"Cả kịch bản LẶP tới khi Dừng. Chạy trong nền, tác động app đang mở. "
+                @"Mẹo: tìm toạ độ chính xác trên khung VNC ở PC (góc dưới hiện tỉ lệ).";
+    hint.translatesAutoresizingMaskIntoConstraints = NO;
+
+    self.editor = [UITextView new];
+    self.editor.font = [UIFont fontWithName:@"Menlo" size:14] ?: [UIFont systemFontOfSize:14];
+    self.editor.autocapitalizationType = UITextAutocapitalizationTypeNone;
+    self.editor.autocorrectionType = UITextAutocorrectionTypeNo;
+    self.editor.backgroundColor = [UIColor secondarySystemBackgroundColor];
+    self.editor.translatesAutoresizingMaskIntoConstraints = NO;
+
+    self.status = [UILabel new];
+    self.status.font = [UIFont systemFontOfSize:13];
+    self.status.textColor = [UIColor secondaryLabelColor];
+    self.status.text = @"…";
+    self.status.translatesAutoresizingMaskIntoConstraints = NO;
+
+    [self.view addSubview:hint];
+    [self.view addSubview:self.editor];
+    [self.view addSubview:self.status];
+    UILayoutGuide *g = self.view.safeAreaLayoutGuide;
+    [NSLayoutConstraint activateConstraints:@[
+        [hint.topAnchor constraintEqualToAnchor:g.topAnchor constant:8],
+        [hint.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+        [hint.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+        [self.editor.topAnchor constraintEqualToAnchor:hint.bottomAnchor constant:8],
+        [self.editor.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:8],
+        [self.editor.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-8],
+        [self.status.topAnchor constraintEqualToAnchor:self.editor.bottomAnchor constant:6],
+        [self.status.leadingAnchor constraintEqualToAnchor:g.leadingAnchor constant:12],
+        [self.status.trailingAnchor constraintEqualToAnchor:g.trailingAnchor constant:-12],
+        [self.status.bottomAnchor constraintEqualToAnchor:g.bottomAnchor constant:-8],
+    ]];
+
+    [self loadScript];
+    [self refreshStatus];
+}
+
+- (void)dismissSelf {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)loadScript {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *reply = TVNCRunCommand(@"autoget", 4.0) ?: @"";
+        NSString *script = @"";
+        NSRange sp = [reply rangeOfString:@" "];
+        if ([reply hasPrefix:@"OK"] && sp.location != NSNotFound) {
+            NSString *b64 = [[reply substringFromIndex:sp.location + 1]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            NSData *d = [[NSData alloc] initWithBase64EncodedString:b64 options:0];
+            if (d)
+                script = [[NSString alloc] initWithData:d encoding:NSUTF8StringEncoding] ?: @"";
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.editor.text.length == 0)
+                self.editor.text = script.length ? script : @"# ví dụ:\ntap 0.5 0.9\nwait 2\n";
+        });
+    });
+}
+
+- (void)refreshStatus {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *reply = TVNCRunCommand(@"autostatus", 4.0) ?: @"";
+        BOOL running = [reply containsString:@"running"];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.status.text = running ? @"● Đang chạy" : @"○ Đã dừng";
+            self.status.textColor = running ? [UIColor systemGreenColor] : [UIColor secondaryLabelColor];
+        });
+    });
+}
+
+- (void)saveAndStart {
+    NSString *script = self.editor.text ?: @"";
+    NSString *b64 = [[script dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
+    [self.editor endEditing:YES];
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        (void)TVNCRunCommand([NSString stringWithFormat:@"autoset %@", b64], 5.0);
+        NSString *r = TVNCRunCommand(@"autostart", 5.0) ?: @"";
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshStatus];
+            if ([r containsString:@"NoScript"])
+                [self toast:@"Kịch bản trống"];
+        });
+    });
+}
+
+- (void)stop {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        (void)TVNCRunCommand(@"autostop", 4.0);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refreshStatus];
+        });
+    });
+}
+
+- (void)toast:(NSString *)t {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:t
+                                                              message:nil
+                                                       preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+@end

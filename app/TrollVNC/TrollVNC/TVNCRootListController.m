@@ -283,23 +283,32 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                                                             action:nil];
     self.navigationItem.backBarButtonItem.tintColor = _primaryColor;
 
-    // Nút "App Data" (reset dữ liệu app trên chính máy này). Đặt TRƯỚC nhánh
-    // managed để nó hiện cả ở màn hình quản lý — nơi các nút khác bị bỏ qua bởi
-    // return sớm bên dưới.
-    UIBarButtonItem *appDataItem = [[UIBarButtonItem alloc] initWithTitle:@"App Data"
-                                                                   style:UIBarButtonItemStylePlain
-                                                                  target:self
-                                                                  action:@selector(showAppData)];
-    appDataItem.tintColor = _primaryColor;
-
-    UIBarButtonItem *activationItem = [[UIBarButtonItem alloc] initWithTitle:@"Kích hoạt"
-                                                                      style:UIBarButtonItemStylePlain
-                                                                     target:self
-                                                                     action:@selector(showActivation)];
-    activationItem.tintColor = _primaryColor;
+    // Nút "Công cụ" (menu): App Data / Tự động chạm / Kích hoạt. Gộp lại cho gọn
+    // thanh nav. Đặt TRƯỚC nhánh managed để hiện cả ở màn hình quản lý.
+    __weak typeof(self) weakSelf = self;
+    UIAction *appDataAct = [UIAction actionWithTitle:@"Reset dữ liệu app"
+                                               image:[UIImage systemImageNamed:@"externaldrive"]
+                                          identifier:nil
+                                             handler:^(__kindof UIAction *a) { [weakSelf showAppData]; }];
+    UIAction *autoAct = [UIAction actionWithTitle:@"Tự động chạm"
+                                            image:[UIImage systemImageNamed:@"hand.tap"]
+                                       identifier:nil
+                                          handler:^(__kindof UIAction *a) { [weakSelf showAutoClick]; }];
+    UIAction *actAct = [UIAction actionWithTitle:@"Kích hoạt bản quyền"
+                                           image:[UIImage systemImageNamed:@"checkmark.seal"]
+                                      identifier:nil
+                                         handler:^(__kindof UIAction *a) { [weakSelf showActivation]; }];
+    UIMenu *toolsMenu = [UIMenu menuWithTitle:@"" children:@[ appDataAct, autoAct, actAct ]];
+    UIBarButtonItem *toolsItem =
+        [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
+                                         style:UIBarButtonItemStylePlain
+                                        target:nil
+                                        action:nil];
+    toolsItem.menu = toolsMenu;
+    toolsItem.tintColor = _primaryColor;
 
     if ([self hasManagedConfiguration]) {
-        self.navigationItem.rightBarButtonItems = @[ appDataItem, activationItem ];
+        self.navigationItem.rightBarButtonItem = toolsItem;
         return;
     }
 
@@ -325,15 +334,10 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
     BOOL isPad = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad);
     if (isApp || isPad) {
-        self.navigationItem.leftBarButtonItems = @[ clientsItem, appDataItem, activationItem ];
+        self.navigationItem.leftBarButtonItems = @[ clientsItem, toolsItem ];
         self.navigationItem.rightBarButtonItem = applyItem;
     } else {
-        self.navigationItem.rightBarButtonItems = @[
-            applyItem,
-            clientsItem,
-            appDataItem,
-            activationItem,
-        ];
+        self.navigationItem.rightBarButtonItems = @[ applyItem, clientsItem, toolsItem ];
     }
 
     self.monitor = nw_path_monitor_create();
@@ -377,6 +381,13 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 - (void)showActivation {
     TVNCActivationController *vc =
         [[TVNCActivationController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    vc.primaryColor = self.primaryColor;
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.navigationController presentViewController:navController animated:YES completion:nil];
+}
+
+- (void)showAutoClick {
+    TVNCAutoClickController *vc = [[TVNCAutoClickController alloc] init];
     vc.primaryColor = self.primaryColor;
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
     [self.navigationController presentViewController:navController animated:YES completion:nil];

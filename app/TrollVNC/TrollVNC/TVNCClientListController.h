@@ -46,4 +46,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+/// Tự động chạm: soạn kịch bản (tap/swipe/wait/home…), gửi xuống daemon và
+/// Bật/Tắt. Vòng lặp chạy TRONG DAEMON nên tiếp tục dù thoát app.
+@interface TVNCAutoClickController : UIViewController
+
+@property(nonatomic, strong) UIColor *primaryColor;
+
+@end
+
 NS_ASSUME_NONNULL_END

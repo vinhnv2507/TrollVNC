@@ -4548,6 +4548,146 @@ static NSData *tvCtlLicenseStatus(void) {
     return [s dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+#pragma mark - Auto-click (kịch bản tự chạy trên máy)
+
+// Chạy một kịch bản chạm/vuốt NGAY TRÊN MÁY theo vòng lặp, không cần PC. Toạ độ
+// theo tỉ lệ 0..1 (không gian màn dọc gSrcWidth×gSrcHeight). Bơm sự kiện qua
+// STHIDEventGenerator — đúng bộ mà VNC dùng để điều khiển.
+static NSString *gAutoScript = nil;
+static dispatch_queue_t gAutoQueue = nil;
+static std::atomic<bool> gAutoStop{false};
+static std::atomic<bool> gAutoRunning{false};
+
+static NSString *tvAutoScriptPath(void) {
+    return @"/var/mobile/Library/controlios/autoscript.txt";
+}
+
+static CGPoint tvAutoPoint(double rx, double ry) {
+    double w = gSrcWidth > 0 ? (double)gSrcWidth : (double)gWidth;
+    double h = gSrcHeight > 0 ? (double)gSrcHeight : (double)gHeight;
+    rx = rx < 0 ? 0 : (rx > 1 ? 1 : rx);
+    ry = ry < 0 ? 0 : (ry > 1 ? 1 : ry);
+    return CGPointMake((CGFloat)(rx * (w - 1)), (CGFloat)(ry * (h - 1)));
+}
+
+// Ngủ theo nhịp nhỏ để DỪNG nhanh khi có yêu cầu dừng.
+static void tvAutoSleep(double sec) {
+    double slept = 0;
+    while (slept < sec && !gAutoStop.load()) {
+        double step = (sec - slept) < 0.1 ? (sec - slept) : 0.1;
+        if (step <= 0)
+            break;
+        usleep((useconds_t)(step * 1e6));
+        slept += step;
+    }
+}
+
+static void tvAutoRunLine(NSString *line, STHIDEventGenerator *gen) {
+    NSMutableArray<NSString *> *a = [NSMutableArray array];
+    for (NSString *s in [line componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]])
+        if (s.length)
+            [a addObject:s];
+    if (a.count == 0)
+        return;
+    NSString *op = [a[0] lowercaseString];
+    double (^n)(NSUInteger) = ^double(NSUInteger i) { return i < a.count ? [a[i] doubleValue] : 0.0; };
+
+    if ([op isEqualToString:@"tap"] && a.count >= 3) {
+        [gen tap:tvAutoPoint(n(1), n(2))];
+    } else if ([op isEqualToString:@"doubletap"] && a.count >= 3) {
+        [gen doubleTap:tvAutoPoint(n(1), n(2))];
+    } else if ([op isEqualToString:@"longpress"] && a.count >= 3) {
+        [gen longPress:tvAutoPoint(n(1), n(2))];
+    } else if ([op isEqualToString:@"swipe"] && a.count >= 5) {
+        double dur = a.count >= 6 ? n(5) : 0.3;
+        [gen dragLinearWithStartPoint:tvAutoPoint(n(1), n(2))
+                             endPoint:tvAutoPoint(n(3), n(4))
+                             duration:dur];
+    } else if ([op isEqualToString:@"home"]) {
+        [gen menuPress];
+    } else if ([op isEqualToString:@"key"] && a.count >= 2) {
+        [gen keyPress:a[1]];
+    } else if ([op isEqualToString:@"wait"] && a.count >= 2) {
+        NSString *w = a[1];
+        NSRange dash = [w rangeOfString:@"-"];
+        double sec;
+        if (dash.location != NSNotFound && dash.location > 0) {
+            double lo = [[w substringToIndex:dash.location] doubleValue];
+            double hi = [[w substringFromIndex:dash.location + 1] doubleValue];
+            sec = lo + ((double)arc4random() / UINT32_MAX) * (hi > lo ? (hi - lo) : 0);
+        } else {
+            sec = [w doubleValue];
+        }
+        tvAutoSleep(sec);
+    }
+    // dòng lạ: bỏ qua (giữ vòng lặp sống)
+}
+
+static void tvAutoStart(void) {
+    if (gAutoRunning.load())
+        return;
+    NSString *script = gAutoScript ?: @"";
+    if (script.length == 0)
+        return;
+    gAutoStop.store(false);
+    if (!gAutoQueue)
+        gAutoQueue = dispatch_queue_create("com.controlios.autoclick", DISPATCH_QUEUE_SERIAL);
+    dispatch_async(gAutoQueue, ^{
+        @autoreleasepool {
+            NSArray<NSString *> *lines =
+                [script componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+            STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
+            gAutoRunning.store(true);
+            TVLog(@"Auto-click: bắt đầu (%lu dòng)", (unsigned long)lines.count);
+            while (!gAutoStop.load()) {
+                BOOL didSomething = NO;
+                for (NSString *raw in lines) {
+                    if (gAutoStop.load())
+                        break;
+                    NSString *line = [raw stringByTrimmingCharactersInSet:
+                                              [NSCharacterSet whitespaceCharacterSet]];
+                    if (line.length == 0 || [line hasPrefix:@"#"])
+                        continue;
+                    @autoreleasepool {
+                        tvAutoRunLine(line, gen);
+                    }
+                    didSomething = YES;
+                    if (!gAutoStop.load())
+                        tvAutoSleep(0.05); // nhịp nhỏ giữa lệnh
+                }
+                if (!didSomething)
+                    tvAutoSleep(0.5); // script không có lệnh chạy được -> đừng quay nóng
+            }
+            gAutoRunning.store(false);
+            TVLog(@"Auto-click: đã dừng");
+        }
+    });
+}
+
+static void tvAutoStop(void) {
+    gAutoStop.store(true);
+}
+
+static void tvAutoSetScript(NSString *script) {
+    gAutoScript = [script copy];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:[tvAutoScriptPath() stringByDeletingLastPathComponent]
+   withIntermediateDirectories:YES
+                    attributes:nil
+                         error:NULL];
+    [script writeToFile:tvAutoScriptPath() atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+}
+
+static void tvAutoLoadFromDisk(void) {
+    if (gAutoScript == nil) {
+        NSString *s = [NSString stringWithContentsOfFile:tvAutoScriptPath()
+                                                encoding:NSUTF8StringEncoding
+                                                   error:NULL];
+        if (s)
+            gAutoScript = [s copy];
+    }
+}
+
 #pragma mark - App data reset
 
 // mobile chạy uid/gid 501 trên iOS. File do root chép vào container phải được
@@ -5067,6 +5207,31 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         NSString *bid = (sp.location == NSNotFound) ? rest : [rest substringToIndex:sp.location];
         NSString *nm = (sp.location == NSNotFound) ? @"" : [rest substringFromIndex:sp.location + 1];
         resp = tvCtlRestoreApp(bid, nm);
+    } else if ([cmd hasPrefix:@"autoset "]) {
+        NSData *raw = [[NSData alloc] initWithBase64EncodedString:[cmd substringFromIndex:8] options:0];
+        NSString *script = raw ? [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] : nil;
+        if (!script) {
+            resp = [@"ERR BadScript\n" dataUsingEncoding:NSUTF8StringEncoding];
+        } else {
+            tvAutoSetScript(script);
+            resp = [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+        }
+    } else if ([cmd isEqualToString:@"autostart"]) {
+        tvAutoStart();
+        resp = [(gAutoScript.length == 0 ? @"ERR NoScript\n"
+                                         : (gAutoRunning.load() ? @"OK running\n" : @"OK started\n"))
+            dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd isEqualToString:@"autostop"]) {
+        tvAutoStop();
+        resp = [@"OK stopped\n" dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd isEqualToString:@"autostatus"]) {
+        resp = [(gAutoRunning.load() ? @"OK running\n" : @"OK stopped\n")
+            dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd isEqualToString:@"autoget"]) {
+        tvAutoLoadFromDisk();
+        NSString *b64 = [[(gAutoScript ?: @"") dataUsingEncoding:NSUTF8StringEncoding]
+            base64EncodedStringWithOptions:0];
+        resp = [[NSString stringWithFormat:@"OK %@\n", b64] dataUsingEncoding:NSUTF8StringEncoding];
     } else {
         resp = [@"ERR Unknown\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
