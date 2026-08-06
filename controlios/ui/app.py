@@ -917,6 +917,19 @@ class MainWindow(QMainWindow):
                 lambda _checked=False, g=gesture: self._run_device_gesture(g))
             gesture_row.addWidget(btn)
             self.device_gesture_buttons[gesture] = btn
+
+        # AssistiveTouch iOS (nút tròn nổi) — bật/tắt cho máy đang xem/chọn.
+        at_button = QToolButton()
+        at_button.setText("⊙ AssistiveTouch")
+        at_button.setToolTip("Bật/tắt nút tròn AssistiveTouch của iOS trên máy")
+        at_button.setPopupMode(QToolButton.InstantPopup)
+        at_menu = QMenu(at_button)
+        for label, state in [("Bật", "on"), ("Tắt", "off"), ("Đảo", "toggle")]:
+            act = at_menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, s=state: self._set_assistive_touch(s))
+        at_button.setMenu(at_menu)
+        gesture_row.addWidget(at_button)
         detail_layout.addLayout(gesture_row)
 
         self.splitter = QSplitter(Qt.Horizontal)
@@ -1591,6 +1604,16 @@ class MainWindow(QMainWindow):
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
                   "lock": "Khoá máy"}
         self._run_quick_action(labels.get(gesture, gesture), gesture, False)
+
+    def _set_assistive_touch(self, state: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        self.pool.assistive_touch(
+            targets, state,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
     def _run_quick_action(self, label: str, source: str, needs_name: bool) -> None:
         targets = self.action_targets()

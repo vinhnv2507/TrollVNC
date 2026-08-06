@@ -556,6 +556,16 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Respring", action, on_event, on_done)
 
+    def assistive_touch(self, keys: Iterable[str], state: str,
+                        on_event=None, on_done=None) -> None:
+        """Bật/tắt AssistiveTouch iOS trên nhiều máy. state = on|off|toggle."""
+
+        async def action(channel):
+            await channel.set_assistive_touch(state)
+            return f"AssistiveTouch {state}"
+
+        self._bulk_app_action(keys, f"AssistiveTouch {state}", action, on_event, on_done)
+
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
         """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).

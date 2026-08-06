@@ -483,6 +483,13 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không respring được: {text.strip()}")
 
+    async def set_assistive_touch(self, state: str) -> None:
+        """Bật/tắt AssistiveTouch của iOS. state = 'on' | 'off' | 'toggle'."""
+
+        text = await self.command(f"assistivetouch {state}")
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không đổi được AssistiveTouch: {text.strip()}")
+
     async def set_scale(self, factor: float) -> None:
         """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.
 
