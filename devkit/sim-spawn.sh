@@ -23,7 +23,7 @@ if [ ! -f "$BINARY" ]; then
     BINARY=".theos/obj/iphone_simulator/trollvncserver"
 fi
 
-SANDBOX_PATH=$(xcrun simctl get_app_container "$REAL_SIMULATOR_ID" com.82flex.TrollVNCApp data 2>/dev/null)
+SANDBOX_PATH=$(xcrun simctl get_app_container "$REAL_SIMULATOR_ID" com.controlios.app data 2>/dev/null)
 if [ -z "$SANDBOX_PATH" ]; then
     echo "Warning: could not resolve app sandbox path; preferences may not load"
 fi
