@@ -63,15 +63,6 @@ def letter_icon(app: AppInfo) -> QIcon:
     return QIcon(pixmap)
 
 
-# Thao tác ở mức **thiết bị**, không thuộc app nào. Đây là những thứ kênh điều
-# khiển không làm được nên vẫn phải dùng nút cứng qua cử chỉ.
-DEVICE_ACTIONS = [
-    ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
-    ("⇄ Chuyển app", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
-    ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),
-]
-
-
 class AppsPanel(QWidget):
     launch_requested = Signal(str)       # bundle id
     terminate_requested = Signal(str)
@@ -79,7 +70,6 @@ class AppsPanel(QWidget):
     snapshot_requested = Signal(str)     # lưu snapshot dữ liệu app
     restore_requested = Signal(str)      # khôi phục dữ liệu app từ snapshot
     refresh_requested = Signal()
-    gesture_requested = Signal(str)      # tên cử chỉ: home / switcher / lock
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -88,20 +78,7 @@ class AppsPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
 
-        # Hàng thao tác thiết bị: gộp từ menu "Thao tác app" cũ về đây, để mọi
-        # thứ liên quan tới app và máy nằm chung một chỗ.
-        device_row = QHBoxLayout()
-        device_row.setSpacing(4)
-        self.device_buttons = {}
-        for label, gesture, tip in DEVICE_ACTIONS:
-            button = QPushButton(label)
-            button.setToolTip(tip)
-            button.clicked.connect(
-                lambda _checked=False, g=gesture: self.gesture_requested.emit(g)
-            )
-            device_row.addWidget(button)
-            self.device_buttons[gesture] = button
-        layout.addLayout(device_row)
+        # Home / Chuyển app / Khoá đã chuyển xuống ngay dưới khung lớn.
 
         row = QHBoxLayout()
         self.refresh_button = QPushButton("Nạp danh sách")

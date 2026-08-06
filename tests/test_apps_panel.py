@@ -124,23 +124,6 @@ class AppsPanelTest(unittest.TestCase):
         self.panel.set_targets(42)
         self.assertIn("42", self.panel.target_label.text())
 
-    def test_device_buttons_emit_their_gesture(self) -> None:
-        """Home/Chuyển app/Khoá gộp từ menu 'Thao tác app' cũ về bảng này."""
-
-        seen = []
-        self.panel.gesture_requested.connect(seen.append)
-        for gesture in ("home", "switcher", "lock"):
-            self.panel.device_buttons[gesture].click()
-        self.assertEqual(seen, ["home", "switcher", "lock"])
-
-    def test_device_buttons_exist_even_before_a_list_loads(self) -> None:
-        panel = AppsPanel()
-        try:
-            self.assertEqual(set(panel.device_buttons), {"home", "switcher", "lock"})
-            self.assertEqual(panel.list.count(), 0)
-        finally:
-            panel.close()
-
     def test_icon_is_identical_for_the_same_app(self) -> None:
         first = letter_icon(SAMPLE[0]).pixmap(34, 34).toImage()
         again = letter_icon(SAMPLE[0]).pixmap(34, 34).toImage()
@@ -245,7 +228,7 @@ class WindowIntegrationTest(unittest.TestCase):
             (list(keys), steps)
         )
         self.window.grid.select_all()
-        self.window.apps_panel.device_buttons["home"].click()
+        self.window.device_gesture_buttons["home"].click()
 
         self.assertEqual(len(sent), 1)
         keys, steps = sent[0]
@@ -256,7 +239,7 @@ class WindowIntegrationTest(unittest.TestCase):
         sent = []
         self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(steps)
         self.window.grid.select_all()
-        self.window.apps_panel.device_buttons["lock"].click()
+        self.window.device_gesture_buttons["lock"].click()
         self.assertEqual(sent[0][0].args[0], "lock")
 
     def test_old_quick_action_toolbar_button_is_gone(self) -> None:

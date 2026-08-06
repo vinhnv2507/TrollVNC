@@ -900,6 +900,25 @@ class MainWindow(QMainWindow):
         detail_layout.addWidget(self.detail_title)
         detail_layout.addWidget(self.detail, 1)
 
+        # Phím thiết bị nhanh NGAY DƯỚI khung lớn: Home / Chuyển app / Khoá — luôn
+        # thấy khi đang xem một máy, khỏi mở bảng Ứng dụng.
+        gesture_row = QHBoxLayout()
+        gesture_row.setContentsMargins(2, 0, 2, 2)
+        gesture_row.setSpacing(4)
+        self.device_gesture_buttons = {}
+        for label, gesture, tip in [
+            ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
+            ("⇄ Chuyển app", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
+            ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),
+        ]:
+            btn = QPushButton(label)
+            btn.setToolTip(tip)
+            btn.clicked.connect(
+                lambda _checked=False, g=gesture: self._run_device_gesture(g))
+            gesture_row.addWidget(btn)
+            self.device_gesture_buttons[gesture] = btn
+        detail_layout.addLayout(gesture_row)
+
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.grid)
         self.splitter.addWidget(detail_pane)
@@ -927,7 +946,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.wipe_requested.connect(self._wipe_app)
         self.apps_panel.snapshot_requested.connect(self._snapshot_app)
         self.apps_panel.restore_requested.connect(self._restore_app)
-        self.apps_panel.gesture_requested.connect(self._run_device_gesture)
+        # Home / Chuyển app / Khoá đã chuyển xuống dưới khung lớn.
         # Cài .ipa / Độ sáng / Đẩy file đã chuyển ra thanh công cụ chính.
 
         self._build_toolbar()
