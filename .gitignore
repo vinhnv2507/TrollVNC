@@ -20,3 +20,6 @@ build/
 dist/
 *.spec
 tests/_*.json
+
+# Khoa RIENG cap license — TUYET DOI khong commit
+tools/controlios_private.pem
