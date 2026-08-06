@@ -128,8 +128,9 @@ class AppsPanel(QWidget):
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
-        self.list.itemActivated.connect(self._on_activated)
-        self.list.itemClicked.connect(self._on_activated)
+        # Nhấn ĐÚP để MỞ app. Bấm một lần chỉ CHỌN — để dùng các nút
+        # Snapshot/Khôi phục/Xoá data (hoặc chuột phải) mà không vô tình mở app.
+        self.list.itemDoubleClicked.connect(self._on_activated)
         layout.addWidget(self.list, 1)
 
         # Độ sáng / Cài .ipa / Đẩy file đã chuyển ra thanh công cụ chính.
@@ -250,7 +251,8 @@ class AppsPanel(QWidget):
 
         if self._apps:
             self.status.setText(
-                f"{len(apps)}/{len(self._apps)} app · bấm để mở, chuột phải để đóng"
+                f"{len(apps)}/{len(self._apps)} app · bấm chọn · nhấn đúp để mở · "
+                "chuột phải: đóng/snapshot"
             )
 
     def selected_bundle(self) -> Optional[str]:
