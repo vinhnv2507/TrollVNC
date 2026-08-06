@@ -1144,24 +1144,34 @@ class MainWindow(QMainWindow):
         save_photo.triggered.connect(self._push_photo)
         bar.addAction(save_photo)
 
-        # Độ sáng: một nút gộp menu (min/−/+/max) cho gọn thanh công cụ.
-        bright_button = QToolButton()
-        bright_button.setText("Độ sáng")
-        bright_button.setToolTip("Chỉnh độ sáng màn hình các máy đang chọn "
-                                 "(hạ thấp để tiết kiệm pin, VNC vẫn chạy)")
-        bright_button.setPopupMode(QToolButton.InstantPopup)
-        bright_menu = QMenu(bright_button)
+        # Độ sáng + Âm lượng gộp một nút menu (một ô cho gọn thanh công cụ).
+        media_button = QToolButton()
+        media_button.setText("Sáng/Âm")
+        media_button.setToolTip("Chỉnh độ sáng và âm lượng các máy đang chọn")
+        media_button.setPopupMode(QToolButton.InstantPopup)
+        media_menu = QMenu(media_button)
+        media_menu.addSection("Độ sáng")
         for label, key, repeat in [
             ("▁ Tối đa (tối nhất)", "brightness_down", BRIGHTNESS_STEPS),
             ("− Giảm một nấc", "brightness_down", 1),
             ("+ Tăng một nấc", "brightness_up", 1),
             ("▔ Sáng nhất", "brightness_up", BRIGHTNESS_STEPS),
         ]:
-            act = bright_menu.addAction(label)
+            act = media_menu.addAction(label)
             act.triggered.connect(
                 lambda _checked=False, k=key, r=repeat: self._send_media_key(k, r))
-        bright_button.setMenu(bright_menu)
-        bar.addWidget(bright_button)
+        media_menu.addSection("Âm lượng")
+        for label, key, repeat in [
+            ("🔊 Tăng một nấc", "volume_up", 1),
+            ("🔉 Giảm một nấc", "volume_down", 1),
+            ("🔈 Giảm nhiều", "volume_down", 5),
+            ("🔇 Tắt tiếng", "mute", 1),
+        ]:
+            act = media_menu.addAction(label)
+            act.triggered.connect(
+                lambda _checked=False, k=key, r=repeat: self._send_media_key(k, r))
+        media_button.setMenu(media_menu)
+        bar.addWidget(media_button)
 
         respring = QAction("Respring", self)
         respring.setToolTip(

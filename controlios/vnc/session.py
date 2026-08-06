@@ -285,6 +285,10 @@ class VncSession:
 
         if not self._client:
             return
+        # Cuộn "thuận iOS": lăn bánh xe lên phải làm nội dung dịch như vuốt trên
+        # iPhone. Không đảo thì cảm giác ngược chiều cuộn của iOS.
+        if getattr(self.settings, "natural_scroll", True):
+            dy, dx = -dy, -dx
         mouse = self._client.mouse
         mouse.move(int(x), int(y))
         for _ in range(abs(int(dy))):

@@ -59,6 +59,8 @@ class SessionInputTest(unittest.IsolatedAsyncioTestCase):
         return False
 
     async def test_scroll_up_and_down_use_distinct_buttons(self) -> None:
+        # Kiểm ánh xạ nút THÔ, nên tắt đảo chiều "cuộn thuận iOS".
+        self.session.settings.natural_scroll = False
         self.server.pointer_events.clear()
         self.session.scroll(100, 200, dy=2)
         self.assertTrue(await self.drain(lambda: len(self.server.pointer_events) >= 4))
@@ -73,6 +75,7 @@ class SessionInputTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn(1 << 4, pressed, f"lăn xuống phải là nút 5 (mask 16): {pressed}")
 
     async def test_horizontal_scroll_uses_buttons_six_and_seven(self) -> None:
+        self.session.settings.natural_scroll = False
         self.server.pointer_events.clear()
         self.session.scroll(50, 50, dx=1)
         self.assertTrue(await self.drain(lambda: len(self.server.pointer_events) >= 2))
@@ -347,6 +350,8 @@ class BroadcastInputTest(unittest.TestCase):
 
         with unittest.mock.patch.object(SendTextDialog, "exec",
                                         return_value=QDialog.Accepted), \
+             unittest.mock.patch.object(SendTextDialog, "delivery",
+                                        return_value=("Xin chào", False, False)), \
              unittest.mock.patch.object(SendTextDialog, "result_text",
                                         return_value=("Xin chào", True)):
             self.window._send_text_dialog()

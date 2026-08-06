@@ -155,6 +155,11 @@ class Settings:
     # control socket (setscale); cần TrollVNC đã vá vòng 5.
     device_scale: float = 1.0
 
+    # Cuộn "thuận iOS": lăn bánh xe lên -> nội dung đi như vuốt trên iPhone. Bật
+    # (mặc định) đảo chiều lăn cho khớp cảm giác cuộn của iOS; tắt để giữ chiều
+    # kiểu desktop.
+    natural_scroll: bool = True
+
     def validate(self) -> None:
         """Reject settings that would fail later inside the network thread."""
 

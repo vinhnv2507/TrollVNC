@@ -117,6 +117,13 @@ class QualityDialog(QDialog):
         idle_form.addRow("Scale khung máy gửi:", self.scale_combo)
         layout.addWidget(idle_box)
 
+        self.natural_scroll = QCheckBox("Cuộn thuận iOS (lăn bánh xe khớp chiều vuốt iPhone)")
+        self.natural_scroll.setToolTip(
+            "Bật: lăn bánh xe lên làm nội dung dịch như vuốt lên trên iPhone. "
+            "Tắt: giữ chiều kiểu desktop (ngược với iOS)."
+        )
+        layout.addWidget(self.natural_scroll)
+
         note = QLabel(
             "Tốc độ/độ nét có hiệu lực ngay, không phải nối lại máy.\n"
             "Đổi Scale khung máy gửi sẽ làm mỗi máy nối lại một nhịp (như xoay "
@@ -147,6 +154,7 @@ class QualityDialog(QDialog):
         self.live_edge.setDisabled(full)
         self.idle_after.setValue(int(self.settings.idle_disconnect_after))
         self._select_scale(self.settings.device_scale)
+        self.natural_scroll.setChecked(getattr(self.settings, "natural_scroll", True))
 
     def _select_scale(self, value: float) -> None:
         # Chọn mức gần nhất với giá trị hiện có.
@@ -162,6 +170,7 @@ class QualityDialog(QDialog):
             else self.live_edge.value()
         self.settings.idle_disconnect_after = float(self.idle_after.value())
         self.settings.device_scale = float(self.scale_combo.currentData())
+        self.settings.natural_scroll = self.natural_scroll.isChecked()
 
     def scale_value(self) -> float:
         return float(self.scale_combo.currentData())
