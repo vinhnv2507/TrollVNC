@@ -2068,12 +2068,16 @@ NS_INLINE void alignDimensions(int rawW, int rawH, int *alignedW, int *alignedH)
 }
 
 // Resize framebuffer according to rotation (0/180 keep WxH from src, 90/270 swap), then apply scale
-NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
+static BOOL tvDisconnectAllClients(void); // định nghĩa ở dưới; cần khi xoay đổi cỡ
+
+// Trả YES nếu ĐÃ đổi cỡ framebuffer (để nhánh xoay ngắt client cho PC nối lại ở
+// cỡ mới — client này không hỗ trợ NewFBSize nên phải nối lại).
+NS_INLINE BOOL maybeResizeFramebufferForRotation(int rotQ) {
     // Source capture size (portrait-orientated)
     int srcW = gSrcWidth;
     int srcH = gSrcHeight;
     if (srcW <= 0 || srcH <= 0)
-        return;
+        return NO;
 
     // Rotate at source dimension stage
     int rotW = (rotQ % 2 == 0) ? srcW : srcH;
@@ -2086,7 +2090,7 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
     alignDimensions(outWraw, outHraw, &outW, &outH);
 
     if (outW == gWidth && outH == gHeight)
-        return; // no change
+        return NO; // no change
 
     // Allocate new double buffers
     size_t newFBSize = (size_t)outW * (size_t)outH * (size_t)gBytesPerPixel;
@@ -2133,6 +2137,7 @@ NS_INLINE void maybeResizeFramebufferForRotation(int rotQ) {
 
     gHasPending = NO;
     TVLog(@"Resize: framebuffer changed to %dx%d (rotQ=%d, scale=%.3f)", gWidth, gHeight, rotQ, gScale);
+    return YES;
 }
 
 // Ensure scratch buffer for rotation is available and large enough
@@ -2333,7 +2338,10 @@ static void handleFramebuffer(CMSampleBufferRef sampleBuffer) {
     CFAbsoluteTime __tv_tResize0 = CFAbsoluteTimeGetCurrent();
 #endif
 
-    maybeResizeFramebufferForRotation(rotQ);
+    // Xoay làm đổi cỡ (W↔H) -> ngắt client để PC nối lại ở cỡ mới (không có
+    // DesktopSize thì không tự cập nhật được).
+    if (maybeResizeFramebufferForRotation(rotQ))
+        tvDisconnectAllClients();
 
 #if DEBUG
     CFAbsoluteTime __tv_tResize1 = CFAbsoluteTimeGetCurrent();
@@ -4804,6 +4812,37 @@ static void tvAutoLoadFromDisk(void) {
     }
 }
 
+#pragma mark - AssistiveTouch
+
+// Bật/tắt AssistiveTouch của iOS (nút tròn nổi). mode: 0=tắt, 1=bật, 2=đảo.
+// Dùng API riêng của libAccessibility (daemon root gọi được).
+static BOOL tvSetAssistiveTouch(int mode) {
+    void *h = dlopen("/usr/lib/libAccessibility.dylib", RTLD_LAZY);
+    if (!h)
+        return NO;
+    BOOL (*isOn)(void) = (BOOL (*)(void))dlsym(h, "_AXSAssistiveTouchEnabled");
+    void (*setOn)(BOOL) = (void (*)(BOOL))dlsym(h, "_AXSAssistiveTouchSetEnabled");
+    if (!setOn)
+        return NO;
+    BOOL target = (mode == 2) ? (isOn ? !isOn() : YES) : (mode == 1);
+    setOn(target);
+    TVLog(@"AssistiveTouch -> %@", target ? @"BẬT" : @"TẮT");
+    return YES;
+}
+
+// `assistivetouch on|off|toggle`
+static NSData *tvCtlAssistiveTouch(NSString *arg) {
+    arg = [[arg stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        lowercaseString];
+    int mode = [arg isEqualToString:@"on"] ? 1 : ([arg isEqualToString:@"off"] ? 0 : 2);
+    BOOL ok = tvSetAssistiveTouch(mode);
+    void *h = dlopen("/usr/lib/libAccessibility.dylib", RTLD_LAZY);
+    BOOL (*isOn)(void) = h ? (BOOL (*)(void))dlsym(h, "_AXSAssistiveTouchEnabled") : NULL;
+    NSString *state = isOn ? (isOn() ? @"on" : @"off") : @"?";
+    NSString *s = ok ? [NSString stringWithFormat:@"OK %@\n", state] : @"ERR Unavailable\n";
+    return [s dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - App data reset
 
 // mobile chạy uid/gid 501 trên iOS. File do root chép vào container phải được
@@ -5275,6 +5314,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlSavePhoto([cmd substringFromIndex:10]);
     } else if ([cmd isEqualToString:@"respring"]) {
         resp = tvCtlRespring();
+    } else if ([cmd hasPrefix:@"assistivetouch "]) {
+        resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"setscale "]) {
         resp = tvCtlSetScale([cmd substringFromIndex:9]);
     } else if ([cmd hasPrefix:@"openurlin "]) {
