@@ -134,6 +134,35 @@ class AppsPanel(QWidget):
 
         # Độ sáng / Cài .ipa / Đẩy file đã chuyển ra thanh công cụ chính.
 
+        # Backup/khôi phục DỮ LIỆU của app ĐANG CHỌN trong danh sách. (Cũng có ở
+        # chuột phải, nhưng để nút cho dễ thấy.)
+        data_label = QLabel("Dữ liệu app đang chọn:")
+        data_label.setStyleSheet("color: #9aa4b2;")
+        layout.addWidget(data_label)
+        data_row = QHBoxLayout()
+        data_row.setSpacing(4)
+        self.snapshot_button = QPushButton("💾 Snapshot…")
+        self.snapshot_button.setToolTip(
+            "Lưu một bản dữ liệu của app đang chọn (nhiều bản có tên) — cần "
+            "TrollVNC đã vá")
+        self.snapshot_button.clicked.connect(
+            lambda: self._emit_for_selected(self.snapshot_requested))
+        data_row.addWidget(self.snapshot_button)
+
+        self.restore_button = QPushButton("↩ Khôi phục…")
+        self.restore_button.setToolTip(
+            "Mở danh sách snapshot của app đang chọn để khôi phục hoặc xoá bản")
+        self.restore_button.clicked.connect(
+            lambda: self._emit_for_selected(self.restore_requested))
+        data_row.addWidget(self.restore_button)
+
+        self.wipe_button = QPushButton("🧹 Xoá data")
+        self.wipe_button.setToolTip("Xoá dữ liệu app đang chọn như vừa cài lại (giữ keychain)")
+        self.wipe_button.clicked.connect(
+            lambda: self._emit_for_selected(self.wipe_requested))
+        data_row.addWidget(self.wipe_button)
+        layout.addLayout(data_row)
+
         self.status = QLabel("Chọn một máy rồi bấm Nạp danh sách.")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #9aa4b2;")
@@ -144,6 +173,15 @@ class AppsPanel(QWidget):
         layout.addWidget(self.note)
 
     # ------------------------------------------------------------------ trạng thái
+
+    def _emit_for_selected(self, signal) -> None:
+        """Phát tín hiệu backup/khôi phục/xoá cho app đang chọn trong danh sách."""
+
+        bundle = self.selected_bundle()
+        if bundle:
+            signal.emit(bundle)
+        else:
+            self.status.setText("Hãy chọn một app trong danh sách trước.")
 
     def set_targets(self, count: int) -> None:
         self.target_label.setText(
