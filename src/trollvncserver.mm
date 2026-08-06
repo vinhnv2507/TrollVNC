@@ -21,6 +21,7 @@
 
 #import <Accelerate/Accelerate.h>
 #import <Foundation/Foundation.h>
+#import <Security/Security.h>   // xác thực chữ ký license (ECDSA P-256)
 
 #import <arpa/inet.h>
 #import <atomic>
@@ -40,6 +41,7 @@
 #import <signal.h>
 #import <string>
 #import <sys/socket.h>
+#import <time.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
 #import <vector>
@@ -73,6 +75,12 @@ static int gPort = 5901;
 static int gTvCtlPort = 0;        // port for control connections (0 = disabled)
 static NSString *gTvCtlToken = nil; // token bắt buộc cho kết nối không phải loopback
 static BOOL gTvCtlBindAll = NO;     // YES khi có token: nghe trên mọi giao diện mạng
+
+// Kích hoạt bản quyền: daemon chỉ phục vụ khi có license hợp lệ (ký số, buộc
+// UDID, còn hạn). Xem #pragma mark - License.
+static BOOL gLicenseValid = NO;
+static NSString *gLicenseToken = nil;  // "khoá có ích": token control lấy từ license
+static long long gLicenseExpiry = 0;   // epoch giây, 0 = vĩnh viễn
 
 // SPI để liệt kê/mở app. Dùng NSClassFromString khi gọi nên không phải link
 // thêm framework nào, và cũng không phải sửa Makefile.
@@ -4410,6 +4418,136 @@ static NSData *tvCtlOpenURL(NSString *urlString) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
+#pragma mark - License (kích hoạt bản quyền)
+
+// KHOÁ CÔNG KHAI của bạn (65 byte, 04||X||Y). Sinh bằng
+// `tools/controlios_keygen.py genkeys` rồi DÁN mảng đó vào đây. Khoá riêng đi kèm
+// (controlios_private.pem) GIỮ BÍ MẬT — mất nó là ai cũng chế được license.
+static const uint8_t kLicensePubKey[65] = {
+    0x04, 0x24, 0xa7, 0xf1, 0x9e, 0xe2, 0xa7, 0xdd, 0x87, 0xa6, 0xdc, 0xdd, 0xc7,
+    0xa0, 0x4c, 0xf2, 0xa2, 0x64, 0x1a, 0x73, 0x79, 0x1f, 0xa4, 0x68, 0x92, 0x58,
+    0xb1, 0x98, 0x94, 0xac, 0x1d, 0xbe, 0xd6, 0x05, 0x22, 0xf0, 0x18, 0xf7, 0x51,
+    0xac, 0x69, 0xa0, 0x9c, 0x56, 0x8e, 0xc1, 0x42, 0x22, 0x2c, 0xe0, 0x22, 0x07,
+    0x57, 0x07, 0x46, 0xfa, 0x86, 0x5d, 0x5d, 0xc1, 0xe6, 0x0b, 0x6f, 0x44, 0xb5};
+
+static NSString *tvLicensePath(void) {
+    return @"/var/mobile/Library/controlios/license.dat";
+}
+
+// UDID máy qua libMobileGestalt (daemon có entitlement đọc được).
+static NSString *tvDeviceUDID(void) {
+    static NSString *cached = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        void *h = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_LAZY);
+        if (h) {
+            CFStringRef (*mgCopy)(CFStringRef) =
+                (CFStringRef (*)(CFStringRef))dlsym(h, "MGCopyAnswer");
+            if (mgCopy) {
+                CFStringRef v = mgCopy(CFSTR("UniqueDeviceID"));
+                if (v)
+                    cached = (__bridge_transfer NSString *)v;
+            }
+        }
+    });
+    return cached;
+}
+
+static NSData *tvB64UrlDecode(NSString *s) {
+    NSMutableString *m = [s mutableCopy];
+    [m replaceOccurrencesOfString:@"-" withString:@"+" options:0 range:NSMakeRange(0, m.length)];
+    [m replaceOccurrencesOfString:@"_" withString:@"/" options:0 range:NSMakeRange(0, m.length)];
+    while (m.length % 4)
+        [m appendString:@"="];
+    return [[NSData alloc] initWithBase64EncodedString:m options:0];
+}
+
+// Đọc + kiểm license: chữ ký ECDSA-P256-SHA256 hợp lệ, đúng UDID máy, chưa hết
+// hạn. Đặt gLicenseValid/gLicenseToken/gLicenseExpiry. Gọi lúc khởi động và khi
+// `relicense`.
+static void tvLicenseLoad(void) {
+    gLicenseValid = NO;
+    gLicenseToken = nil;
+    gLicenseExpiry = 0;
+
+    NSString *lic = [[NSString stringWithContentsOfFile:tvLicensePath()
+                                               encoding:NSUTF8StringEncoding
+                                                  error:NULL]
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (lic.length == 0) {
+        TVLog(@"License: chưa có file %@", tvLicensePath());
+        return;
+    }
+    NSArray<NSString *> *parts = [lic componentsSeparatedByString:@"."];
+    if (parts.count != 2) {
+        TVLog(@"License: sai định dạng");
+        return;
+    }
+    NSData *payload = tvB64UrlDecode(parts[0]);
+    NSData *sig = tvB64UrlDecode(parts[1]);
+    if (!payload || !sig) {
+        TVLog(@"License: base64 hỏng");
+        return;
+    }
+
+    NSData *keyData = [NSData dataWithBytes:kLicensePubKey length:sizeof(kLicensePubKey)];
+    NSDictionary *attrs = @{
+        (id)kSecAttrKeyType : (id)kSecAttrKeyTypeECSECPrimeRandom,
+        (id)kSecAttrKeyClass : (id)kSecAttrKeyClassPublic,
+        (id)kSecAttrKeySizeInBits : @256,
+    };
+    SecKeyRef pub = SecKeyCreateWithData((__bridge CFDataRef)keyData,
+                                         (__bridge CFDictionaryRef)attrs, NULL);
+    if (!pub) {
+        TVLog(@"License: dựng khoá công khai lỗi");
+        return;
+    }
+    BOOL sigOK = SecKeyVerifySignature(pub, kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
+                                       (__bridge CFDataRef)payload, (__bridge CFDataRef)sig, NULL);
+    CFRelease(pub);
+    if (!sigOK) {
+        TVLog(@"License: chữ ký KHÔNG hợp lệ");
+        return;
+    }
+
+    NSDictionary *p = [NSJSONSerialization JSONObjectWithData:payload options:0 error:NULL];
+    if (![p isKindOfClass:[NSDictionary class]]) {
+        TVLog(@"License: payload lỗi");
+        return;
+    }
+    NSString *udid = p[@"udid"];
+    long long exp = [p[@"exp"] longLongValue];
+    NSString *tok = p[@"tok"];
+    NSString *devUDID = tvDeviceUDID();
+    if (udid.length == 0 || ![udid isEqualToString:devUDID]) {
+        TVLog(@"License: sai UDID (license=%@, máy=%@)", udid, devUDID);
+        return;
+    }
+    if (exp != 0 && (long long)time(NULL) > exp) {
+        TVLog(@"License: đã hết hạn (%lld)", exp);
+        return;
+    }
+
+    gLicenseValid = YES;
+    gLicenseToken = [tok copy];
+    gLicenseExpiry = exp;
+    // "Khoá có ích": token control lấy TỪ license. Thiếu license hợp lệ thì không
+    // có token đúng -> PC không điều khiển được kể cả khi patch phần kiểm.
+    if (tok.length > 0)
+        gTvCtlToken = [tok copy];
+    TVLog(@"License: HỢP LỆ (UDID khớp, hạn=%lld)", exp);
+}
+
+// `license` — trả trạng thái kích hoạt (cho phép kể cả khi CHƯA kích hoạt để app
+// hiện UDID + trạng thái).
+static NSData *tvCtlLicenseStatus(void) {
+    NSString *udid = tvDeviceUDID() ?: @"";
+    NSString *s = gLicenseValid
+        ? [NSString stringWithFormat:@"OK valid exp=%lld udid=%@\n", gLicenseExpiry, udid]
+        : [NSString stringWithFormat:@"OK invalid udid=%@\n", udid];
+    return [s dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - App data reset
 
 // mobile chạy uid/gid 501 trên iOS. File do root chép vào container phải được
@@ -4791,6 +4929,30 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // coming from outside the device must present the token. Loopback keeps
     // working without one so the on-device TrollVNC app is unaffected.
     BOOL isLoopback = (caddr.sin_addr.s_addr == htonl(INADDR_LOOPBACK));
+
+    // Kích hoạt bản quyền. Cho phép `license` (hỏi trạng thái) và `relicense`
+    // (nạp lại sau khi app ghi file license) KỂ CẢ khi chưa kích hoạt — để app
+    // kích hoạt được. Mọi lệnh khác đòi license hợp lệ.
+    if ([cmd isEqualToString:@"license"]) {
+        NSData *st = tvCtlLicenseStatus();
+        tvCtlWriteAll(cfd, st.bytes, st.length);
+        close(cfd);
+        return;
+    }
+    if ([cmd isEqualToString:@"relicense"]) {
+        tvLicenseLoad();
+        NSData *st = tvCtlLicenseStatus();
+        tvCtlWriteAll(cfd, st.bytes, st.length);
+        close(cfd);
+        return;
+    }
+    if (!gLicenseValid) {
+        const char *deny = "ERR NotActivated\n";
+        tvCtlWriteAll(cfd, deny, strlen(deny));
+        close(cfd);
+        return;
+    }
+
     if (!isLoopback && cmd.length > 0) {
         NSString *prefix =
             gTvCtlToken.length > 0 ? [NSString stringWithFormat:@"auth %@ ", gTvCtlToken] : nil;
@@ -5081,6 +5243,11 @@ static void clientGoneHook(rfbClientPtr cl) {
 }
 
 static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
+    // Gác cổng bản quyền: chưa kích hoạt (sai/thiếu/hết hạn license) thì từ chối.
+    if (!gLicenseValid) {
+        TVLog(@"VNC: từ chối client — chưa kích hoạt bản quyền");
+        return RFB_CLIENT_REFUSE;
+    }
     cl->clientGoneHook = clientGoneHook;
     if (!cl->viewOnly && gViewOnly)
         cl->viewOnly = TRUE;
@@ -5782,6 +5949,11 @@ static void tvStopRfbEventThread(void) {
 }
 
 static void initializeAndRunRfbServer(void) {
+    // Kiểm license TRƯỚC khi mở server. Không hợp lệ thì newClientHook từ chối mọi
+    // client VNC và control socket chỉ trả "ERR NotActivated".
+    tvLicenseLoad();
+    TVLog(@"License: %@ (máy %@)", gLicenseValid ? @"đã kích hoạt" : @"CHƯA kích hoạt",
+          tvDeviceUDID() ?: @"?");
     rfbInitServer(gScreen);
     TVLog(@"VNC server initialized on port %d, %dx%d, name '%@'", gPort, gWidth, gHeight, gDesktopName);
 

@@ -1052,3 +1052,172 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
 }
 
 @end
+
+#pragma mark - Activation (kích hoạt bản quyền)
+
+static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/license.dat";
+
+@interface TVNCActivationController ()
+@property(nonatomic, copy) NSString *udid;
+@property(nonatomic, copy) NSString *statusLine;
+@end
+
+@implementation TVNCActivationController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Kích hoạt";
+    self.udid = @"";
+    self.statusLine = @"Đang kiểm tra…";
+    UIRefreshControl *rc = [UIRefreshControl new];
+    [rc addTarget:self action:@selector(refresh) forControlEvents:UIControlEventValueChanged];
+    self.refreshControl = rc;
+    [self refresh];
+}
+
+// Hỏi daemon: "OK valid exp=<epoch> udid=<udid>" hoặc "OK invalid udid=<udid>".
+- (void)refresh {
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *reply = TVNCRunCommand(@"license", 4.0) ?: @"";
+        NSString *udid = @"";
+        NSString *status = @"Không đọc được trạng thái (daemon chưa chạy?)";
+        for (NSString *field in [reply componentsSeparatedByCharactersInSet:
+                                            [NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+            if ([field hasPrefix:@"udid="])
+                udid = [field substringFromIndex:5];
+        }
+        BOOL activated = [reply containsString:@"valid"] && ![reply containsString:@"invalid"];
+        if (activated) {
+            long long exp = 0;
+            for (NSString *field in [reply componentsSeparatedByString:@" "])
+                if ([field hasPrefix:@"exp="])
+                    exp = [[field substringFromIndex:4] longLongValue];
+            if (exp == 0) {
+                status = @"✓ Đã kích hoạt — vĩnh viễn";
+            } else {
+                NSDateFormatter *f = [NSDateFormatter new];
+                f.dateFormat = @"dd/MM/yyyy";
+                status = [NSString stringWithFormat:@"✓ Đã kích hoạt — hạn %@",
+                          [f stringFromDate:[NSDate dateWithTimeIntervalSince1970:exp]]];
+            }
+        } else if ([reply containsString:@"invalid"]) {
+            status = @"✗ Chưa kích hoạt";
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.udid = udid;
+            self.statusLine = status;
+            [self.refreshControl endRefreshing];
+            [self.tableView reloadData];
+        });
+    });
+}
+
+- (NSInteger)numberOfSectionsInTableView:(UITableView *)tableView {
+    return 3; // UDID · trạng thái · kích hoạt
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return 1;
+}
+
+- (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
+    if (section == 0)
+        return @"UDID máy này (gửi cho người bán để lấy key)";
+    if (section == 1)
+        return @"Trạng thái";
+    return @"Kích hoạt";
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:@"c"];
+    if (!cell)
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"c"];
+    cell.textLabel.numberOfLines = 0;
+    cell.accessoryType = UITableViewCellAccessoryNone;
+    cell.selectionStyle = UITableViewCellSelectionStyleDefault;
+    if (indexPath.section == 0) {
+        cell.textLabel.text = self.udid.length ? self.udid : @"(không đọc được)";
+        cell.textLabel.textColor = [UIColor labelColor];
+    } else if (indexPath.section == 1) {
+        cell.textLabel.text = self.statusLine;
+        cell.textLabel.textColor =
+            [self.statusLine hasPrefix:@"✓"] ? [UIColor systemGreenColor] : [UIColor systemOrangeColor];
+        cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    } else {
+        cell.textLabel.text = @"Dán license & kích hoạt…";
+        cell.textLabel.textColor = self.primaryColor ?: [UIColor labelColor];
+    }
+    return cell;
+}
+
+- (void)tableView:(UITableView *)tableView didSelectRowAtIndexPath:(NSIndexPath *)indexPath {
+    [tableView deselectRowAtIndexPath:indexPath animated:YES];
+    if (indexPath.section == 0 && self.udid.length) {
+        [UIPasteboard generalPasteboard].string = self.udid;
+        [self alert:@"Đã chép UDID" message:self.udid];
+    } else if (indexPath.section == 2) {
+        [self promptActivate];
+    }
+}
+
+- (void)promptActivate {
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"Kích hoạt"
+                                            message:@"Dán chuỗi license người bán cấp:"
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addTextFieldWithConfigurationHandler:^(UITextField *tf) {
+        tf.placeholder = @"license…";
+        tf.autocapitalizationType = UITextAutocapitalizationTypeNone;
+        tf.autocorrectionType = UITextAutocorrectionTypeNo;
+    }];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Kích hoạt"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction *a) {
+        NSString *lic = [alert.textFields.firstObject.text
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        [self activateWith:lic];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)activateWith:(NSString *)license {
+    if (license.length == 0)
+        return;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:[kTVNCLicensePath stringByDeletingLastPathComponent]
+  withIntermediateDirectories:YES
+                   attributes:nil
+                        error:NULL];
+    NSError *werr = nil;
+    BOOL wrote = [license writeToFile:kTVNCLicensePath
+                          atomically:YES
+                            encoding:NSUTF8StringEncoding
+                               error:&werr];
+    if (!wrote) {
+        [self alert:@"Lỗi"
+            message:[NSString stringWithFormat:@"Không ghi được file license: %@",
+                                               werr.localizedDescription ?: @"?"]];
+        return;
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSString *reply = TVNCRunCommand(@"relicense", 5.0) ?: @"";
+        BOOL ok = [reply containsString:@"valid"] && ![reply containsString:@"invalid"];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [self refresh];
+            [self alert:(ok ? @"Thành công" : @"Chưa kích hoạt được")
+                message:(ok ? @"License hợp lệ. Nếu đang mở phiên VNC, respring cho chắc."
+                            : @"Không hợp lệ / sai UDID / hết hạn. Kiểm tra lại key.")];
+        });
+    });
+}
+
+- (void)alert:(NSString *)title message:(NSString *)message {
+    UIAlertController *a = [UIAlertController alertControllerWithTitle:title
+                                                              message:message
+                                                       preferredStyle:UIAlertControllerStyleAlert];
+    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:a animated:YES completion:nil];
+}
+
+@end

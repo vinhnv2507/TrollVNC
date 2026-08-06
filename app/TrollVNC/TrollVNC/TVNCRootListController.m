@@ -292,8 +292,14 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                                                   action:@selector(showAppData)];
     appDataItem.tintColor = _primaryColor;
 
+    UIBarButtonItem *activationItem = [[UIBarButtonItem alloc] initWithTitle:@"Kích hoạt"
+                                                                      style:UIBarButtonItemStylePlain
+                                                                     target:self
+                                                                     action:@selector(showActivation)];
+    activationItem.tintColor = _primaryColor;
+
     if ([self hasManagedConfiguration]) {
-        self.navigationItem.rightBarButtonItem = appDataItem;
+        self.navigationItem.rightBarButtonItems = @[ appDataItem, activationItem ];
         return;
     }
 
@@ -319,13 +325,14 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
     BOOL isPad = ([UIDevice currentDevice].userInterfaceIdiom == UIUserInterfaceIdiomPad);
     if (isApp || isPad) {
-        self.navigationItem.leftBarButtonItems = @[ clientsItem, appDataItem ];
+        self.navigationItem.leftBarButtonItems = @[ clientsItem, appDataItem, activationItem ];
         self.navigationItem.rightBarButtonItem = applyItem;
     } else {
         self.navigationItem.rightBarButtonItems = @[
             applyItem,
             clientsItem,
             appDataItem,
+            activationItem,
         ];
     }
 
@@ -363,6 +370,14 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     vc.bundle = self.bundle;
     vc.primaryColor = self.primaryColor;
     vc.notificationGenerator = self.notificationGenerator;
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.navigationController presentViewController:navController animated:YES completion:nil];
+}
+
+- (void)showActivation {
+    TVNCActivationController *vc =
+        [[TVNCActivationController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    vc.primaryColor = self.primaryColor;
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
     [self.navigationController presentViewController:navController animated:YES completion:nil];
 }

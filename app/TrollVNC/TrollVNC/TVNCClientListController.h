@@ -38,4 +38,12 @@ NS_ASSUME_NONNULL_BEGIN
 
 @end
 
+/// Kích hoạt bản quyền: hiện UDID máy (gửi cho người bán) + trạng thái, dán key
+/// license vào để kích hoạt. App ghi file license rồi bảo daemon nạp lại.
+@interface TVNCActivationController : UITableViewController
+
+@property(nonatomic, strong) UIColor *primaryColor;
+
+@end
+
 NS_ASSUME_NONNULL_END

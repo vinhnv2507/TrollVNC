@@ -80,6 +80,7 @@ trollvncserver_FRAMEWORKS += Foundation
 trollvncserver_FRAMEWORKS += IOKit
 trollvncserver_FRAMEWORKS += IOSurface
 trollvncserver_FRAMEWORKS += QuartzCore
+trollvncserver_FRAMEWORKS += Security
 trollvncserver_FRAMEWORKS += UIKit
 trollvncserver_FRAMEWORKS += UserNotifications
 trollvncserver_FRAMEWORKS += Photos
