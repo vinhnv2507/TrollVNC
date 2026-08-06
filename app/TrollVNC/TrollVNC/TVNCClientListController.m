@@ -1254,10 +1254,13 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
     hint.numberOfLines = 0;
     hint.font = [UIFont systemFontOfSize:12];
     hint.textColor = [UIColor secondaryLabelColor];
-    hint.text = @"Toạ độ theo TỈ LỆ 0..1. Lệnh: tap x y · doubletap x y · longpress x y · "
-                @"swipe x1 y1 x2 y2 [giây] · wait giây (hoặc a-b) · home · key <ký tự>. "
-                @"Cả kịch bản LẶP tới khi Dừng. Chạy trong nền, tác động app đang mở. "
-                @"Mẹo: tìm toạ độ chính xác trên khung VNC ở PC (góc dưới hiện tỉ lệ).";
+    hint.text = @"Toạ độ TỈ LỆ 0..1. Lệnh: tap x y (hoặc tap x1 y1 x2 y2 = ngẫu nhiên trong "
+                @"vùng) · doubletap · twofinger · threefinger · longpress x y [giây] · "
+                @"swipe x1 y1 x2 y2 [giây] · wait giây/a-b · home · key k · text nội dung. "
+                @"Vòng lặp: loop N … end (N=0 hoặc bỏ trống = vô hạn). Theo MÀU: "
+                @"ifcolor x y RRGGBB [sai] … end · ifnotcolor · waitcolor x y RRGGBB [giây] · "
+                @"stopifcolor · stop. Chạy MỘT lượt — muốn lặp thì bọc trong loop. "
+                @"Mẹo: lấy toạ độ chính xác trên khung VNC ở PC (góc dưới hiện tỉ lệ).";
     hint.translatesAutoresizingMaskIntoConstraints = NO;
 
     self.editor = [UITextView new];
@@ -1312,7 +1315,8 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
         }
         dispatch_async(dispatch_get_main_queue(), ^{
             if (self.editor.text.length == 0)
-                self.editor.text = script.length ? script : @"# ví dụ:\ntap 0.5 0.9\nwait 2\n";
+                self.editor.text = script.length ? script
+                    : @"# ví dụ: chạm giữa-dưới mỗi 1–3 giây, lặp mãi\nloop 0\n  tap 0.5 0.9\n  wait 1-3\nend\n";
         });
     });
 }

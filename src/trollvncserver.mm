@@ -4420,6 +4420,11 @@ static NSData *tvCtlOpenURL(NSString *urlString) {
 
 #pragma mark - License (kích hoạt bản quyền)
 
+// Bật/tắt GÁC CỔNG bản quyền. 0 = KHÔNG gác (để TEST tự do), 1 = bắt buộc
+// license hợp lệ mới phục vụ. License vẫn được đọc/hiển thị khi = 0, chỉ không
+// chặn. Khi hoàn thiện đổi thành 1.
+#define CIOS_ENFORCE_LICENSE 0
+
 // KHOÁ CÔNG KHAI của bạn (65 byte, 04||X||Y). Sinh bằng
 // `tools/controlios_keygen.py genkeys` rồi DÁN mảng đó vào đây. Khoá riêng đi kèm
 // (controlios_private.pem) GIỮ BÍ MẬT — mất nó là ai cũng chế được license.
@@ -4531,10 +4536,12 @@ static void tvLicenseLoad(void) {
     gLicenseValid = YES;
     gLicenseToken = [tok copy];
     gLicenseExpiry = exp;
+#if CIOS_ENFORCE_LICENSE
     // "Khoá có ích": token control lấy TỪ license. Thiếu license hợp lệ thì không
     // có token đúng -> PC không điều khiển được kể cả khi patch phần kiểm.
     if (tok.length > 0)
         gTvCtlToken = [tok copy];
+#endif
     TVLog(@"License: HỢP LỆ (UDID khớp, hạn=%lld)", exp);
 }
 
@@ -4582,45 +4589,158 @@ static void tvAutoSleep(double sec) {
     }
 }
 
-static void tvAutoRunLine(NSString *line, STHIDEventGenerator *gen) {
-    NSMutableArray<NSString *> *a = [NSMutableArray array];
-    for (NSString *s in [line componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]])
-        if (s.length)
-            [a addObject:s];
-    if (a.count == 0)
-        return;
-    NSString *op = [a[0] lowercaseString];
-    double (^n)(NSUInteger) = ^double(NSUInteger i) { return i < a.count ? [a[i] doubleValue] : 0.0; };
+// ---- Dò MÀU điểm ảnh (đọc thẳng framebuffer đang phục vụ VNC) ----
+static BOOL tvSampleColor(double rx, double ry, uint8_t *oR, uint8_t *oG, uint8_t *oB) {
+    if (!gScreen || !gScreen->frameBuffer || gWidth <= 0 || gHeight <= 0)
+        return NO;
+    int x = (int)(rx * (gWidth - 1)), y = (int)(ry * (gHeight - 1));
+    if (x < 0) x = 0;
+    if (x >= gWidth) x = gWidth - 1;
+    if (y < 0) y = 0;
+    if (y >= gHeight) y = gHeight - 1;
+    rfbPixelFormat *f = &gScreen->serverFormat;
+    int bpp = f->bitsPerPixel / 8;
+    if (bpp < 3)
+        return NO;
+    uint8_t *px = (uint8_t *)gScreen->frameBuffer + (size_t)y * gScreen->paddedWidthInBytes + (size_t)x * bpp;
+    uint32_t pixel = 0;
+    memcpy(&pixel, px, bpp > 4 ? 4 : bpp);
+    int rmax = f->redMax ? f->redMax : 255;
+    int gmax = f->greenMax ? f->greenMax : 255;
+    int bmax = f->blueMax ? f->blueMax : 255;
+    *oR = (uint8_t)(((pixel >> f->redShift) & f->redMax) * 255 / rmax);
+    *oG = (uint8_t)(((pixel >> f->greenShift) & f->greenMax) * 255 / gmax);
+    *oB = (uint8_t)(((pixel >> f->blueShift) & f->blueMax) * 255 / bmax);
+    return YES;
+}
 
-    if ([op isEqualToString:@"tap"] && a.count >= 3) {
-        [gen tap:tvAutoPoint(n(1), n(2))];
-    } else if ([op isEqualToString:@"doubletap"] && a.count >= 3) {
-        [gen doubleTap:tvAutoPoint(n(1), n(2))];
-    } else if ([op isEqualToString:@"longpress"] && a.count >= 3) {
-        [gen longPress:tvAutoPoint(n(1), n(2))];
-    } else if ([op isEqualToString:@"swipe"] && a.count >= 5) {
-        double dur = a.count >= 6 ? n(5) : 0.3;
-        [gen dragLinearWithStartPoint:tvAutoPoint(n(1), n(2))
-                             endPoint:tvAutoPoint(n(3), n(4))
+// args = x y RRGGBB [tol] : điểm (rx,ry) có màu gần RRGGBB trong dung sai không.
+static BOOL tvColorMatches(NSArray<NSString *> *a) {
+    if (a.count < 3)
+        return NO;
+    unsigned int hex = 0;
+    [[NSScanner scannerWithString:a[2]] scanHexInt:&hex];
+    int tr = (hex >> 16) & 0xff, tg = (hex >> 8) & 0xff, tb = hex & 0xff;
+    int tol = a.count >= 4 ? [a[3] intValue] : 12;
+    uint8_t r, g, b;
+    if (!tvSampleColor([a[0] doubleValue], [a[1] doubleValue], &r, &g, &b))
+        return NO;
+    return abs((int)r - tr) <= tol && abs((int)g - tg) <= tol && abs((int)b - tb) <= tol;
+}
+
+// Lệnh đơn (không phải khối). a = tham số SAU op.
+static void tvAutoLeaf(NSString *op, NSArray<NSString *> *a, STHIDEventGenerator *gen) {
+    double (^n)(NSUInteger) = ^double(NSUInteger i) { return i < a.count ? [a[i] doubleValue] : 0.0; };
+    double (^rnd)(double, double) = ^double(double lo, double hi) {
+        return lo + ((double)arc4random() / UINT32_MAX) * (hi > lo ? (hi - lo) : 0);
+    };
+
+    if ([op isEqualToString:@"tap"]) {
+        if (a.count >= 4) // vùng ngẫu nhiên x1 y1 x2 y2 (nhân bản hoá)
+            [gen tap:tvAutoPoint(rnd(n(0), n(2)), rnd(n(1), n(3)))];
+        else if (a.count >= 2)
+            [gen tap:tvAutoPoint(n(0), n(1))];
+    } else if ([op isEqualToString:@"doubletap"] && a.count >= 2) {
+        [gen doubleTap:tvAutoPoint(n(0), n(1))];
+    } else if ([op isEqualToString:@"twofinger"] && a.count >= 2) {
+        [gen twoFingerTap:tvAutoPoint(n(0), n(1))];
+    } else if ([op isEqualToString:@"threefinger"] && a.count >= 2) {
+        [gen threeFingerTap:tvAutoPoint(n(0), n(1))];
+    } else if ([op isEqualToString:@"longpress"] && a.count >= 2) {
+        double dur = a.count >= 3 ? n(2) : 0.6;
+        CGPoint p = tvAutoPoint(n(0), n(1));
+        [gen touchDown:p];
+        tvAutoSleep(dur);
+        [gen liftUp:p];
+    } else if ([op isEqualToString:@"swipe"] && a.count >= 4) {
+        double dur = a.count >= 5 ? n(4) : 0.3;
+        [gen dragLinearWithStartPoint:tvAutoPoint(n(0), n(1))
+                             endPoint:tvAutoPoint(n(2), n(3))
                              duration:dur];
     } else if ([op isEqualToString:@"home"]) {
         [gen menuPress];
-    } else if ([op isEqualToString:@"key"] && a.count >= 2) {
-        [gen keyPress:a[1]];
-    } else if ([op isEqualToString:@"wait"] && a.count >= 2) {
-        NSString *w = a[1];
+    } else if ([op isEqualToString:@"key"] && a.count >= 1) {
+        [gen keyPress:a[0]];
+    } else if ([op isEqualToString:@"text"] && a.count >= 1) {
+        NSString *s = [a componentsJoinedByString:@" "];
+        for (NSUInteger i = 0; i < s.length; i++) {
+            if (gAutoStop.load())
+                return;
+            [gen keyPress:[s substringWithRange:NSMakeRange(i, 1)]];
+        }
+    } else if ([op isEqualToString:@"wait"] && a.count >= 1) {
+        NSString *w = a[0];
         NSRange dash = [w rangeOfString:@"-"];
         double sec;
-        if (dash.location != NSNotFound && dash.location > 0) {
-            double lo = [[w substringToIndex:dash.location] doubleValue];
-            double hi = [[w substringFromIndex:dash.location + 1] doubleValue];
-            sec = lo + ((double)arc4random() / UINT32_MAX) * (hi > lo ? (hi - lo) : 0);
-        } else {
+        if (dash.location != NSNotFound && dash.location > 0)
+            sec = rnd([[w substringToIndex:dash.location] doubleValue],
+                      [[w substringFromIndex:dash.location + 1] doubleValue]);
+        else
             sec = [w doubleValue];
-        }
         tvAutoSleep(sec);
+    } else if ([op isEqualToString:@"waitcolor"] && a.count >= 3) {
+        // x y RRGGBB [giây] [tol] : chờ tới khi điểm có màu đó (hoặc quá giờ).
+        double timeout = a.count >= 4 ? n(3) : 10.0;
+        NSArray *ca = @[ a[0], a[1], a[2], a.count >= 5 ? a[4] : @"12" ];
+        double waited = 0;
+        while (waited < timeout && !gAutoStop.load()) {
+            if (tvColorMatches(ca))
+                break;
+            usleep(100000);
+            waited += 0.1;
+        }
+    } else if ([op isEqualToString:@"stopifcolor"] && a.count >= 3) {
+        if (tvColorMatches(a))
+            gAutoStop.store(true);
+    } else if ([op isEqualToString:@"stop"]) {
+        gAutoStop.store(true);
     }
-    // dòng lạ: bỏ qua (giữ vòng lặp sống)
+    // op lạ: bỏ qua
+}
+
+// Phân tích khối lệnh tới `end` (loop / ifcolor / ifnotcolor). *i trỏ qua `end`.
+static NSArray *tvAutoParse(NSArray<NSArray<NSString *> *> *lines, NSUInteger *i) {
+    NSMutableArray *out = [NSMutableArray array];
+    while (*i < lines.count) {
+        NSArray<NSString *> *w = lines[*i];
+        NSString *op = [w[0] lowercaseString];
+        if ([op isEqualToString:@"end"]) {
+            (*i)++;
+            break;
+        }
+        (*i)++;
+        NSArray *args = w.count > 1 ? [w subarrayWithRange:NSMakeRange(1, w.count - 1)] : @[];
+        if ([op isEqualToString:@"loop"] || [op isEqualToString:@"ifcolor"] ||
+            [op isEqualToString:@"ifnotcolor"]) {
+            NSArray *body = tvAutoParse(lines, i);
+            [out addObject:@{@"op" : op, @"args" : args, @"body" : body}];
+        } else {
+            [out addObject:@{@"op" : op, @"args" : args}];
+        }
+    }
+    return out;
+}
+
+static void tvAutoExec(NSArray *nodes, STHIDEventGenerator *gen) {
+    for (NSDictionary *node in nodes) {
+        if (gAutoStop.load())
+            return;
+        NSString *op = node[@"op"];
+        NSArray<NSString *> *a = node[@"args"];
+        if ([op isEqualToString:@"loop"]) {
+            long count = a.count >= 1 ? [a[0] longLongValue] : 0; // 0/thiếu = vô hạn
+            for (long k = 0; (count <= 0 || k < count) && !gAutoStop.load(); k++)
+                tvAutoExec(node[@"body"], gen);
+        } else if ([op isEqualToString:@"ifcolor"] || [op isEqualToString:@"ifnotcolor"]) {
+            BOOL m = tvColorMatches(a);
+            if (m == [op isEqualToString:@"ifcolor"])
+                tvAutoExec(node[@"body"], gen);
+        } else {
+            tvAutoLeaf(op, a, gen);
+            if (!gAutoStop.load())
+                tvAutoSleep(0.03); // nhịp nhỏ giữa lệnh
+        }
+    }
 }
 
 static void tvAutoStart(void) {
@@ -4634,32 +4754,28 @@ static void tvAutoStart(void) {
         gAutoQueue = dispatch_queue_create("com.controlios.autoclick", DISPATCH_QUEUE_SERIAL);
     dispatch_async(gAutoQueue, ^{
         @autoreleasepool {
-            NSArray<NSString *> *lines =
-                [script componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+            // Token hoá: mỗi dòng -> mảng từ (bỏ dòng trống / chú thích #).
+            NSMutableArray<NSArray<NSString *> *> *lines = [NSMutableArray array];
+            for (NSString *raw in
+                 [script componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]]) {
+                NSString *ln = [raw stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+                if (ln.length == 0 || [ln hasPrefix:@"#"])
+                    continue;
+                NSMutableArray<NSString *> *w = [NSMutableArray array];
+                for (NSString *t in [ln componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]])
+                    if (t.length)
+                        [w addObject:t];
+                if (w.count)
+                    [lines addObject:w];
+            }
+            NSUInteger i = 0;
+            NSArray *program = tvAutoParse(lines, &i);
             STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
             gAutoRunning.store(true);
-            TVLog(@"Auto-click: bắt đầu (%lu dòng)", (unsigned long)lines.count);
-            while (!gAutoStop.load()) {
-                BOOL didSomething = NO;
-                for (NSString *raw in lines) {
-                    if (gAutoStop.load())
-                        break;
-                    NSString *line = [raw stringByTrimmingCharactersInSet:
-                                              [NSCharacterSet whitespaceCharacterSet]];
-                    if (line.length == 0 || [line hasPrefix:@"#"])
-                        continue;
-                    @autoreleasepool {
-                        tvAutoRunLine(line, gen);
-                    }
-                    didSomething = YES;
-                    if (!gAutoStop.load())
-                        tvAutoSleep(0.05); // nhịp nhỏ giữa lệnh
-                }
-                if (!didSomething)
-                    tvAutoSleep(0.5); // script không có lệnh chạy được -> đừng quay nóng
-            }
+            TVLog(@"Auto-click: chạy (%lu dòng)", (unsigned long)lines.count);
+            tvAutoExec(program, gen); // chạy MỘT lượt; lặp thì dùng `loop 0 ... end`
             gAutoRunning.store(false);
-            TVLog(@"Auto-click: đã dừng");
+            TVLog(@"Auto-click: xong/dừng");
         }
     });
 }
@@ -5086,7 +5202,7 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         close(cfd);
         return;
     }
-    if (!gLicenseValid) {
+    if (CIOS_ENFORCE_LICENSE && !gLicenseValid) {
         const char *deny = "ERR NotActivated\n";
         tvCtlWriteAll(cfd, deny, strlen(deny));
         close(cfd);
@@ -5409,7 +5525,7 @@ static void clientGoneHook(rfbClientPtr cl) {
 
 static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
     // Gác cổng bản quyền: chưa kích hoạt (sai/thiếu/hết hạn license) thì từ chối.
-    if (!gLicenseValid) {
+    if (CIOS_ENFORCE_LICENSE && !gLicenseValid) {
         TVLog(@"VNC: từ chối client — chưa kích hoạt bản quyền");
         return RFB_CLIENT_REFUSE;
     }
