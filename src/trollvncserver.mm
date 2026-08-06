@@ -3926,27 +3926,45 @@ static NSData *tvCtlLaunchApp(NSString *bundleId) {
         return [@"ERR MissingBundleID\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     BOOL ok = NO;
-    LSApplicationWorkspace *ws = tvAppWorkspace();
-    if ([ws respondsToSelector:@selector(openApplicationWithBundleID:)])
-        ok = [ws openApplicationWithBundleID:bundleId];
+    int sbsErr = -1; // mã lỗi SpringBoardServices gần nhất (để chẩn đoán)
 
-    if (!ok) {
-        // Fallback: SpringBoardServices. The launchapplications entitlement is
-        // already present in TrollVNC.entitlements.
-        void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
-                         "SpringBoardServices",
-                         RTLD_LAZY);
-        if (h) {
+    // 1) SpringBoardServices — đường đáng tin nhất khi gọi từ daemon root. Ưu
+    //    tiên bản CÓ launch options (iOS mới trả lỗi với bản không options).
+    //    entitlement com.apple.springboard.launchapplications đã có sẵn.
+    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                     "SpringBoardServices",
+                     RTLD_LAZY);
+    if (h) {
+        int (*sbsLaunchOpts)(CFStringRef, CFDictionaryRef, Boolean) =
+            (int (*)(CFStringRef, CFDictionaryRef, Boolean))dlsym(
+                h, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
+        if (sbsLaunchOpts) {
+            sbsErr = sbsLaunchOpts((__bridge CFStringRef)bundleId, NULL, false);
+            ok = (sbsErr == 0);
+        }
+        if (!ok) {
             int (*sbsLaunch)(CFStringRef, Boolean) =
                 (int (*)(CFStringRef, Boolean))dlsym(h, "SBSLaunchApplicationWithIdentifier");
-            if (sbsLaunch)
-                ok = (sbsLaunch((__bridge CFStringRef)bundleId, false) == 0);
+            if (sbsLaunch) {
+                sbsErr = sbsLaunch((__bridge CFStringRef)bundleId, false);
+                ok = (sbsErr == 0);
+            }
         }
     }
 
-    TVLog(@"Control socket: launch %@ -> %@", bundleId, ok ? @"OK" : @"FAIL");
-    const char *raw = ok ? "OK\n" : "ERR LaunchFailed\n";
-    return [NSData dataWithBytes:raw length:strlen(raw)];
+    // 2) Fallback: LSApplicationWorkspace (đôi khi trả NO dù đã mở, nên để sau).
+    if (!ok) {
+        LSApplicationWorkspace *ws = tvAppWorkspace();
+        if ([ws respondsToSelector:@selector(openApplicationWithBundleID:)])
+            ok = [ws openApplicationWithBundleID:bundleId];
+    }
+
+    TVLog(@"Control socket: launch %@ -> %@ (sbsErr=%d)", bundleId, ok ? @"OK" : @"FAIL", sbsErr);
+    if (ok)
+        return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    // Kèm mã lỗi SBS để biết vì sao (vd not-found, permission, đã chạy...).
+    NSString *msg = [NSString stringWithFormat:@"ERR LaunchFailed sbs=%d\n", sbsErr];
+    return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 static NSData *tvCtlTerminateApp(NSString *bundleId) {
