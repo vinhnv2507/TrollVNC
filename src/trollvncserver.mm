@@ -4870,6 +4870,24 @@ static NSString *tvHttpRequest(NSString *method, NSString *urlStr, NSString *bod
     return result;
 }
 
+// Chạm cấp thấp GIỐNG HỆT đường VNC (touchDownAtPoints/liftUpAtPoints) — KHÔNG
+// dùng -[STHIDEventGenerator tap:] vì nó gọi _sendTaps với delayBetweenTaps:0,
+// vướng NSParameterAssert(delay > 0.0) → ném exception (chạm không tới nơi, có
+// thể làm sập daemon khiến phiên VNC nối lại/màn đen). Đây là bộ HID mà điều
+// khiển VNC đang dùng nên chắc chắn hoạt động.
+static void tvAutoTap(STHIDEventGenerator *gen, CGPoint p, NSUInteger fingers) {
+    if (fingers < 1)
+        fingers = 1;
+    if (fingers > 3)
+        fingers = 3;
+    CGPoint pts[3];
+    for (NSUInteger i = 0; i < fingers; i++)
+        pts[i] = CGPointMake(p.x + (CGFloat)(i * 24), p.y); // nhiều ngón: tách điểm
+    [gen touchDownAtPoints:pts touchCount:fingers];
+    usleep(60000); // giữ 60ms cho hệ nhận là một cú chạm
+    [gen liftUpAtPoints:pts touchCount:fingers];
+}
+
 // Cài API native cho JS (kiểu AutoTouch). gen bắt trong block.
 static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
@@ -4896,25 +4914,28 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx[@"screenHeight"] = ^int { return gSrcHeight; };
 
     ctx[@"tap"] = ^(double x, double y) {
-        [gen tap:tvAutoPoint(x, y)];
+        tvAutoTap(gen, tvAutoPoint(x, y), 1);
         tvJSStopIfNeeded();
     };
     ctx[@"tapRegion"] = ^(double x1, double y1, double x2, double y2) {
         double rx = x1 + ((double)arc4random() / UINT32_MAX) * (x2 - x1);
         double ry = y1 + ((double)arc4random() / UINT32_MAX) * (y2 - y1);
-        [gen tap:tvAutoPoint(rx, ry)];
+        tvAutoTap(gen, tvAutoPoint(rx, ry), 1);
         tvJSStopIfNeeded();
     };
     ctx[@"doubleTap"] = ^(double x, double y) {
-        [gen doubleTap:tvAutoPoint(x, y)];
+        CGPoint p = tvAutoPoint(x, y);
+        tvAutoTap(gen, p, 1);
+        usleep(120000);
+        tvAutoTap(gen, p, 1);
         tvJSStopIfNeeded();
     };
     ctx[@"twoFingerTap"] = ^(double x, double y) {
-        [gen twoFingerTap:tvAutoPoint(x, y)];
+        tvAutoTap(gen, tvAutoPoint(x, y), 2);
         tvJSStopIfNeeded();
     };
     ctx[@"threeFingerTap"] = ^(double x, double y) {
-        [gen threeFingerTap:tvAutoPoint(x, y)];
+        tvAutoTap(gen, tvAutoPoint(x, y), 3);
         tvJSStopIfNeeded();
     };
     ctx[@"longPress"] = ^(double x, double y, double sec) {
