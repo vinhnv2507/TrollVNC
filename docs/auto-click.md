@@ -68,6 +68,32 @@ let q = findImage("/var/mobile/Media/tpl.png", 0,0.5,1,1, 24); // vùng + sai s�
 if (p) tap(p.x, p.y);   // p = {x, y} tỉ lệ tâm, hoặc null nếu không thấy
 ```
 
+**Tìm CHỮ trên màn (OCR + toạ độ)** — mạnh cho tự động theo giao diện
+```js
+let q = findText("Đăng nhập");     // {x,y} tỉ lệ tâm, không phân biệt hoa/thường
+if (q) tap(q.x, q.y);
+tapText("Đăng nhập");              // tìm chữ rồi chạm (1 dòng)
+waitText("Trang chủ", 10);         // chờ tới khi chữ hiện (tối đa 10s)
+```
+**Tiện ích dựng sẵn (prelude)**
+```js
+swipeUp(); swipeDown(); swipeLeft(); swipeRight();   // vuốt theo hướng
+tapImage("/var/mobile/Media/tpl.png");               // tìm ảnh rồi chạm
+waitImage("/var/mobile/Media/tpl.png", 10);          // chờ ảnh hiện
+tapIfColor(0.5, 0.9, "FF3B30", 15);                  // chạm nếu đúng màu
+repeat(5, function(i){ tap(0.5, 0.9); });            // lặp N lần
+retry(3, function(){ return tapText("OK"); });       // thử lại tới khi thành công
+```
+**Biến BỀN / clipboard / ảnh / thời gian / phím cứng**
+```js
+setVar("dem", getVar("dem", 0) + 1);   // lưu qua CÁC LẦN chạy (file vars.json)
+let n = getVar("dem", 0);              // đọc, kèm mặc định
+let c = getClipboard(); setClipboard("abc");  // bảng tạm iOS
+saveScreenshot("/var/mobile/Media/shot.png"); // chụp màn ra PNG
+let t = now();                          // mốc mili-giây (đo thời lượng)
+volumeUp(); volumeDown(); mute(); lockScreen();  // phím cứng
+```
+
 **App / URL / Thông báo**
 ```js
 launchApp("com.zing.zalo");           // mở app theo bundle id
