@@ -4575,6 +4575,7 @@ static NSString *gAutoScript = nil;
 static dispatch_queue_t gAutoQueue = nil;
 static std::atomic<bool> gAutoStop{false};
 static std::atomic<bool> gAutoRunning{false};
+static std::atomic<bool> gAutoTrace{true}; // tự ghi từng lệnh + kết quả vào nhật ký
 
 static NSString *tvAutoScriptPath(void) {
     return @"/var/mobile/Library/controlios/autoscript.txt";
@@ -4647,6 +4648,12 @@ static void tvAutoLog(NSString *msg) {
         while (gAutoLog.count > 250)
             [gAutoLog removeObjectAtIndex:0];
     }
+}
+
+// Ghi trace (từng lệnh) — chỉ khi bật, dùng cho theo dõi tiến trình trên PC.
+static inline void tvTrace(NSString *m) {
+    if (gAutoTrace.load())
+        tvAutoLog(m);
 }
 
 static NSString *tvAutoLogText(void) {
@@ -4897,7 +4904,11 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
             TVLog(@"Auto-JS lỗi: %@", m);
         }
     };
-    ctx[@"sleep"] = ^(double sec) { tvAutoSleep(sec); tvJSStopIfNeeded(); };
+    ctx[@"sleep"] = ^(double sec) {
+        tvTrace([NSString stringWithFormat:@"sleep %.2fs", sec]);
+        tvAutoSleep(sec);
+        tvJSStopIfNeeded();
+    };
     ctx[@"wait"] = ctx[@"sleep"];
     ctx[@"random"] = ^double(double a, double b) {
         return a + ((double)arc4random() / UINT32_MAX) * (b > a ? (b - a) : 0);
@@ -4913,17 +4924,23 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx[@"screenWidth"] = ^int { return gSrcWidth; };
     ctx[@"screenHeight"] = ^int { return gSrcHeight; };
 
+    // Bật/tắt tự ghi trace (mặc định BẬT). setTrace(false) để yên lặng.
+    ctx[@"setTrace"] = ^(BOOL on) { gAutoTrace.store(on); };
+
     ctx[@"tap"] = ^(double x, double y) {
+        tvTrace([NSString stringWithFormat:@"tap %.3f, %.3f", x, y]);
         tvAutoTap(gen, tvAutoPoint(x, y), 1);
         tvJSStopIfNeeded();
     };
     ctx[@"tapRegion"] = ^(double x1, double y1, double x2, double y2) {
         double rx = x1 + ((double)arc4random() / UINT32_MAX) * (x2 - x1);
         double ry = y1 + ((double)arc4random() / UINT32_MAX) * (y2 - y1);
+        tvTrace([NSString stringWithFormat:@"tapRegion -> tap %.3f, %.3f", rx, ry]);
         tvAutoTap(gen, tvAutoPoint(rx, ry), 1);
         tvJSStopIfNeeded();
     };
     ctx[@"doubleTap"] = ^(double x, double y) {
+        tvTrace([NSString stringWithFormat:@"doubleTap %.3f, %.3f", x, y]);
         CGPoint p = tvAutoPoint(x, y);
         tvAutoTap(gen, p, 1);
         usleep(120000);
@@ -4931,14 +4948,17 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
         tvJSStopIfNeeded();
     };
     ctx[@"twoFingerTap"] = ^(double x, double y) {
+        tvTrace([NSString stringWithFormat:@"twoFingerTap %.3f, %.3f", x, y]);
         tvAutoTap(gen, tvAutoPoint(x, y), 2);
         tvJSStopIfNeeded();
     };
     ctx[@"threeFingerTap"] = ^(double x, double y) {
+        tvTrace([NSString stringWithFormat:@"threeFingerTap %.3f, %.3f", x, y]);
         tvAutoTap(gen, tvAutoPoint(x, y), 3);
         tvJSStopIfNeeded();
     };
     ctx[@"longPress"] = ^(double x, double y, double sec) {
+        tvTrace([NSString stringWithFormat:@"longPress %.3f, %.3f (%.1fs)", x, y, sec > 0 ? sec : 0.6]);
         CGPoint p = tvAutoPoint(x, y);
         [gen touchDown:p];
         tvAutoSleep(sec > 0 ? sec : 0.6);
@@ -4946,14 +4966,16 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
         tvJSStopIfNeeded();
     };
     ctx[@"swipe"] = ^(double x1, double y1, double x2, double y2, double sec) {
+        tvTrace([NSString stringWithFormat:@"swipe %.3f,%.3f -> %.3f,%.3f", x1, y1, x2, y2]);
         [gen dragLinearWithStartPoint:tvAutoPoint(x1, y1)
                              endPoint:tvAutoPoint(x2, y2)
                              duration:sec > 0 ? sec : 0.3];
         tvJSStopIfNeeded();
     };
-    ctx[@"home"] = ^{ [gen menuPress]; };
-    ctx[@"key"] = ^(NSString *k) { [gen keyPress:k]; };
+    ctx[@"home"] = ^{ tvTrace(@"home"); [gen menuPress]; };
+    ctx[@"key"] = ^(NSString *k) { tvTrace([@"key " stringByAppendingString:(k ?: @"")]); [gen keyPress:k]; };
     ctx[@"typeText"] = ^(NSString *s) {
+        tvTrace([@"typeText " stringByAppendingString:(s ?: @"")]);
         for (NSUInteger i = 0; i < s.length && !gAutoStop.load(); i++)
             [gen keyPress:[s substringWithRange:NSMakeRange(i, 1)]];
         tvJSStopIfNeeded();
@@ -4961,30 +4983,42 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
 
     ctx[@"getColor"] = ^NSString *(double x, double y) {
         uint8_t r, g, b;
-        if (!tvSampleColor(x, y, &r, &g, &b))
+        if (!tvSampleColor(x, y, &r, &g, &b)) {
+            tvTrace([NSString stringWithFormat:@"getColor %.3f,%.3f = (không có khung)", x, y]);
             return @"";
-        return [NSString stringWithFormat:@"%02X%02X%02X", r, g, b];
+        }
+        NSString *hex = [NSString stringWithFormat:@"%02X%02X%02X", r, g, b];
+        tvTrace([NSString stringWithFormat:@"getColor %.3f,%.3f = %@", x, y, hex]);
+        return hex;
     };
     ctx[@"matchColor"] = ^BOOL(double x, double y, NSString *hex, double tol) {
-        return tvColorAt(x, y, hex, tol);
+        BOOL ok = tvColorAt(x, y, hex, tol);
+        tvTrace([NSString stringWithFormat:@"matchColor %.3f,%.3f \"%@\" = %@", x, y, hex ?: @"",
+                                           ok ? @"true" : @"false"]);
+        return ok;
     };
     ctx[@"waitColor"] = ^BOOL(double x, double y, NSString *hex, double timeout, double tol) {
         double waited = 0, tmo = timeout > 0 ? timeout : 10;
         while (waited < tmo && !gAutoStop.load()) {
-            if (tvColorAt(x, y, hex, tol))
+            if (tvColorAt(x, y, hex, tol)) {
+                tvTrace([NSString stringWithFormat:@"waitColor %.3f,%.3f \"%@\" = true (%.1fs)", x, y,
+                                                   hex ?: @"", waited]);
                 return YES;
+            }
             usleep(100000);
             waited += 0.1;
         }
+        tvTrace([NSString stringWithFormat:@"waitColor %.3f,%.3f \"%@\" = false (hết %.0fs)", x, y,
+                                           hex ?: @"", tmo]);
         return NO;
     };
     ctx[@"assistiveTouch"] = ^(BOOL on) { tvSetAssistiveTouch(on ? 1 : 0); };
 
     // App / URL (đóng-mở app theo bundle id, mở URL).
-    ctx[@"launchApp"] = ^(NSString *b) { tvCtlLaunchApp(b); };
-    ctx[@"killApp"] = ^(NSString *b) { tvCtlTerminateApp(b); };
-    ctx[@"openURL"] = ^(NSString *u) { tvCtlOpenURL(u); };
-    ctx[@"openURLIn"] = ^(NSString *b, NSString *u) { tvCtlOpenURLInApp(b, u); };
+    ctx[@"launchApp"] = ^(NSString *b) { tvTrace([@"launchApp " stringByAppendingString:(b ?: @"")]); tvCtlLaunchApp(b); };
+    ctx[@"killApp"] = ^(NSString *b) { tvTrace([@"killApp " stringByAppendingString:(b ?: @"")]); tvCtlTerminateApp(b); };
+    ctx[@"openURL"] = ^(NSString *u) { tvTrace([@"openURL " stringByAppendingString:(u ?: @"")]); tvCtlOpenURL(u); };
+    ctx[@"openURLIn"] = ^(NSString *b, NSString *u) { tvTrace([@"openURLIn " stringByAppendingString:(b ?: @"")]); tvCtlOpenURLInApp(b, u); };
 
     // Tệp (đọc/ghi chuỗi; JSON dùng JSON.parse/stringify có sẵn của JS).
     ctx[@"readFile"] = ^NSString *(NSString *p) {
@@ -5028,8 +5062,12 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
         double t = (tol && ![tol isUndefined]) ? [tol toDouble] : 24;
         JSContext *ct = [JSContext currentContext];
         double fx, fy;
-        if (tvFindImage(path, a, b, c, d, t, &fx, &fy))
+        if (tvFindImage(path, a, b, c, d, t, &fx, &fy)) {
+            tvTrace([NSString stringWithFormat:@"findImage %@ = %.3f,%.3f",
+                                               [path lastPathComponent] ?: @"", fx, fy]);
             return [JSValue valueWithObject:@{@"x" : @(fx), @"y" : @(fy)} inContext:ct];
+        }
+        tvTrace([NSString stringWithFormat:@"findImage %@ = null", [path lastPathComponent] ?: @""]);
         return [JSValue valueWithNullInContext:ct];
     };
 }
@@ -5046,6 +5084,7 @@ static void tvAutoStart(void) {
     dispatch_async(gAutoQueue, ^{
         @autoreleasepool {
             gAutoRunning.store(true);
+            gAutoTrace.store(true); // mỗi lần chạy mặc định ghi tiến trình
             JSContext *ctx = [[JSContext alloc] init];
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
             tvAutoLog(@"▶ bắt đầu");
