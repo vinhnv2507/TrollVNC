@@ -675,6 +675,11 @@ class JsAutoClickDialog(QDialog):
         self.pick_btn.clicked.connect(lambda: self._begin_pick("match"))
         pick_row.addWidget(self.pick_btn)
         pick_row.addStretch(1)
+        lib_btn = QPushButton("⇪ Đẩy làm thư viện hàm")
+        lib_btn.setToolTip("Đẩy nội dung ô soạn thành THƯ VIỆN HÀM (nạp trước mọi "
+                           "kịch bản trên máy) — thêm hàm mới KHÔNG cần cài lại app.")
+        lib_btn.clicked.connect(self._push_prelude)
+        pick_row.addWidget(lib_btn)
         layout.addLayout(pick_row)
 
         self.status = QLabel("Kịch bản áp cho các máy đang chọn (cần TrollVNC đã vá).")
@@ -897,6 +902,21 @@ class JsAutoClickDialog(QDialog):
         self.status.setText(f"Đang đẩy & chạy trên {len(targets)} máy…")
         self.window.pool.push_and_run_autoscript(
             targets, self.editor.toPlainText(),
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.window.bridge.bulk_done.emit(d, ok, fails))
+
+    def _push_prelude(self) -> None:
+        targets = self._targets()
+        if not targets:
+            return
+        js = self.editor.toPlainText()
+        if not js.strip():
+            QMessageBox.information(self, "Trống", "Ô soạn đang trống — hãy dán các "
+                                    "hàm tiện ích rồi bấm đẩy làm thư viện.")
+            return
+        self.status.setText(f"Đang đẩy THƯ VIỆN HÀM xuống {len(targets)} máy…")
+        self.window.pool.push_prelude(
+            targets, js,
             on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.window.bridge.bulk_done.emit(d, ok, fails))
 

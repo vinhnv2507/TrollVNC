@@ -501,6 +501,15 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không đẩy được kịch bản: {text.strip()}")
 
+    async def push_prelude(self, js: str) -> None:
+        """Đẩy THƯ VIỆN HÀM (JS) xuống máy — nạp trước mọi kịch bản, không cần
+        cài lại app. Dùng để thêm hàm tiện ích mới qua socket."""
+
+        b64 = base64.b64encode(js.encode("utf-8")).decode()
+        text = await self.command(f"setprelude {b64}", read_timeout=15)
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không đẩy được thư viện hàm: {text.strip()}")
+
     async def autoclick_start(self) -> None:
         """Bắt đầu chạy kịch bản auto-click đã đẩy."""
 

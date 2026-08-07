@@ -587,6 +587,16 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Auto-click: đẩy", action, on_event, on_done)
 
+    def push_prelude(self, keys: Iterable[str], js: str,
+                     on_event=None, on_done=None) -> None:
+        """Đẩy THƯ VIỆN HÀM (JS) xuống nhiều máy — thêm hàm mới không cần cài lại."""
+
+        async def action(channel):
+            await channel.push_prelude(js)
+            return "đã đẩy thư viện hàm"
+
+        self._bulk_app_action(keys, "Auto-click: đẩy thư viện hàm", action, on_event, on_done)
+
     def autoclick_stop(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
         """Dừng auto-click trên nhiều máy."""
 

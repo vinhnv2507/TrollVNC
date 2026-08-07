@@ -58,6 +58,12 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.server.unpatched = True
         self.assertIsNone(await self.channel.get_color(0.5, 0.2))
 
+    async def test_push_prelude_sends_base64(self) -> None:
+        import base64
+        await self.channel.push_prelude("function foo(){}")
+        raw = base64.b64decode(self.server.prelude)
+        self.assertEqual(raw.decode(), "function foo(){}")
+
     async def test_launch_marks_app_running(self) -> None:
         await self.channel.launch("com.honeygain.app")
         self.assertEqual(self.server.launched, ["com.honeygain.app"])

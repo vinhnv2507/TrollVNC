@@ -131,6 +131,14 @@ for (let i = 0; i < 100 && !false; i++) {
 }
 ```
 
+## Cập nhật KHÔNG cần cài lại app
+- **Kịch bản & hàm JS**: đẩy qua PC tức thì — muốn thêm hàm mới cứ để đầu script,
+  hoặc bấm **“⇪ Đẩy làm thư viện hàm”** để nạp nội dung ô soạn thành **thư viện**
+  (nạp trước MỌI kịch bản trên máy) → thêm hàm dùng chung cho cả farm, **không
+  cài lại**. (Lệnh control `setprelude`/`getprelude`, lưu `…/controlios/prelude.js`.)
+- **Chỉ khi thêm primitive NATIVE mới** (HID, Vision/OCR, đọc framebuffer…) mới
+  phải build lại + cài đè — vì máy chỉ-TrollStore không hot-swap được binary đã ký.
+
 ## Lệnh control (PC cũng điều khiển được)
 ```
 autoset <base64 kịch bản JS>   # lưu
