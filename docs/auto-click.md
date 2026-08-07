@@ -113,6 +113,20 @@ Kịch bản lưu ở `/var/mobile/Library/controlios/autoscript.txt`.
 đầu tiên đang chọn (~1.2s/lần), hiện cả `▶ bắt đầu`, `■ dừng`, `⚠ lỗi`. Đây là
 cách theo dõi đáng tin nhất.
 
+### Tự ghi tiến trình (trace) — MẶC ĐỊNH BẬT
+Không cần chèn `log()`: daemon **tự ghi mỗi lệnh + kết quả** vào nhật ký, ví dụ:
+```
+16:40:01  matchColor 0.806,0.250 "35F7EF" = true
+16:40:01  tap 0.806, 0.250
+16:40:02  sleep 1.50s
+16:40:03  waitColor 0.500,0.900 "34C759" = false (hết 10s)
+16:40:03  findImage nut.png = 0.512,0.744
+```
+Có với: `tap/tapRegion/doubleTap/two-threeFingerTap/longPress/swipe/home/key/
+typeText/sleep/getColor/matchColor/waitColor/findImage/launchApp/killApp/openURL`.
+Vòng lặp dày thì nhật ký giữ **250 dòng gần nhất**. Muốn tắt cho gọn: gọi
+`setTrace(false);` đầu kịch bản (bật lại `setTrace(true);`).
+
 > `toast`/`alert` **chỉ ghi vào nhật ký** (xem trên PC). Máy chỉ-TrollStore
 > (không jailbreak) không vẽ được chữ nổi đè lên app khác — muốn HUD nổi kiểu
 > AutoTouch cần tweak inject vào SpringBoard (chỉ có khi jailbreak).
