@@ -566,6 +566,36 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"AssistiveTouch {state}", action, on_event, on_done)
 
+    def push_and_run_autoscript(self, keys: Iterable[str], script: str,
+                                on_event=None, on_done=None) -> None:
+        """Đẩy kịch bản auto-click JS xuống nhiều máy RỒI chạy ngay (farm)."""
+
+        async def action(channel):
+            await channel.push_autoscript(script)
+            await channel.autoclick_start()
+            return "đã đẩy + chạy"
+
+        self._bulk_app_action(keys, "Auto-click: đẩy & chạy", action, on_event, on_done)
+
+    def push_autoscript(self, keys: Iterable[str], script: str,
+                        on_event=None, on_done=None) -> None:
+        """Chỉ đẩy kịch bản (không chạy)."""
+
+        async def action(channel):
+            await channel.push_autoscript(script)
+            return "đã đẩy kịch bản"
+
+        self._bulk_app_action(keys, "Auto-click: đẩy", action, on_event, on_done)
+
+    def autoclick_stop(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        """Dừng auto-click trên nhiều máy."""
+
+        async def action(channel):
+            await channel.autoclick_stop()
+            return "đã dừng"
+
+        self._bulk_app_action(keys, "Auto-click: dừng", action, on_event, on_done)
+
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
         """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).

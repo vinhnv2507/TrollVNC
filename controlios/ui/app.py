@@ -532,6 +532,168 @@ class SnapshotDialog(QDialog):
         self.status.setText("Đang xoá tất cả snapshot…")
 
 
+JS_SNIPPETS = [
+    ("— Chèn lệnh JS —", ""),
+    ("tap(0.5, 0.5);", "chạm điểm"),
+    ("tapRegion(0.4, 0.8, 0.6, 0.95);", "chạm ngẫu nhiên trong vùng"),
+    ("swipe(0.5, 0.8, 0.5, 0.3, 0.4);", "vuốt"),
+    ("longPress(0.5, 0.5, 1.0);", "giữ lâu"),
+    ("home();", "nút Home"),
+    ("typeText(\"noi dung\");", "gõ chữ"),
+    ("sleep(1);", "chờ giây"),
+    ("sleep(random(1, 3));", "chờ ngẫu nhiên"),
+    ("while (true) {\n  \n}", "lặp mãi"),
+    ("for (let i = 0; i < 10; i++) {\n  \n}", "lặp N lần"),
+    ("if (matchColor(0.5, 0.5, \"FF3B30\", 15)) {\n  \n}", "nếu đúng màu"),
+    ("let p = findImage(\"/var/mobile/Media/tpl.png\");\nif (p) tap(p.x, p.y);", "tìm ảnh → chạm"),
+    ("let s = ocr(0.0, 0.4, 1.0, 0.6);", "đọc chữ (OCR)"),
+    ("launchApp(\"com.zing.zalo\");", "mở app"),
+    ("killApp(\"com.zing.zalo\");", "đóng app"),
+    ("openURL(\"https://\");", "mở URL"),
+    ("let r = httpGet(\"https://\");", "HTTP GET"),
+    ("toast(\"noi dung\");", "thông báo trên máy"),
+    ("assistiveTouch(true);", "bật AssistiveTouch"),
+]
+
+
+class JsAutoClickDialog(QDialog):
+    """Soạn kịch bản auto-click JavaScript, lưu thư viện, ĐẨY xuống nhiều máy và
+    chạy/dừng. Kịch bản chạy TRÊN MÁY (daemon) — không cần PC nối liên tục."""
+
+    def __init__(self, window) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Auto-click (JavaScript, chạy trên máy)")
+        self.resize(640, 560)
+
+        layout = QVBoxLayout(self)
+        top = QHBoxLayout()
+        self.name_combo = QComboBox()
+        self.name_combo.setMinimumWidth(200)
+        self.name_combo.activated.connect(self._load_selected)
+        top.addWidget(QLabel("Thư viện:"))
+        top.addWidget(self.name_combo, 1)
+        save_btn = QPushButton("Lưu…")
+        save_btn.clicked.connect(self._save)
+        top.addWidget(save_btn)
+        del_btn = QPushButton("Xoá")
+        del_btn.clicked.connect(self._delete)
+        top.addWidget(del_btn)
+        self.cmd_combo = QComboBox()
+        for text, desc in JS_SNIPPETS:
+            self.cmd_combo.addItem(f"{text.splitlines()[0]}  ·  {desc}" if desc else text, text)
+        self.cmd_combo.activated.connect(self._insert)
+        top.addWidget(self.cmd_combo, 1)
+        layout.addLayout(top)
+
+        self.editor = QPlainTextEdit()
+        self.editor.setStyleSheet("font-family: Consolas, monospace; font-size: 13px;")
+        self.editor.setPlainText(
+            "// Ví dụ: chạm giữa-dưới mỗi 1–3 giây, lặp mãi\n"
+            "while (true) {\n  tap(0.5, 0.9);\n  sleep(random(1, 3));\n}\n")
+        layout.addWidget(self.editor, 1)
+
+        self.status = QLabel("Kịch bản áp cho các máy đang chọn (cần TrollVNC đã vá).")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: #9aa4b2;")
+        layout.addWidget(self.status)
+
+        row = QDialogButtonBox()
+        run = row.addButton("⬇▶ Đẩy & Chạy", QDialogButtonBox.AcceptRole)
+        push = row.addButton("⬇ Chỉ đẩy", QDialogButtonBox.ActionRole)
+        stop = row.addButton("■ Dừng", QDialogButtonBox.DestructiveRole)
+        row.addButton(QDialogButtonBox.Close)
+        run.clicked.connect(self._push_run)
+        push.clicked.connect(self._push_only)
+        stop.clicked.connect(self._stop)
+        row.rejected.connect(self.close)
+        layout.addWidget(row)
+
+        self._reload_names()
+
+    # ---------------------------------------------------------- thư viện
+    def _reload_names(self) -> None:
+        from ..config import DEFAULT_JS_SCRIPTS, load_named_scripts
+        self._scripts = load_named_scripts(DEFAULT_JS_SCRIPTS)
+        self.name_combo.blockSignals(True)
+        self.name_combo.clear()
+        self.name_combo.addItem("— chọn kịch bản đã lưu —", "")
+        for name in sorted(self._scripts):
+            self.name_combo.addItem(name, name)
+        self.name_combo.blockSignals(False)
+
+    def _load_selected(self, index: int) -> None:
+        name = self.name_combo.itemData(index)
+        if name and name in self._scripts:
+            self.editor.setPlainText(self._scripts[name])
+
+    def _save(self) -> None:
+        from ..config import DEFAULT_JS_SCRIPTS, load_named_scripts, save_named_scripts
+        name, ok = QInputDialog.getText(self, "Lưu kịch bản", "Tên kịch bản:")
+        if not ok or not name.strip():
+            return
+        scripts = load_named_scripts(DEFAULT_JS_SCRIPTS)
+        scripts[name.strip()] = self.editor.toPlainText()
+        save_named_scripts(scripts, DEFAULT_JS_SCRIPTS)
+        self._reload_names()
+        self.name_combo.setCurrentText(name.strip())
+        self.status.setText(f"Đã lưu “{name.strip()}”.")
+
+    def _delete(self) -> None:
+        from ..config import DEFAULT_JS_SCRIPTS, load_named_scripts, save_named_scripts
+        name = self.name_combo.currentData()
+        if not name:
+            return
+        scripts = load_named_scripts(DEFAULT_JS_SCRIPTS)
+        scripts.pop(name, None)
+        save_named_scripts(scripts, DEFAULT_JS_SCRIPTS)
+        self._reload_names()
+        self.status.setText(f"Đã xoá “{name}”.")
+
+    def _insert(self, index: int) -> None:
+        snippet = self.cmd_combo.itemData(index)
+        if snippet:
+            self.editor.insertPlainText(snippet + "\n")
+        self.cmd_combo.setCurrentIndex(0)
+
+    # ---------------------------------------------------------- đẩy/chạy
+    def _targets(self):
+        targets = self.window.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+        return targets
+
+    def _push_run(self) -> None:
+        targets = self._targets()
+        if not targets:
+            return
+        self.status.setText(f"Đang đẩy & chạy trên {len(targets)} máy…")
+        self.window.pool.push_and_run_autoscript(
+            targets, self.editor.toPlainText(),
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.window.bridge.bulk_done.emit(d, ok, fails))
+
+    def _push_only(self) -> None:
+        targets = self._targets()
+        if not targets:
+            return
+        self.status.setText(f"Đang đẩy xuống {len(targets)} máy…")
+        self.window.pool.push_autoscript(
+            targets, self.editor.toPlainText(),
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.window.bridge.bulk_done.emit(d, ok, fails))
+
+    def _stop(self) -> None:
+        targets = self._targets()
+        if not targets:
+            return
+        self.window.pool.autoclick_stop(
+            targets,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.window.bridge.bulk_done.emit(d, ok, fails))
+        self.status.setText("Đang dừng…")
+
+
 class ScriptDialog(QDialog):
     """Soạn và chạy kịch bản trên các máy đang chọn."""
 
@@ -1207,9 +1369,17 @@ class MainWindow(QMainWindow):
         ssh_action.triggered.connect(self._open_ssh_console)
         bar.addAction(ssh_action)
 
-        script_action = QAction("Kịch bản…", self)
-        script_action.triggered.connect(self._open_script_dialog)
-        bar.addAction(script_action)
+        script_button = QToolButton()
+        script_button.setText("Kịch bản")
+        script_button.setToolTip("Kịch bản tự động")
+        script_button.setPopupMode(QToolButton.InstantPopup)
+        script_menu = QMenu(script_button)
+        act_pc = script_menu.addAction("Kịch bản (PC gõ qua VNC)…")
+        act_pc.triggered.connect(self._open_script_dialog)
+        act_js = script_menu.addAction("Auto-click JS (chạy trên máy)…")
+        act_js.triggered.connect(self._open_js_autoclick)
+        script_button.setMenu(script_menu)
+        bar.addWidget(script_button)
 
         open_folder = QAction("Thư mục", self)
         open_folder.setToolTip("Mở thư mục captures chứa ảnh/ghi hình/kịch bản")
@@ -1803,6 +1973,12 @@ class MainWindow(QMainWindow):
         self.script_dialog.refresh_targets()
         self.script_dialog.show()
         self.script_dialog.raise_()
+
+    def _open_js_autoclick(self) -> None:
+        if getattr(self, "js_autoclick_dialog", None) is None:
+            self.js_autoclick_dialog = JsAutoClickDialog(self)
+        self.js_autoclick_dialog.show()
+        self.js_autoclick_dialog.raise_()
 
     def start_script(self, steps, targets: List[str]) -> None:
         self.pool.run_script(

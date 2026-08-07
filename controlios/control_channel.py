@@ -14,6 +14,7 @@ Chỉ dùng được với bản TrollVNC đã vá (xem docs/trollvnc-patch.md).
 from __future__ import annotations
 
 import asyncio
+import base64
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -489,6 +490,39 @@ class ControlChannel:
         text = await self.command(f"assistivetouch {state}")
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không đổi được AssistiveTouch: {text.strip()}")
+
+    # --------------------------------------------- auto-click (JS chạy trên máy)
+
+    async def push_autoscript(self, script: str) -> None:
+        """Đẩy kịch bản JavaScript auto-click xuống máy (lưu, chưa chạy)."""
+
+        b64 = base64.b64encode(script.encode("utf-8")).decode()
+        text = await self.command(f"autoset {b64}", read_timeout=15)
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không đẩy được kịch bản: {text.strip()}")
+
+    async def autoclick_start(self) -> None:
+        """Bắt đầu chạy kịch bản auto-click đã đẩy."""
+
+        text = await self.command("autostart")
+        head = text.strip()
+        if head.startswith("ERR NoScript"):
+            raise ControlError("Chưa có kịch bản trên máy — đẩy trước khi chạy.")
+        if not head.startswith("OK"):
+            raise ControlError(f"Không chạy được auto-click: {head}")
+
+    async def autoclick_stop(self) -> None:
+        """Dừng auto-click."""
+
+        text = await self.command("autostop")
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không dừng được auto-click: {text.strip()}")
+
+    async def autoclick_status(self) -> bool:
+        """True nếu auto-click đang chạy."""
+
+        text = await self.command("autostatus")
+        return "running" in text
 
     async def set_scale(self, factor: float) -> None:
         """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.

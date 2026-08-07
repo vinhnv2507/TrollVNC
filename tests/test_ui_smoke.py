@@ -508,6 +508,23 @@ class ScriptDialogTest(unittest.TestCase):
         finally:
             dialog.close()
 
+    def test_js_autoclick_dialog_push_and_run(self) -> None:
+        from controlios.ui.app import JsAutoClickDialog
+
+        self.window.grid.select_all()
+        sent = []
+        self.window.pool.push_and_run_autoscript = (
+            lambda keys, script, **kw: sent.append((list(keys), script)))
+        dialog = JsAutoClickDialog(self.window)
+        try:
+            dialog.editor.setPlainText("tap(0.5, 0.5);")
+            dialog._push_run()
+            self.assertEqual(len(sent), 1)
+            self.assertEqual(sent[0][1], "tap(0.5, 0.5);")
+            self.assertEqual(len(sent[0][0]), 2)
+        finally:
+            dialog.close()
+
     def test_command_palette_inserts_template(self) -> None:
         from controlios.ui.app import ScriptDialog
 

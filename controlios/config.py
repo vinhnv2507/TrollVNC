@@ -25,6 +25,8 @@ DEFAULT_REGISTRY = PROJECT_ROOT / "config" / "devices.json"
 
 # Thư viện kịch bản đặt tên, lưu ngay trong app (không cần file .txt rời).
 DEFAULT_SCRIPTS = PROJECT_ROOT / "config" / "scripts.json"
+# Thư viện kịch bản auto-click JavaScript (chạy TRÊN MÁY qua daemon).
+DEFAULT_JS_SCRIPTS = PROJECT_ROOT / "config" / "autoclick_js.json"
 
 
 def load_named_scripts(path: Path | str | None = None) -> dict:
