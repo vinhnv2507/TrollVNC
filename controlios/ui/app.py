@@ -594,6 +594,29 @@ class JsAutoClickDialog(QDialog):
             "while (true) {\n  tap(0.5, 0.9);\n  sleep(random(1, 3));\n}\n")
         layout.addWidget(self.editor, 1)
 
+        pick_row = QHBoxLayout()
+        self.pick_btn = QToolButton()
+        self.pick_btn.setText("🎨 Lấy màu (bấm lên màn)")
+        self.pick_btn.setPopupMode(QToolButton.MenuButtonPopup)
+        pick_menu = QMenu(self.pick_btn)
+        # (nhãn, kiểu chèn) — chọn kiểu rồi bấm 1 điểm trên khung lớn.
+        for label, kind in (
+            ('matchColor(x, y, "màu", 15)  · chèn', "match"),
+            ('waitColor(x, y, "màu", 10, 12)  · chèn', "wait"),
+            ('getColor(x, y)  · chèn', "get"),
+            ("tap(x, y)  · chèn toạ độ", "tap"),
+            ("chỉ chép mã màu #RRGGBB", "hex"),
+        ):
+            act = QAction(label, self.pick_btn)
+            act.triggered.connect(lambda _=False, k=kind: self._begin_pick(k))
+            pick_menu.addAction(act)
+        self.pick_btn.setMenu(pick_menu)
+        # Bấm thẳng nút (không mở menu) = kiểu mặc định matchColor.
+        self.pick_btn.clicked.connect(lambda: self._begin_pick("match"))
+        pick_row.addWidget(self.pick_btn)
+        pick_row.addStretch(1)
+        layout.addLayout(pick_row)
+
         self.status = QLabel("Kịch bản áp cho các máy đang chọn (cần TrollVNC đã vá).")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #9aa4b2;")
@@ -676,6 +699,37 @@ class JsAutoClickDialog(QDialog):
             self.status.setText(f"Đã xuất log: {path}")
         except OSError as exc:
             QMessageBox.warning(self, "Lỗi", f"Không ghi được file: {exc}")
+
+    # ------------------------------------------------- lấy màu (get color)
+    def _begin_pick(self, kind: str) -> None:
+        if not self.window.detail.key:
+            self.status.setText("Hãy mở 1 máy ra khung điều khiển lớn trước khi lấy màu.")
+            return
+        self._pick_kind = kind
+        self.status.setText("👉 Bấm 1 điểm trên MÀN HÌNH LỚN để lấy màu tại đó…")
+        self.window.begin_color_pick(self._finish_pick)
+
+    def _finish_pick(self, rx: float, ry: float, hexcolor: Optional[str]) -> None:
+        if hexcolor is None:
+            self.status.setText("Chưa có khung hình để lấy màu — thử lại.")
+            return
+        kind = getattr(self, "_pick_kind", "match")
+        snippet = {
+            "match": f'matchColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 15)',
+            "wait": f'waitColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 10, 12)',
+            "get": f'getColor({rx:.3f}, {ry:.3f})',
+            "tap": f'tap({rx:.3f}, {ry:.3f})',
+            "hex": hexcolor,
+        }.get(kind, f'matchColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 15)')
+        QApplication.clipboard().setText(snippet)
+        if kind == "hex":
+            self.status.setText(f"Đã chép mã màu: #{snippet}")
+            return
+        cursor = self.editor.textCursor()
+        prefix = "" if cursor.atBlockStart() else "\n"
+        cursor.insertText(f"{prefix}{snippet};\n")
+        self.editor.setTextCursor(cursor)
+        self.status.setText(f"Đã chèn + chép: {snippet}")
 
     def _on_autolog(self, key: str, running: bool, log: str) -> None:
         if key != self._poll_key:
@@ -2096,9 +2150,27 @@ class MainWindow(QMainWindow):
             return None
         return x / fb_w, y / fb_h
 
+    def begin_color_pick(self, callback) -> None:
+        """Bật chế độ lấy màu: cú BẤM kế trên khung điều khiển lớn sẽ gọi
+        callback(rx, ry, "RRGGBB") thay vì chạm — để chèn lệnh vào kịch bản."""
+        self._pick_color_cb = callback
+        self.detail.setCursor(Qt.CrossCursor)
+
+    def _end_color_pick(self) -> None:
+        self._pick_color_cb = None
+        self.detail.unsetCursor()
+
     def _on_pointer_pressed(self, x: int, y: int, button: int) -> None:
         if not self.detail.key:
             return
+        if getattr(self, "_pick_color_cb", None) is not None:
+            cb = self._pick_color_cb
+            self._end_color_pick()
+            self._swallow_release = True   # nuốt cú nhả đi kèm, không gửi mouse_up
+            ratios = self._ratios(x, y)
+            if ratios:
+                cb(ratios[0], ratios[1], self.detail.color_at_fb(x, y))
+            return          # lấy màu, KHÔNG chạm
         self._press_origin = (x, y)
         self._press_time = time.monotonic()
         if self._broadcasting():
@@ -2121,6 +2193,9 @@ class MainWindow(QMainWindow):
     def _on_pointer_released(self, x: int, y: int, button: int) -> None:
         if not self.detail.key:
             return
+        if getattr(self, "_swallow_release", False):
+            self._swallow_release = False
+            return          # cú nhả đi kèm lần lấy màu — bỏ qua
         origin = getattr(self, "_press_origin", None)
 
         if self._broadcasting():

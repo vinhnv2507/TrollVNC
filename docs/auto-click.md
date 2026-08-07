@@ -35,8 +35,12 @@ stop();                        // dừng kịch bản
 log('thông báo');              // ghi log daemon
 ```
 > **Lấy màu trên PC:** rê chuột trên khung điều khiển lớn — thanh dưới hiện
-> `x=.. y=..  ·  0.500 0.900  ·  #RRGGBB`. Đọc **tỉ lệ + mã màu** ngay tại điểm
-> đó để dán vào `matchColor(0.500, 0.900, "RRGGBB", 15)`.
+> `x=.. y=..  ·  0.500 0.900  ·  #RRGGBB` (tỉ lệ + mã màu tại điểm đó).
+>
+> **Chèn thẳng vào kịch bản:** trong dialog **Auto-click JS** bấm **🎨 Lấy màu**
+> rồi bấm 1 điểm trên màn hình lớn → lệnh **tự chèn vào ô soạn + chép clipboard**.
+> Menu ▾ chọn kiểu: `matchColor` / `waitColor` / `getColor` / `tap(x,y)` / chỉ
+> chép `#RRGGBB`. (Bấm thẳng nút = `matchColor`.)
 
 **Dò MÀU** (đọc màn thật)
 ```js
