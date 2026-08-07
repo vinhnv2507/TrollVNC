@@ -119,7 +119,7 @@ class Bridge(QObject):
     apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
     snapshots_loaded = Signal(str, object, str)  # key, danh sách Snapshot, lỗi
     autolog_loaded = Signal(str, bool, str)      # key, đang chạy, nhật ký
-    color_read = Signal(str, float, float, str)  # key, rx, ry, "RRGGBB" (rỗng nếu trượt)
+    color_read = Signal(str, float, float, str, str)  # key, rx, ry, "RRGGBB", lỗi (đều rỗng nếu trượt)
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
@@ -721,22 +721,26 @@ class JsAutoClickDialog(QDialog):
         self._pick_pc_hex = hexcolor
         key = self.window.detail.key
         if key:
-            self.status.setText("Đang hỏi màu thật từ máy…")
+            self.status.setText("Đang hỏi màu thật từ máy (tối đa 3s)…")
             self.window.pool.read_color(
                 key, rx, ry,
-                on_done=lambda k, hx: self.window.bridge.color_read.emit(k, rx, ry, hx or ""))
+                on_done=lambda k, hx, err: self.window.bridge.color_read.emit(
+                    k, rx, ry, hx or "", err or ""))
         else:
             self._insert_color(rx, ry, hexcolor)
 
-    def _on_color_read(self, key: str, rx: float, ry: float, hexv: str) -> None:
-        # Ưu tiên màu thật từ máy; máy cũ chưa hỗ trợ lệnh 'color' -> dùng tạm màu PC.
+    def _on_color_read(self, key: str, rx: float, ry: float, hexv: str, err: str) -> None:
+        # Ưu tiên màu thật từ máy; nếu máy không trả (lỗi/cũ) -> LUÔN dùng màu PC
+        # để vẫn có kết quả chèn, kèm lý do để biết đường sửa.
         real = hexv or getattr(self, "_pick_pc_hex", None)
-        self._insert_color(rx, ry, real, from_device=bool(hexv))
+        self._insert_color(rx, ry, real, from_device=bool(hexv), err=err)
 
     def _insert_color(self, rx: float, ry: float, hexcolor: Optional[str],
-                      from_device: bool = False) -> None:
+                      from_device: bool = False, err: str = "") -> None:
         if hexcolor is None:
-            self.status.setText("Chưa lấy được màu (máy chưa có khung?) — thử lại.")
+            self.status.setText(
+                f"Không lấy được màu: {err}" if err else
+                "Chưa lấy được màu (máy chưa có khung?) — thử lại.")
             return
         kind = getattr(self, "_pick_kind", "match")
         snippet = {
@@ -748,7 +752,12 @@ class JsAutoClickDialog(QDialog):
             "tap": f'tap({rx:.3f}, {ry:.3f})',
             "hex": hexcolor,
         }.get(kind, f'matchColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 15)')
-        src = "màu THẬT từ máy" if from_device else "màu PC (gần đúng — máy chưa hỗ trợ)"
+        if from_device:
+            src = "màu THẬT từ máy"
+        elif err:
+            src = f"màu PC (máy không trả: {err})"
+        else:
+            src = "màu PC (gần đúng — máy chưa hỗ trợ)"
         QApplication.clipboard().setText(snippet)
         if kind == "hex":
             self.status.setText(f"Đã chép mã màu: #{snippet}  ({src})")

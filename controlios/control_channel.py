@@ -549,7 +549,8 @@ class ControlChannel:
         chuẩn hơn đọc từ khung đã nén ở PC. None nếu máy chưa có khung/không hỗ trợ."""
 
         try:
-            text = (await self.command(f"color {rx:.4f} {ry:.4f}")).strip()
+            text = (await self.command(
+                f"color {rx:.4f} {ry:.4f}", read_timeout=3.0)).strip()
         except NotPatchedError:
             return None          # bản TrollVNC cũ chưa có lệnh 'color'
         parts = text.split()

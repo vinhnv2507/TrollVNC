@@ -624,14 +624,15 @@ class DevicePool:
 
     def read_color(self, key: str, rx: float, ry: float, on_done) -> None:
         """Đọc MÀU THẬT tại điểm tỉ lệ (rx, ry) trên MỘT máy (daemon lấy pixel
-        gốc). on_done(key, hex_or_None)."""
+        gốc). on_done(key, hex_or_None, err_or_None). Chặn ~3.5s để không treo."""
 
         async def run() -> None:
             try:
-                hexv = await self._channel(key).get_color(rx, ry)
-                on_done(key, hexv)
-            except Exception:
-                on_done(key, None)
+                hexv = await asyncio.wait_for(
+                    self._channel(key).get_color(rx, ry), timeout=3.5)
+                on_done(key, hexv, None)
+            except Exception as exc:
+                on_done(key, None, str(exc))
 
         self._call_coro(run())
 
