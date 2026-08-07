@@ -23,6 +23,7 @@
 #import <Foundation/Foundation.h>
 #import <JavaScriptCore/JavaScriptCore.h>   // engine kịch bản auto-click (JS)
 #import <UIKit/UIKit.h>                      // UIImage cho findImage (template matching)
+#import <Vision/Vision.h>                    // OCR (nhận chữ trên màn)
 #import <Security/Security.h>   // xác thực chữ ký license (ECDSA P-256)
 
 #import <arpa/inet.h>
@@ -4759,6 +4760,57 @@ static BOOL tvFindImage(NSString *path, double rx1, double ry1, double rx2, doub
     return NO;
 }
 
+// OCR một vùng màn (Vision, trên máy, không cần mạng). Trả về chữ nhận được
+// (mỗi dòng một mục). Chạy đồng bộ trên luồng auto nền.
+static NSString *tvOCR(double rx1, double ry1, double rx2, double ry2) {
+    if (!gScreen || !gScreen->frameBuffer || gWidth <= 0 || gHeight <= 0)
+        return @"";
+    int x1 = (int)(MAX(0.0, rx1) * (gWidth - 1));
+    int y1 = (int)(MAX(0.0, ry1) * (gHeight - 1));
+    int x2 = (int)((rx2 <= 0 ? 1.0 : rx2) * (gWidth - 1));
+    int y2 = (int)((ry2 <= 0 ? 1.0 : ry2) * (gHeight - 1));
+    if (x2 <= x1)
+        x2 = gWidth - 1;
+    if (y2 <= y1)
+        y2 = gHeight - 1;
+
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef dp = CGDataProviderCreateWithData(
+        NULL, gScreen->frameBuffer, (size_t)gScreen->paddedWidthInBytes * gHeight, NULL);
+    CGImageRef full = CGImageCreate(
+        gWidth, gHeight, 8, 32, gScreen->paddedWidthInBytes, cs,
+        (CGBitmapInfo)(kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little), dp, NULL, false,
+        kCGRenderingIntentDefault);
+    CGColorSpaceRelease(cs);
+    CGDataProviderRelease(dp);
+    if (!full)
+        return @"";
+    CGImageRef crop = CGImageCreateWithImageInRect(full, CGRectMake(x1, y1, x2 - x1, y2 - y1));
+    CGImageRelease(full);
+    if (!crop)
+        return @"";
+
+    NSMutableString *out = [NSMutableString string];
+    if (@available(iOS 13.0, *)) {
+        VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] init];
+        req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        req.usesLanguageCorrection = YES;
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:crop options:@{}];
+        NSError *err = nil;
+        if ([h performRequests:@[ req ] error:&err]) {
+            for (VNRecognizedTextObservation *o in req.results) {
+                VNRecognizedText *t = [[o topCandidates:1] firstObject];
+                if (t.string.length) {
+                    [out appendString:t.string];
+                    [out appendString:@"\n"];
+                }
+            }
+        }
+    }
+    CGImageRelease(crop);
+    return out;
+}
+
 // HTTP đồng bộ (chạy trên luồng auto nền, chặn bằng semaphore — completion chạy
 // ở luồng khác nên không deadlock). Trả về nội dung phản hồi (chuỗi).
 static NSString *tvHttpRequest(NSString *method, NSString *urlStr, NSString *body, NSString *contentType) {
@@ -4901,6 +4953,15 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
         });
     };
     ctx[@"alert"] = ctx[@"toast"];
+
+    // OCR: đọc chữ trong vùng màn (Vision). ocr([x1,y1,x2,y2]) -> chuỗi.
+    ctx[@"ocr"] = ^NSString *(JSValue *x1, JSValue *y1, JSValue *x2, JSValue *y2) {
+        double a = (x1 && ![x1 isUndefined]) ? [x1 toDouble] : 0;
+        double b = (y1 && ![y1 isUndefined]) ? [y1 toDouble] : 0;
+        double c = (x2 && ![x2 isUndefined]) ? [x2 toDouble] : 1;
+        double d = (y2 && ![y2 isUndefined]) ? [y2 toDouble] : 1;
+        return tvOCR(a, b, c, d);
+    };
 
     // findImage(path[, x1,y1,x2,y2][, tol]) -> {x,y} (tỉ lệ) hoặc null.
     ctx[@"findImage"] =

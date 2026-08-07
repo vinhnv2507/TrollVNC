@@ -1347,6 +1347,7 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
         mk(@"if matchColor", @"if (matchColor(0.5, 0.5, \"FF3B30\", 15)) {\n  \n}\n"),
         mk(@"waitColor", @"waitColor(0.5, 0.5, \"34C759\", 10, 12);\n"),
         mk(@"findImage", @"let p = findImage(\"/var/mobile/Media/tpl.png\");\nif (p) tap(p.x, p.y);\n"),
+        mk(@"ocr (đọc chữ)", @"let s = ocr(0.0, 0.4, 1.0, 0.6);\n"),
     ]];
     UIMenu *aw = [UIMenu menuWithTitle:@"App / Web / Thông báo" children:@[
         mk(@"launchApp", @"launchApp(\"com.zing.zalo\");\n"),
