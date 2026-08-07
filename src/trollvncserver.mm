@@ -4626,6 +4626,37 @@ static BOOL tvSampleColor(double rx, double ry, uint8_t *oR, uint8_t *oG, uint8_
 }
 
 // args = x y RRGGBB [tol] : điểm (rx,ry) có màu gần RRGGBB trong dung sai không.
+// Nhật ký auto-click: bộ đệm vòng để PC kéo về theo dõi tiến trình (log/toast).
+static NSMutableArray<NSString *> *gAutoLog = nil;
+static NSObject *gAutoLogLock = nil;
+
+static void tvAutoLog(NSString *msg) {
+    if (!gAutoLogLock)
+        gAutoLogLock = [NSObject new];
+    @synchronized(gAutoLogLock) {
+        if (!gAutoLog)
+            gAutoLog = [NSMutableArray array];
+        static NSDateFormatter *fmt;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{
+            fmt = [NSDateFormatter new];
+            fmt.dateFormat = @"HH:mm:ss";
+        });
+        [gAutoLog addObject:[NSString stringWithFormat:@"%@  %@", [fmt stringFromDate:[NSDate date]],
+                                                       msg ?: @""]];
+        while (gAutoLog.count > 250)
+            [gAutoLog removeObjectAtIndex:0];
+    }
+}
+
+static NSString *tvAutoLogText(void) {
+    if (!gAutoLogLock)
+        gAutoLogLock = [NSObject new];
+    @synchronized(gAutoLogLock) {
+        return [(gAutoLog ?: @[]) componentsJoinedByString:@"\n"];
+    }
+}
+
 // ================= Engine JavaScript (JavaScriptCore), kiểu AutoTouch =========
 static BOOL tvSetAssistiveTouch(int mode); // định nghĩa ở dưới
 
@@ -4843,15 +4874,20 @@ static NSString *tvHttpRequest(NSString *method, NSString *urlStr, NSString *bod
 static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
         NSString *m = [e toString];
-        if (![m containsString:@"__STOP__"])
+        if (![m containsString:@"__STOP__"]) {
+            tvAutoLog([@"⚠ lỗi: " stringByAppendingString:(m ?: @"")]);
             TVLog(@"Auto-JS lỗi: %@", m);
+        }
     };
     ctx[@"sleep"] = ^(double sec) { tvAutoSleep(sec); tvJSStopIfNeeded(); };
     ctx[@"wait"] = ctx[@"sleep"];
     ctx[@"random"] = ^double(double a, double b) {
         return a + ((double)arc4random() / UINT32_MAX) * (b > a ? (b - a) : 0);
     };
-    ctx[@"log"] = ^(NSString *m) { TVLog(@"Auto-JS: %@", m); };
+    ctx[@"log"] = ^(NSString *m) {
+        tvAutoLog(m);
+        TVLog(@"Auto-JS: %@", m);
+    };
     ctx[@"stop"] = ^{
         gAutoStop.store(true);
         tvJSStopIfNeeded();
@@ -4948,6 +4984,7 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
 
     // Thông báo (banner trên máy) — daemon không có hộp thoại nên alert = banner.
     ctx[@"toast"] = ^(NSString *m) {
+        tvAutoLog([@"toast: " stringByAppendingString:(m ?: @"")]);
         dispatch_async(dispatch_get_main_queue(), ^{
             [[BulletinManager sharedManager] popBannerWithContent:m userInfo:nil];
         });
@@ -4993,9 +5030,11 @@ static void tvAutoStart(void) {
             gAutoRunning.store(true);
             JSContext *ctx = [[JSContext alloc] init];
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
+            tvAutoLog(@"▶ bắt đầu");
             TVLog(@"Auto-JS: chạy");
             [ctx evaluateScript:script]; // lỗi/dừng -> exceptionHandler nuốt gọn
             gAutoRunning.store(false);
+            tvAutoLog(@"■ dừng");
             TVLog(@"Auto-JS: xong/dừng");
         }
     });
@@ -5597,6 +5636,13 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     } else if ([cmd isEqualToString:@"autostatus"]) {
         resp = [(gAutoRunning.load() ? @"OK running\n" : @"OK stopped\n")
             dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd isEqualToString:@"autolog"]) {
+        // Trạng thái + nhật ký (base64 để không vướng xuống dòng).
+        NSString *b64 = [[tvAutoLogText() dataUsingEncoding:NSUTF8StringEncoding]
+            base64EncodedStringWithOptions:0];
+        NSString *s = [NSString stringWithFormat:@"OK %@ %@\n",
+                                                 gAutoRunning.load() ? @"running" : @"stopped", b64];
+        resp = [s dataUsingEncoding:NSUTF8StringEncoding];
     } else if ([cmd isEqualToString:@"autoget"]) {
         tvAutoLoadFromDisk();
         NSString *b64 = [[(gAutoScript ?: @"") dataUsingEncoding:NSUTF8StringEncoding]
