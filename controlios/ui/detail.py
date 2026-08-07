@@ -109,6 +109,7 @@ class DetailView(QWidget):
     def set_device(self, key: Optional[str]) -> None:
         self.key = key
         self._pixmap = None
+        self._image = None
         self._scaled = None
         self._cursor = None
         self._cursor_down = False
@@ -119,15 +120,32 @@ class DetailView(QWidget):
         """Bỏ ảnh đang hiển thị (giữ nguyên máy đang mở) — dùng khi nối lại để
         không giữ khung cũ/lồng lúc framebuffer đổi cỡ."""
         self._pixmap = None
+        self._image = None
         self._scaled = None
         self.update()
+
+    def color_at_fb(self, x: int, y: int) -> Optional[str]:
+        """Mã màu RRGGBB tại điểm framebuffer (x, y), hoặc None. Dùng cho 'get
+        color' — lấy màu để viết matchColor/waitColor trong kịch bản."""
+        image = self._image
+        if image is None or image.isNull():
+            return None
+        fw, fh = self._fb
+        if not fw or not fh:
+            return None
+        ix = max(0, min(image.width() - 1, int(x / fw * image.width())))
+        iy = max(0, min(image.height() - 1, int(y / fh * image.height())))
+        c = image.pixelColor(ix, iy)
+        return f"{c.red():02X}{c.green():02X}{c.blue():02X}"
 
     def on_frame(self, frame: Frame) -> None:
         if frame.key != self.key:
             return
         # fromImage đã sao chép điểm ảnh vào pixmap, nên .copy() ở đây là thừa
         # một lần sao chép cả khung hình.
-        self._pixmap = QPixmap.fromImage(qimage_for(frame))
+        image = qimage_for(frame)
+        self._image = image                  # giữ để đọc màu điểm ảnh (get color)
+        self._pixmap = QPixmap.fromImage(image)
         self._fb = (frame.full_width, frame.full_height)
         self._scaled = None                  # khung mới -> phải thu phóng lại
         self.update()

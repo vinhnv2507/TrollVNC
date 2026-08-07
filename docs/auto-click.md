@@ -34,6 +34,10 @@ let x = 0.5; function foo(){ ... }   // biến, hàm — JS đầy đủ
 stop();                        // dừng kịch bản
 log('thông báo');              // ghi log daemon
 ```
+> **Lấy màu trên PC:** rê chuột trên khung điều khiển lớn — thanh dưới hiện
+> `x=.. y=..  ·  0.500 0.900  ·  #RRGGBB`. Đọc **tỉ lệ + mã màu** ngay tại điểm
+> đó để dán vào `matchColor(0.500, 0.900, "RRGGBB", 15)`.
+
 **Dò MÀU** (đọc màn thật)
 ```js
 getColor(0.5, 0.5);                    // -> "RRGGBB"

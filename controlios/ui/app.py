@@ -2108,9 +2108,11 @@ class MainWindow(QMainWindow):
     def _on_pointer_moved(self, x: int, y: int) -> None:
         ratios = self._ratios(x, y)
         if ratios:
-            self.coords_label.setText(
-                f"x={x} y={y}  ·  {ratios[0]:.3f} {ratios[1]:.3f}"
-            )
+            text = f"x={x} y={y}  ·  {ratios[0]:.3f} {ratios[1]:.3f}"
+            color = self.detail.color_at_fb(x, y)
+            if color:
+                text += f"  ·  #{color}"
+            self.coords_label.setText(text)
         if not self.detail.key or self._broadcasting():
             return
         if self.detail._dragging:
