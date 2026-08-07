@@ -4759,6 +4759,34 @@ static BOOL tvFindImage(NSString *path, double rx1, double ry1, double rx2, doub
     return NO;
 }
 
+// HTTP đồng bộ (chạy trên luồng auto nền, chặn bằng semaphore — completion chạy
+// ở luồng khác nên không deadlock). Trả về nội dung phản hồi (chuỗi).
+static NSString *tvHttpRequest(NSString *method, NSString *urlStr, NSString *body, NSString *contentType) {
+    NSURL *url = [NSURL URLWithString:urlStr];
+    if (!url)
+        return @"";
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url];
+    req.HTTPMethod = method;
+    req.timeoutInterval = 20;
+    if (body.length) {
+        req.HTTPBody = [body dataUsingEncoding:NSUTF8StringEncoding];
+        [req setValue:(contentType.length ? contentType : @"application/x-www-form-urlencoded")
+            forHTTPHeaderField:@"Content-Type"];
+    }
+    __block NSString *result = @"";
+    dispatch_semaphore_t sem = dispatch_semaphore_create(0);
+    NSURLSessionDataTask *task = [[NSURLSession sharedSession]
+        dataTaskWithRequest:req
+          completionHandler:^(NSData *data, NSURLResponse *resp, NSError *err) {
+              if (data)
+                  result = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+              dispatch_semaphore_signal(sem);
+          }];
+    [task resume];
+    dispatch_semaphore_wait(sem, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC)));
+    return result;
+}
+
 // Cài API native cho JS (kiểu AutoTouch). gen bắt trong block.
 static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
@@ -4842,6 +4870,37 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
         return NO;
     };
     ctx[@"assistiveTouch"] = ^(BOOL on) { tvSetAssistiveTouch(on ? 1 : 0); };
+
+    // App / URL (đóng-mở app theo bundle id, mở URL).
+    ctx[@"launchApp"] = ^(NSString *b) { tvCtlLaunchApp(b); };
+    ctx[@"killApp"] = ^(NSString *b) { tvCtlTerminateApp(b); };
+    ctx[@"openURL"] = ^(NSString *u) { tvCtlOpenURL(u); };
+    ctx[@"openURLIn"] = ^(NSString *b, NSString *u) { tvCtlOpenURLInApp(b, u); };
+
+    // Tệp (đọc/ghi chuỗi; JSON dùng JSON.parse/stringify có sẵn của JS).
+    ctx[@"readFile"] = ^NSString *(NSString *p) {
+        return [NSString stringWithContentsOfFile:p encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+    };
+    ctx[@"writeFile"] = ^BOOL(NSString *p, NSString *s) {
+        return [s writeToFile:p atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    };
+    ctx[@"fileExists"] = ^BOOL(NSString *p) {
+        return [[NSFileManager defaultManager] fileExistsAtPath:p];
+    };
+
+    // HTTP (đồng bộ).
+    ctx[@"httpGet"] = ^NSString *(NSString *u) { return tvHttpRequest(@"GET", u, nil, nil); };
+    ctx[@"httpPost"] = ^NSString *(NSString *u, NSString *body, JSValue *ct) {
+        return tvHttpRequest(@"POST", u, body, (ct && ![ct isUndefined]) ? [ct toString] : nil);
+    };
+
+    // Thông báo (banner trên máy) — daemon không có hộp thoại nên alert = banner.
+    ctx[@"toast"] = ^(NSString *m) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[BulletinManager sharedManager] popBannerWithContent:m userInfo:nil];
+        });
+    };
+    ctx[@"alert"] = ctx[@"toast"];
 
     // findImage(path[, x1,y1,x2,y2][, tol]) -> {x,y} (tỉ lệ) hoặc null.
     ctx[@"findImage"] =

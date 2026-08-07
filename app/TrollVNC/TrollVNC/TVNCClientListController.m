@@ -1236,10 +1236,16 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
     self.title = @"Tự động chạm";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
 
-    self.navigationItem.leftBarButtonItem =
+    UIBarButtonItem *closeItem =
         [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose
                                                       target:self
                                                       action:@selector(dismissSelf)];
+    UIBarButtonItem *insertItem = [[UIBarButtonItem alloc] initWithTitle:@"＋ Chèn"
+                                                                  style:UIBarButtonItemStylePlain
+                                                                 target:nil
+                                                                 action:nil];
+    insertItem.menu = [self insertMenu];
+    self.navigationItem.leftBarButtonItems = @[ closeItem, insertItem ];
     UIBarButtonItem *start = [[UIBarButtonItem alloc] initWithTitle:@"▶ Bắt đầu"
                                                              style:UIBarButtonItemStyleDone
                                                             target:self
@@ -1254,14 +1260,12 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
     hint.numberOfLines = 0;
     hint.font = [UIFont systemFontOfSize:12];
     hint.textColor = [UIColor secondaryLabelColor];
-    hint.text = @"JavaScript (như AutoTouch). Toạ độ TỈ LỆ 0..1. Hàm: tap(x,y) · "
-                @"tapRegion(x1,y1,x2,y2) · doubleTap · twoFingerTap · threeFingerTap · "
-                @"longPress(x,y,giây) · swipe(x1,y1,x2,y2,giây) · home() · key('a') · "
-                @"typeText('...') · sleep(giây) · random(a,b) · getColor(x,y)->'RRGGBB' · "
-                @"matchColor(x,y,'RRGGBB',sai)->bool · waitColor(x,y,'RRGGBB',giây,sai) · "
-                @"findImage('/đường/dẫn.png'[,x1,y1,x2,y2][,sai])->{x,y}|null · "
-                @"assistiveTouch(true/false) · stop() · log('...'). Dùng while/for/if của JS. "
-                @"Mẹo: lấy toạ độ trên khung VNC ở PC (góc dưới hiện tỉ lệ).";
+    hint.text = @"JavaScript (như AutoTouch) — bấm “＋ Chèn” để chèn lệnh sẵn. Toạ độ TỈ "
+                @"LỆ 0..1. Cử chỉ: tap·tapRegion·doubleTap·two/threeFingerTap·longPress·swipe·"
+                @"home·key·typeText. Chờ/lặp: sleep·random·while·for·if·stop. Màu/ảnh: "
+                @"getColor·matchColor·waitColor·findImage. App/Web: launchApp·killApp·openURL·"
+                @"openURLIn·httpGet·httpPost·toast. Tệp: readFile·writeFile·fileExists (JSON có "
+                @"sẵn: JSON.parse/stringify). Mẹo: lấy toạ độ trên khung VNC ở PC (góc dưới).";
     hint.translatesAutoresizingMaskIntoConstraints = NO;
 
     self.editor = [UITextView new];
@@ -1300,6 +1304,67 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
 
 - (void)dismissSelf {
     [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)insertSnippet:(NSString *)s {
+    NSRange r = self.editor.selectedRange;
+    if (r.location == NSNotFound || r.location > self.editor.text.length)
+        r = NSMakeRange(self.editor.text.length, 0);
+    NSMutableString *t = [self.editor.text mutableCopy];
+    [t replaceCharactersInRange:r withString:s];
+    self.editor.text = t;
+    self.editor.selectedRange = NSMakeRange(r.location + s.length, 0);
+}
+
+// Bảng chèn lệnh JS, gom nhóm.
+- (UIMenu *)insertMenu {
+    __weak typeof(self) weakSelf = self;
+    UIAction * (^mk)(NSString *, NSString *) = ^UIAction *(NSString *title, NSString *snip) {
+        return [UIAction actionWithTitle:title
+                                   image:nil
+                              identifier:nil
+                                 handler:^(__kindof UIAction *a) { [weakSelf insertSnippet:snip]; }];
+    };
+    UIMenu *gestures = [UIMenu menuWithTitle:@"Cử chỉ" children:@[
+        mk(@"tap", @"tap(0.5, 0.5);\n"),
+        mk(@"tapRegion (ngẫu nhiên)", @"tapRegion(0.4, 0.8, 0.6, 0.95);\n"),
+        mk(@"swipe", @"swipe(0.5, 0.8, 0.5, 0.3, 0.4);\n"),
+        mk(@"longPress", @"longPress(0.5, 0.5, 1.0);\n"),
+        mk(@"doubleTap / twoFingerTap", @"doubleTap(0.5, 0.5);\n"),
+        mk(@"home", @"home();\n"),
+        mk(@"typeText / key", @"typeText(\"noi dung\");\n"),
+    ]];
+    UIMenu *flow = [UIMenu menuWithTitle:@"Chờ / Lặp / Điều kiện" children:@[
+        mk(@"sleep", @"sleep(1);\n"),
+        mk(@"sleep ngẫu nhiên", @"sleep(random(1, 3));\n"),
+        mk(@"while (lặp mãi)", @"while (true) {\n  \n}\n"),
+        mk(@"for N lần", @"for (let i = 0; i < 10; i++) {\n  \n}\n"),
+        mk(@"if", @"if (cond) {\n  \n}\n"),
+        mk(@"stop", @"stop();\n"),
+    ]];
+    UIMenu *ci = [UIMenu menuWithTitle:@"Màu / Ảnh" children:@[
+        mk(@"getColor", @"let c = getColor(0.5, 0.5);\n"),
+        mk(@"if matchColor", @"if (matchColor(0.5, 0.5, \"FF3B30\", 15)) {\n  \n}\n"),
+        mk(@"waitColor", @"waitColor(0.5, 0.5, \"34C759\", 10, 12);\n"),
+        mk(@"findImage", @"let p = findImage(\"/var/mobile/Media/tpl.png\");\nif (p) tap(p.x, p.y);\n"),
+    ]];
+    UIMenu *aw = [UIMenu menuWithTitle:@"App / Web / Thông báo" children:@[
+        mk(@"launchApp", @"launchApp(\"com.zing.zalo\");\n"),
+        mk(@"killApp", @"killApp(\"com.zing.zalo\");\n"),
+        mk(@"openURL", @"openURL(\"https://\");\n"),
+        mk(@"httpGet", @"let r = httpGet(\"https://\");\n"),
+        mk(@"httpPost", @"let r = httpPost(\"https://\", \"a=1&b=2\");\n"),
+        mk(@"toast", @"toast(\"noi dung\");\n"),
+    ]];
+    UIMenu *fl = [UIMenu menuWithTitle:@"Tệp / Khác" children:@[
+        mk(@"readFile", @"let s = readFile(\"/var/mobile/x.txt\");\n"),
+        mk(@"writeFile", @"writeFile(\"/var/mobile/x.txt\", \"noi dung\");\n"),
+        mk(@"fileExists", @"if (fileExists(\"/var/mobile/x.txt\")) {\n  \n}\n"),
+        mk(@"JSON.parse", @"let o = JSON.parse(readFile(\"/var/mobile/x.json\"));\n"),
+        mk(@"assistiveTouch", @"assistiveTouch(true);\n"),
+        mk(@"log", @"log(\"debug\");\n"),
+    ]];
+    return [UIMenu menuWithTitle:@"Chèn lệnh" children:@[ gestures, flow, ci, aw, fl ]];
 }
 
 - (void)loadScript {
