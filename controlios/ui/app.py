@@ -119,6 +119,7 @@ class Bridge(QObject):
     apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
     snapshots_loaded = Signal(str, object, str)  # key, danh sách Snapshot, lỗi
     autolog_loaded = Signal(str, bool, str)      # key, đang chạy, nhật ký
+    color_read = Signal(str, float, float, str)  # key, rx, ry, "RRGGBB" (rỗng nếu trượt)
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
@@ -656,6 +657,7 @@ class JsAutoClickDialog(QDialog):
         # Kéo nhật ký từ máy đầu tiên đang chọn mỗi ~1.2s để theo dõi tiến trình.
         self._poll_key = None
         self.window.bridge.autolog_loaded.connect(self._on_autolog)
+        self.window.bridge.color_read.connect(self._on_color_read)
         self.poll_timer = QTimer(self)
         self.poll_timer.setInterval(1200)
         self.poll_timer.timeout.connect(self._poll_log)
@@ -663,10 +665,12 @@ class JsAutoClickDialog(QDialog):
 
     def closeEvent(self, event) -> None:
         self.poll_timer.stop()
-        try:
-            self.window.bridge.autolog_loaded.disconnect(self._on_autolog)
-        except (RuntimeError, TypeError):
-            pass
+        for sig, slot in ((self.window.bridge.autolog_loaded, self._on_autolog),
+                          (self.window.bridge.color_read, self._on_color_read)):
+            try:
+                sig.disconnect(slot)
+            except (RuntimeError, TypeError):
+                pass
         super().closeEvent(event)
 
     def _poll_log(self) -> None:
@@ -710,8 +714,27 @@ class JsAutoClickDialog(QDialog):
         self.window.begin_color_pick(self._finish_pick)
 
     def _finish_pick(self, rx: float, ry: float, hexcolor: Optional[str]) -> None:
+        # Màu ở PC (hexcolor) chỉ gần đúng vì khung bị thu nhỏ/nén. Hỏi THẲNG máy
+        # để lấy pixel gốc — đúng cái auto-click (getColor/matchColor) dùng.
+        self._pick_pc_hex = hexcolor
+        key = self.window.detail.key
+        if key:
+            self.status.setText("Đang hỏi màu thật từ máy…")
+            self.window.pool.read_color(
+                key, rx, ry,
+                on_done=lambda k, hx: self.window.bridge.color_read.emit(k, rx, ry, hx or ""))
+        else:
+            self._insert_color(rx, ry, hexcolor)
+
+    def _on_color_read(self, key: str, rx: float, ry: float, hexv: str) -> None:
+        # Ưu tiên màu thật từ máy; máy cũ chưa hỗ trợ lệnh 'color' -> dùng tạm màu PC.
+        real = hexv or getattr(self, "_pick_pc_hex", None)
+        self._insert_color(rx, ry, real, from_device=bool(hexv))
+
+    def _insert_color(self, rx: float, ry: float, hexcolor: Optional[str],
+                      from_device: bool = False) -> None:
         if hexcolor is None:
-            self.status.setText("Chưa có khung hình để lấy màu — thử lại.")
+            self.status.setText("Chưa lấy được màu (máy chưa có khung?) — thử lại.")
             return
         kind = getattr(self, "_pick_kind", "match")
         snippet = {
@@ -721,15 +744,16 @@ class JsAutoClickDialog(QDialog):
             "tap": f'tap({rx:.3f}, {ry:.3f})',
             "hex": hexcolor,
         }.get(kind, f'matchColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 15)')
+        src = "màu THẬT từ máy" if from_device else "màu PC (gần đúng — máy chưa hỗ trợ)"
         QApplication.clipboard().setText(snippet)
         if kind == "hex":
-            self.status.setText(f"Đã chép mã màu: #{snippet}")
+            self.status.setText(f"Đã chép mã màu: #{snippet}  ({src})")
             return
         cursor = self.editor.textCursor()
         prefix = "" if cursor.atBlockStart() else "\n"
         cursor.insertText(f"{prefix}{snippet};\n")
         self.editor.setTextCursor(cursor)
-        self.status.setText(f"Đã chèn + chép: {snippet}")
+        self.status.setText(f"Đã chèn + chép: {snippet}  ({src})")
 
     def _on_autolog(self, key: str, running: bool, log: str) -> None:
         if key != self._poll_key:

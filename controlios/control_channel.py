@@ -543,6 +543,20 @@ class ControlChannel:
 
         await self.command("autologclear")
 
+    async def get_color(self, rx: float, ry: float) -> Optional[str]:
+        """Đọc MÀU THẬT "RRGGBB" tại điểm tỉ lệ (rx, ry) trên máy — daemon lấy
+        pixel gốc trên framebuffer (đúng cái getColor/matchColor auto-click dùng),
+        chuẩn hơn đọc từ khung đã nén ở PC. None nếu máy chưa có khung/không hỗ trợ."""
+
+        try:
+            text = (await self.command(f"color {rx:.4f} {ry:.4f}")).strip()
+        except NotPatchedError:
+            return None          # bản TrollVNC cũ chưa có lệnh 'color'
+        parts = text.split()
+        if len(parts) >= 2 and parts[0] == "OK" and len(parts[1]) == 6:
+            return parts[1].upper()
+        return None
+
     async def set_scale(self, factor: float) -> None:
         """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.
 

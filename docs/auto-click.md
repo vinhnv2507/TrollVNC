@@ -41,6 +41,12 @@ log('thông báo');              // ghi log daemon
 > rồi bấm 1 điểm trên màn hình lớn → lệnh **tự chèn vào ô soạn + chép clipboard**.
 > Menu ▾ chọn kiểu: `matchColor` / `waitColor` / `getColor` / `tap(x,y)` / chỉ
 > chép `#RRGGBB`. (Bấm thẳng nút = `matchColor`.)
+>
+> Khi lấy màu, PC **hỏi thẳng máy** (lệnh control `color rx ry`) để lấy **màu
+> THẬT** — daemon đọc pixel gốc trên framebuffer, đúng cái `getColor`/`matchColor`
+> auto-click dùng, nên **khớp tuyệt đối** (không lệ thuộc khung PC bị nén). Status
+> ghi rõ “màu THẬT từ máy”. Máy chạy bản TrollVNC cũ (chưa có lệnh này) thì tự lùi
+> về màu đọc ở PC (gần đúng) và báo rõ.
 
 **Dò MÀU** (đọc màn thật)
 ```js

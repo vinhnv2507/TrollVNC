@@ -49,6 +49,15 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         user_names = [a.display_name for a in apps if a.is_user_app]
         self.assertEqual(user_names, sorted(user_names, key=str.lower))
 
+    async def test_get_color_returns_hex(self) -> None:
+        self.server.color_hex = "4285F4"
+        hexv = await self.channel.get_color(0.5, 0.2)
+        self.assertEqual(hexv, "4285F4")
+
+    async def test_get_color_none_when_unpatched(self) -> None:
+        self.server.unpatched = True
+        self.assertIsNone(await self.channel.get_color(0.5, 0.2))
+
     async def test_launch_marks_app_running(self) -> None:
         await self.channel.launch("com.honeygain.app")
         self.assertEqual(self.server.launched, ["com.honeygain.app"])

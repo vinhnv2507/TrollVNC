@@ -622,6 +622,19 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def read_color(self, key: str, rx: float, ry: float, on_done) -> None:
+        """Đọc MÀU THẬT tại điểm tỉ lệ (rx, ry) trên MỘT máy (daemon lấy pixel
+        gốc). on_done(key, hex_or_None)."""
+
+        async def run() -> None:
+            try:
+                hexv = await self._channel(key).get_color(rx, ry)
+                on_done(key, hexv)
+            except Exception:
+                on_done(key, None)
+
+        self._call_coro(run())
+
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
         """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).
