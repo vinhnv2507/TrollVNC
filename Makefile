@@ -79,6 +79,7 @@ trollvncserver_FRAMEWORKS += CoreVideo
 trollvncserver_FRAMEWORKS += Foundation
 trollvncserver_FRAMEWORKS += IOKit
 trollvncserver_FRAMEWORKS += IOSurface
+trollvncserver_FRAMEWORKS += JavaScriptCore
 trollvncserver_FRAMEWORKS += QuartzCore
 trollvncserver_FRAMEWORKS += Security
 trollvncserver_FRAMEWORKS += UIKit
