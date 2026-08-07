@@ -343,7 +343,7 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     self.monitor = nw_path_monitor_create();
     nw_path_monitor_set_queue(self.monitor, dispatch_get_main_queue());
 
-    __weak typeof(self) weakSelf = self;
+    // (weakSelf đã khai báo ở trên cho menu Công cụ — dùng lại.)
     nw_path_monitor_set_update_handler(self.monitor, ^(nw_path_t _Nonnull path) {
         [weakSelf updateFirstGroupAndReload:YES];
     });

@@ -4667,8 +4667,9 @@ static uint8_t *tvLoadImageRGBA(NSString *path, int *outW, int *outH) {
     if (!buf)
         return NULL;
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef c = CGBitmapContextCreate(buf, w, h, 8, w * 4, cs,
-                                           kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGContextRef c = CGBitmapContextCreate(
+        buf, w, h, 8, w * 4, cs,
+        (uint32_t)(kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big));
     CGColorSpaceRelease(cs);
     if (!c) {
         free(buf);
