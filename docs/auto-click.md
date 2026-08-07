@@ -54,7 +54,7 @@ launchApp("com.zing.zalo");           // mở app theo bundle id
 killApp("com.zing.zalo");             // đóng app
 openURL("https://x.com");             // mở URL (app mặc định)
 openURLIn("com.zing.zalo", "zalo://"); // mở URL bằng app chỉ định
-toast("Xong!");                       // ghi vào NHẬT KÝ + thử banner (alert = toast)
+toast("Xong!");                       // ghi vào NHẬT KÝ (xem trên PC), alert cũng vậy
 log("bước 1 xong");                    // ghi nhật ký (xem trên PC hoặc log daemon)
 ```
 **Tệp / HTTP / JSON**
@@ -93,10 +93,9 @@ Kịch bản lưu ở `/var/mobile/Library/controlios/autoscript.txt`.
 đầu tiên đang chọn (~1.2s/lần), hiện cả `▶ bắt đầu`, `■ dừng`, `⚠ lỗi`. Đây là
 cách theo dõi đáng tin nhất.
 
-> `toast` **cũng** thử hiện banner trên màn iPhone, nhưng banner là **thông báo
-> hệ thống** nên chỉ hiện khi ControlIOS được **cấp quyền Thông báo** (Cài đặt →
-> Thông báo → ControlIOS) và thường không hiện khi đang ở trong app khác. Vì vậy
-> **nhật ký trên PC là chỗ xem chắc chắn**.
+> `toast`/`alert` **chỉ ghi vào nhật ký** (xem trên PC). Máy chỉ-TrollStore
+> (không jailbreak) không vẽ được chữ nổi đè lên app khác — muốn HUD nổi kiểu
+> AutoTouch cần tweak inject vào SpringBoard (chỉ có khi jailbreak).
 
 ## Ghi chú
 - Chạy trong **daemon**, luồng riêng, tách khỏi luồng VNC. Lỗi JS **không sập
