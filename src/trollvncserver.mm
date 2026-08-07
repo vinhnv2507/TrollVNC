@@ -5640,6 +5640,13 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         NSString *s = [NSString stringWithFormat:@"OK %@ %@\n",
                                                  gAutoRunning.load() ? @"running" : @"stopped", b64];
         resp = [s dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd isEqualToString:@"autologclear"]) {
+        if (!gAutoLogLock)
+            gAutoLogLock = [NSObject new];
+        @synchronized(gAutoLogLock) {
+            [gAutoLog removeAllObjects];
+        }
+        resp = [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
     } else if ([cmd isEqualToString:@"autoget"]) {
         tvAutoLoadFromDisk();
         NSString *b64 = [[(gAutoScript ?: @"") dataUsingEncoding:NSUTF8StringEncoding]
