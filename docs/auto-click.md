@@ -87,9 +87,15 @@ let r = httpGet("https://api.example.com/data");    // GET (đồng bộ) -> chu
 let r2 = httpPost("https://api.example.com", "a=1&b=2"); // POST
 ```
 
-> Trong trình soạn, bấm **“＋ Chèn”** để chọn lệnh chèn sẵn (gom nhóm: Cử chỉ /
-> Chờ-Lặp / Màu-Ảnh / App-Web / Tệp). Kịch bản **lưu tự động** trên máy (bấm Bắt
-> đầu là lưu); vòng lặp dùng `while`/`for` của JS.
+> Trong trình soạn, bấm **“＋ Chèn”** để chọn lệnh chèn sẵn: cử chỉ, chờ-lặp,
+> màu-ảnh, app-web, tệp, và **cấu trúc** — hàm, vòng lặp có **nhãn**
+> (`break/continue label`), **khung máy-trạng-thái** (thay `goto`/label kiểu
+> AutoTouch), `try/catch`, `switch`, mảng, JSON. Kịch bản **lưu tự động** trên
+> máy (bấm Bắt đầu là lưu).
+>
+> JS **không có `goto`**, nhưng dùng **hàm** hoặc **máy trạng thái** thay được:
+> đặt `let buoc = "..."`, mỗi `case` là một nhãn, gán `buoc = "tên"` chính là
+> "nhảy tới". Vòng lặp lồng thì dùng nhãn: `ngoai: for(...){ break ngoai; }`.
 
 ### Ví dụ: chỉ bấm khi nút đỏ hiện, tối đa 100 lần
 ```js

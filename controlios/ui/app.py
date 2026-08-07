@@ -555,6 +555,41 @@ JS_SNIPPETS = [
     ("let r = httpGet(\"https://\");", "HTTP GET"),
     ("toast(\"noi dung\");", "thông báo trên máy"),
     ("assistiveTouch(true);", "bật AssistiveTouch"),
+    ("log(\"buoc 1\");", "ghi nhật ký"),
+    ("setTrace(false);", "tắt tự ghi tiến trình"),
+    # ----- Cấu trúc: hàm / nhãn / máy trạng thái (thay goto) -----
+    ("function tapNeuMau(x, y, mau) {\n"
+     "  if (matchColor(x, y, mau, 15)) { tap(x, y); return true; }\n"
+     "  return false;\n"
+     "}", "hàm: chạm nếu đúng màu"),
+    ("function buoc() {\n  \n}\nbuoc();", "định nghĩa & gọi hàm"),
+    ("ngoai: for (let i = 0; i < 5; i++) {\n"
+     "  for (let j = 0; j < 5; j++) {\n"
+     "    if (dieuKien) break ngoai;      // nhảy ra vòng ngoài\n"
+     "    // continue ngoai; // sang lượt vòng ngoài\n"
+     "  }\n"
+     "}", "vòng lặp có NHÃN (break/continue)"),
+    ("let buoc = \"start\";\n"
+     "while (buoc !== \"xong\") {\n"
+     "  switch (buoc) {\n"
+     "    case \"start\":\n"
+     "      if (matchColor(0.5, 0.2, \"1E1E1E\", 15)) buoc = \"lam\";\n"
+     "      else buoc = \"cho\";\n"
+     "      break;\n"
+     "    case \"cho\":\n"
+     "      sleep(1); buoc = \"start\";       // ~ goto start\n"
+     "      break;\n"
+     "    case \"lam\":\n"
+     "      tap(0.5, 0.8);\n"
+     "      buoc = waitColor(0.5, 0.9, \"34C759\", 10, 12) ? \"xong\" : \"start\";\n"
+     "      break;\n"
+     "  }\n"
+     "}\nlog(\"hoan tat\");", "khung MÁY TRẠNG THÁI (thay goto/label)"),
+    ("try {\n  \n} catch (e) {\n  log(\"loi: \" + e);\n}", "try/catch bắt lỗi"),
+    ("switch (x) {\n  case 1:\n    break;\n  default:\n    break;\n}", "switch/case"),
+    ("let arr = [[0.3,0.7],[0.5,0.7],[0.7,0.7]];\n"
+     "for (let p of arr) tap(p[0], p[1]);", "mảng điểm → chạm lần lượt"),
+    ("let o = JSON.parse(readFile(\"/var/mobile/cfg.json\"));", "đọc JSON từ tệp"),
 ]
 
 
