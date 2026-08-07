@@ -4983,13 +4983,10 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     };
 
     // Thông báo (banner trên máy) — daemon không có hộp thoại nên alert = banner.
-    ctx[@"toast"] = ^(NSString *m) {
-        tvAutoLog([@"toast: " stringByAppendingString:(m ?: @"")]);
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [[BulletinManager sharedManager] popBannerWithContent:m userInfo:nil];
-        });
-    };
-    ctx[@"alert"] = ctx[@"toast"];
+    // Máy chỉ-TrollStore (không jailbreak) không vẽ HUD đè lên app được, nên
+    // toast/alert chỉ GHI NHẬT KÝ — xem trên PC (Auto-click JS → ô Nhật ký).
+    ctx[@"toast"] = ^(NSString *m) { tvAutoLog([@"toast: " stringByAppendingString:(m ?: @"")]); };
+    ctx[@"alert"] = ^(NSString *m) { tvAutoLog([@"alert: " stringByAppendingString:(m ?: @"")]); };
 
     // OCR: đọc chữ trong vùng màn (Vision). ocr([x1,y1,x2,y2]) -> chuỗi.
     ctx[@"ocr"] = ^NSString *(JSValue *x1, JSValue *y1, JSValue *x2, JSValue *y2) {
