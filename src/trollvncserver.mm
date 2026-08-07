@@ -5652,6 +5652,22 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         NSString *b64 = [[(gAutoScript ?: @"") dataUsingEncoding:NSUTF8StringEncoding]
             base64EncodedStringWithOptions:0];
         resp = [[NSString stringWithFormat:@"OK %@\n", b64] dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd hasPrefix:@"color "]) {
+        // color <rx> <ry> : đọc MÀU THẬT tại điểm tỉ lệ trên framebuffer -> OK RRGGBB
+        // Dùng cho PC lấy màu chuẩn (đúng cái getColor/matchColor auto-click dùng).
+        NSArray *parts = [cmd componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceCharacterSet]];
+        if (parts.count >= 3) {
+            double rx = [parts[1] doubleValue], ry = [parts[2] doubleValue];
+            uint8_t r, g, b;
+            if (tvSampleColor(rx, ry, &r, &g, &b)) {
+                resp = [[NSString stringWithFormat:@"OK %02X%02X%02X\n", r, g, b]
+                    dataUsingEncoding:NSUTF8StringEncoding];
+            } else {
+                resp = [@"ERR NoFrame\n" dataUsingEncoding:NSUTF8StringEncoding];
+            }
+        } else {
+            resp = [@"ERR Args\n" dataUsingEncoding:NSUTF8StringEncoding];
+        }
     } else {
         resp = [@"ERR Unknown\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
