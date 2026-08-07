@@ -48,6 +48,28 @@ let q = findImage("/var/mobile/Media/tpl.png", 0,0.5,1,1, 24); // vùng + sai s�
 if (p) tap(p.x, p.y);   // p = {x, y} tỉ lệ tâm, hoặc null nếu không thấy
 ```
 
+**App / URL / Thông báo**
+```js
+launchApp("com.zing.zalo");           // mở app theo bundle id
+killApp("com.zing.zalo");             // đóng app
+openURL("https://x.com");             // mở URL (app mặc định)
+openURLIn("com.zing.zalo", "zalo://"); // mở URL bằng app chỉ định
+toast("Xong!");                       // banner thông báo trên máy (alert = toast)
+```
+**Tệp / HTTP / JSON**
+```js
+let s = readFile("/var/mobile/x.txt");        // đọc chuỗi
+writeFile("/var/mobile/x.txt", "nội dung");   // ghi
+if (fileExists("/var/mobile/x.json")) { ... }
+let o = JSON.parse(readFile("/var/mobile/x.json")); // JSON có SẴN của JS
+let r = httpGet("https://api.example.com/data");    // GET (đồng bộ) -> chuỗi
+let r2 = httpPost("https://api.example.com", "a=1&b=2"); // POST
+```
+
+> Trong trình soạn, bấm **“＋ Chèn”** để chọn lệnh chèn sẵn (gom nhóm: Cử chỉ /
+> Chờ-Lặp / Màu-Ảnh / App-Web / Tệp). Kịch bản **lưu tự động** trên máy (bấm Bắt
+> đầu là lưu); vòng lặp dùng `while`/`for` của JS.
+
 ### Ví dụ: chỉ bấm khi nút đỏ hiện, tối đa 100 lần
 ```js
 for (let i = 0; i < 100 && !false; i++) {
