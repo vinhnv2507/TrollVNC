@@ -646,6 +646,17 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def set_smoothness(self, keys: Iterable[str], inflight: int, defer: float,
+                       orientation_sync: bool, on_event=None, on_done=None) -> None:
+        """Áp tham số ĐỘ MƯỢT (Q/defer/xoay) lên nhiều máy — không resize nên
+        KHÔNG nối lại, không chớp đen."""
+
+        async def action(channel):
+            await channel.set_smoothness(inflight, defer, orientation_sync)
+            return f"Q={inflight} defer={defer:.3f} xoay={'on' if orientation_sync else 'off'}"
+
+        self._bulk_app_action(keys, "Độ mượt", action, on_event, on_done)
+
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
         """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).

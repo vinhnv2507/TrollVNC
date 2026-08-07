@@ -58,6 +58,15 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.server.unpatched = True
         self.assertIsNone(await self.channel.get_color(0.5, 0.2))
 
+    async def test_set_smoothness_sends_three_commands(self) -> None:
+        # Không ném lỗi và gửi đủ 3 lệnh (lệnh cuối lưu lại ở fake).
+        await self.channel.set_smoothness(1, 0.008, False)
+        self.assertEqual(self.server.smoothness, "setorient off")
+
+    async def test_set_smoothness_tolerates_unpatched(self) -> None:
+        self.server.unpatched = True
+        await self.channel.set_smoothness(1, 0.008, False)  # không được ném
+
     async def test_push_prelude_sends_base64(self) -> None:
         import base64
         await self.channel.push_prelude("function foo(){}")

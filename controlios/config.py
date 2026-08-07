@@ -157,6 +157,14 @@ class Settings:
     # control socket (setscale); cần TrollVNC đã vá vòng 5.
     device_scale: float = 1.0
 
+    # Độ mượt áp LÊN MÁY qua control socket (không resize -> không nối lại):
+    #  - device_low_latency: True -> Q=1 (bỏ khung cũ) + defer nhỏ -> trễ thấp nhất;
+    #    False -> Q=2 + defer vừa -> mượt hơn khi mạng ổn.
+    #  - device_orientation_sync: False (mặc định) bỏ qua xoay -> HẾT chớp đen khi
+    #    app xoay; bật nếu thật sự cần xoay theo máy.
+    device_low_latency: bool = True
+    device_orientation_sync: bool = False
+
     # Cuộn "thuận iOS": lăn bánh xe lên -> nội dung đi như vuốt trên iPhone. Bật
     # (mặc định) đảo chiều lăn cho khớp cảm giác cuộn của iOS; tắt để giữ chiều
     # kiểu desktop.

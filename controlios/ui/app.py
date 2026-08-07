@@ -1855,7 +1855,9 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
 
     def _open_quality_dialog(self) -> None:
-        old_scale = self.registry.settings.device_scale
+        s0 = self.registry.settings
+        old_scale = s0.device_scale
+        old_smooth = (s0.device_low_latency, s0.device_orientation_sync)
         dialog = QualityDialog(self.registry.settings, self)
         if dialog.exec() != QDialog.Accepted:
             return
@@ -1863,6 +1865,18 @@ class MainWindow(QMainWindow):
         # Phiên đọc Settings ở mỗi vòng nhịp nên đổi là ăn ngay, khỏi nối lại.
         self.registry.save(self.registry_path)
         settings = self.registry.settings
+
+        # Độ mượt (Q/defer/xoay) đi qua control socket — KHÔNG resize nên áp thẳng
+        # lên máy online, không nối lại. Chỉ phát khi đổi.
+        if (settings.device_low_latency, settings.device_orientation_sync) != old_smooth:
+            targets = self.pool.online_keys()
+            if targets:
+                inflight = 1 if settings.device_low_latency else 2
+                defer = 0.008 if settings.device_low_latency else 0.015
+                self.pool.set_smoothness(
+                    targets, inflight, defer, settings.device_orientation_sync,
+                    on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+                    on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
         # Scale đi qua control socket của từng máy (không phải Settings phía PC),
         # nên phải phát riêng — và chỉ khi thật sự đổi để tránh nối lại vô cớ.

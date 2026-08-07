@@ -580,6 +580,25 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không đổi được scale: {text.strip()}")
 
+    async def set_smoothness(self, inflight: int, defer: float,
+                             orientation_sync: bool) -> None:
+        """Chỉnh các tham số ĐỘ MƯỢT lúc chạy — KHÔNG resize nên không nối lại.
+
+        - inflight: số khung tối đa đang mã hoá trước khi bỏ khung mới (Q). 1 =
+          độ trễ thấp nhất (bỏ khung cũ). 2 = mượt hơn khi mạng ổn.
+        - defer: cửa sổ gộp khung (giây). Nhỏ = trễ thấp; lớn = nhẹ CPU/băng thông.
+        - orientation_sync: đồng bộ xoay. Tắt -> hết chớp đen khi app xoay.
+        Bỏ qua lệnh nào máy chưa hỗ trợ (bản cũ) thay vì báo lỗi cả cụm.
+        """
+
+        for line in (f"setinflight {int(inflight)}",
+                     f"setdefer {defer:.3f}",
+                     f"setorient {'on' if orientation_sync else 'off'}"):
+            try:
+                await self.command(line)
+            except NotPatchedError:
+                pass  # bản TrollVNC cũ chưa có lệnh này
+
     async def open_url(self, url: str) -> None:
         text = await self.command(f"openurl {url}")
         if not text.strip().startswith("OK"):

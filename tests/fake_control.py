@@ -275,6 +275,12 @@ class FakeControlServer:
             del self.snapshots[bundle][name]
             return b"OK\n"
 
+        if cmd.startswith(("setinflight ", "setdefer ", "setorient ")):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            self.smoothness = cmd
+            return b"OK\n"
+
         if cmd.startswith("setprelude "):
             if self.unpatched:
                 return b"ERR Unknown\n"

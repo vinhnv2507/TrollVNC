@@ -117,6 +117,23 @@ class QualityDialog(QDialog):
         idle_form.addRow("Scale khung máy gửi:", self.scale_combo)
         layout.addWidget(idle_box)
 
+        smooth_box = QGroupBox("Độ mượt (áp thẳng lên máy — không nối lại)")
+        smooth_form = QFormLayout(smooth_box)
+        self.low_latency = QCheckBox("Ưu tiên độ trễ THẤP (bỏ khung cũ, Q=1)")
+        self.low_latency.setToolTip(
+            "Bật: máy bỏ khung cũ khi chưa gửi kịp -> điều khiển bám tay hơn "
+            "(hợp thao tác auto/bấm nhanh). Tắt: giữ tối đa 2 khung -> mượt hơn "
+            "khi mạng ổn nhưng trễ hơn."
+        )
+        smooth_form.addRow("", self.low_latency)
+        self.orient_sync = QCheckBox("Đồng bộ xoay màn hình theo máy")
+        self.orient_sync.setToolTip(
+            "TẮT (khuyên dùng cho farm): bỏ qua xoay -> KHÔNG resize khi app xoay "
+            "-> hết cảnh chớp đen/nối lại giữa chừng. Bật nếu thật sự cần xem xoay."
+        )
+        smooth_form.addRow("", self.orient_sync)
+        layout.addWidget(smooth_box)
+
         self.natural_scroll = QCheckBox("Cuộn thuận iOS (lăn bánh xe khớp chiều vuốt iPhone)")
         self.natural_scroll.setToolTip(
             "Bật: lăn bánh xe lên làm nội dung dịch như vuốt lên trên iPhone. "
@@ -154,6 +171,8 @@ class QualityDialog(QDialog):
         self.live_edge.setDisabled(full)
         self.idle_after.setValue(int(self.settings.idle_disconnect_after))
         self._select_scale(self.settings.device_scale)
+        self.low_latency.setChecked(getattr(self.settings, "device_low_latency", True))
+        self.orient_sync.setChecked(getattr(self.settings, "device_orientation_sync", False))
         self.natural_scroll.setChecked(getattr(self.settings, "natural_scroll", True))
 
     def _select_scale(self, value: float) -> None:
@@ -170,6 +189,8 @@ class QualityDialog(QDialog):
             else self.live_edge.value()
         self.settings.idle_disconnect_after = float(self.idle_after.value())
         self.settings.device_scale = float(self.scale_combo.currentData())
+        self.settings.device_low_latency = self.low_latency.isChecked()
+        self.settings.device_orientation_sync = self.orient_sync.isChecked()
         self.settings.natural_scroll = self.natural_scroll.isChecked()
 
     def scale_value(self) -> float:
