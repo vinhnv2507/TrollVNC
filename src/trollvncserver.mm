@@ -5926,6 +5926,31 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
                                                  encoding:NSUTF8StringEncoding error:NULL] ?: @"";
         NSString *b64 = [[js dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
         resp = [[NSString stringWithFormat:@"OK %@\n", b64] dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd hasPrefix:@"setinflight "]) {
+        // Số khung tối đa đang mã hoá trước khi BỎ khung mới (Q). 1 = độ trễ thấp
+        // nhất (bỏ khung cũ). KHÔNG resize -> không nối lại.
+        long n = strtol([[cmd substringFromIndex:12] UTF8String], NULL, 10);
+        if (n < 0) n = 0;
+        if (n > 8) n = 8;
+        gMaxInflightUpdates = (int)n;
+        resp = [[NSString stringWithFormat:@"OK %d\n", gMaxInflightUpdates]
+            dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd hasPrefix:@"setdefer "]) {
+        // Cửa sổ gộp khung (giây). Nhỏ = trễ thấp hơn; lớn = nhẹ CPU/băng thông hơn.
+        double s = [[cmd substringFromIndex:9] doubleValue];
+        if (s < 0) s = 0;
+        if (s > 0.5) s = 0.5;
+        gDeferWindowSec = s;
+        resp = [[NSString stringWithFormat:@"OK %.3f\n", gDeferWindowSec]
+            dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd hasPrefix:@"setorient "]) {
+        // Bật/tắt đồng bộ xoay. TẮT -> bỏ qua xoay -> không resize framebuffer khi
+        // app xoay -> HẾT chớp đen giữa chừng (hợp farm không cần xoay).
+        NSString *a = [[cmd substringFromIndex:10]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        gOrientationSyncEnabled = [a isEqualToString:@"on"] ? YES : NO;
+        resp = [[NSString stringWithFormat:@"OK %@\n", gOrientationSyncEnabled ? @"on" : @"off"]
+            dataUsingEncoding:NSUTF8StringEncoding];
     } else if ([cmd hasPrefix:@"color "]) {
         // color <rx> <ry> : đọc MÀU THẬT tại điểm tỉ lệ trên framebuffer -> OK RRGGBB
         // Dùng cho PC lấy màu chuẩn (đúng cái getColor/matchColor auto-click dùng).
