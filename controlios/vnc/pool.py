@@ -608,6 +608,20 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def clear_autolog(self, key: str, on_done=None) -> None:
+        """Xoá nhật ký auto-click trên MỘT máy."""
+
+        async def run() -> None:
+            try:
+                await self._channel(key).clear_autolog()
+                if on_done:
+                    on_done(key, None)
+            except Exception as exc:
+                if on_done:
+                    on_done(key, str(exc))
+
+        self._call_coro(run())
+
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
         """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).

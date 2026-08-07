@@ -607,6 +607,16 @@ class JsAutoClickDialog(QDialog):
                                     "background: #0b0d11; color: #b8c0cc;")
         layout.addWidget(self.log_view)
 
+        log_btns = QHBoxLayout()
+        log_btns.addStretch(1)
+        clear_log = QPushButton("Xoá nhật ký")
+        clear_log.clicked.connect(self._clear_log)
+        log_btns.addWidget(clear_log)
+        export_log = QPushButton("Xuất log…")
+        export_log.clicked.connect(self._export_log)
+        log_btns.addWidget(export_log)
+        layout.addLayout(log_btns)
+
         row = QDialogButtonBox()
         run = row.addButton("⬇▶ Đẩy & Chạy", QDialogButtonBox.AcceptRole)
         push = row.addButton("⬇ Chỉ đẩy", QDialogButtonBox.ActionRole)
@@ -646,6 +656,26 @@ class JsAutoClickDialog(QDialog):
         self.window.pool.autolog(
             self._poll_key,
             on_done=lambda k, running, log: self.window.bridge.autolog_loaded.emit(k, running, log))
+
+    def _clear_log(self) -> None:
+        if self._poll_key:
+            self.window.pool.clear_autolog(self._poll_key)
+        self.log_view.clear()
+
+    def _export_log(self) -> None:
+        text = self.log_view.toPlainText()
+        if not text.strip():
+            QMessageBox.information(self, "Nhật ký trống", "Chưa có nhật ký để xuất.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Xuất nhật ký", "autoclick-log.txt", "Text (*.txt)")
+        if not path:
+            return
+        try:
+            Path(path).write_text(text, encoding="utf-8")
+            self.status.setText(f"Đã xuất log: {path}")
+        except OSError as exc:
+            QMessageBox.warning(self, "Lỗi", f"Không ghi được file: {exc}")
 
     def _on_autolog(self, key: str, running: bool, log: str) -> None:
         if key != self._poll_key:

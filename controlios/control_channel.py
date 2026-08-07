@@ -538,6 +538,11 @@ class ControlChannel:
                 log = ""
         return running, log
 
+    async def clear_autolog(self) -> None:
+        """Xoá nhật ký auto-click trên máy."""
+
+        await self.command("autologclear")
+
     async def set_scale(self, factor: float) -> None:
         """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.
 
