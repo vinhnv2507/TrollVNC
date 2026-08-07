@@ -5259,6 +5259,10 @@ static NSString *const kAutoPrelude =
     @"function repeat(n,fn){for(var i=0;i<n;i++)fn(i);}"
     @"function retry(n,fn){for(var i=0;i<n;i++){if(fn(i))return true;sleep(0.5);}return false;}";
 
+// Thư viện hàm do PC ĐẨY xuống (setprelude) — nạp sau prelude built-in, cho phép
+// thêm hàm tiện ích JS mới mà KHÔNG phải cài lại app.
+static NSString *tvUserPreludePath(void) { return @"/var/mobile/Library/controlios/prelude.js"; }
+
 static void tvAutoStart(void) {
     if (gAutoRunning.load())
         return;
@@ -5275,6 +5279,10 @@ static void tvAutoStart(void) {
             JSContext *ctx = [[JSContext alloc] init];
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
             [ctx evaluateScript:kAutoPrelude]; // hàm tiện ích (swipeUp, tapText, retry…)
+            NSString *userLib = [NSString stringWithContentsOfFile:tvUserPreludePath()
+                                                          encoding:NSUTF8StringEncoding error:NULL];
+            if (userLib.length)
+                [ctx evaluateScript:userLib]; // thư viện hàm PC đẩy xuống (không cần cài lại)
             tvAutoLog(@"▶ bắt đầu");
             TVLog(@"Auto-JS: chạy");
             [ctx evaluateScript:script]; // lỗi/dừng -> exceptionHandler nuốt gọn
@@ -5899,6 +5907,24 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         tvAutoLoadFromDisk();
         NSString *b64 = [[(gAutoScript ?: @"") dataUsingEncoding:NSUTF8StringEncoding]
             base64EncodedStringWithOptions:0];
+        resp = [[NSString stringWithFormat:@"OK %@\n", b64] dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd hasPrefix:@"setprelude "]) {
+        // Đẩy THƯ VIỆN HÀM (JS) từ PC — nạp trước mọi kịch bản, KHÔNG cần cài lại.
+        NSData *raw = [[NSData alloc] initWithBase64EncodedString:[cmd substringFromIndex:11] options:0];
+        NSString *js = raw ? [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] : nil;
+        if (js == nil) {
+            resp = [@"ERR BadData\n" dataUsingEncoding:NSUTF8StringEncoding];
+        } else {
+            [[NSFileManager defaultManager]
+                      createDirectoryAtPath:[tvUserPreludePath() stringByDeletingLastPathComponent]
+                withIntermediateDirectories:YES attributes:nil error:NULL];
+            [js writeToFile:tvUserPreludePath() atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+            resp = [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+        }
+    } else if ([cmd isEqualToString:@"getprelude"]) {
+        NSString *js = [NSString stringWithContentsOfFile:tvUserPreludePath()
+                                                 encoding:NSUTF8StringEncoding error:NULL] ?: @"";
+        NSString *b64 = [[js dataUsingEncoding:NSUTF8StringEncoding] base64EncodedStringWithOptions:0];
         resp = [[NSString stringWithFormat:@"OK %@\n", b64] dataUsingEncoding:NSUTF8StringEncoding];
     } else if ([cmd hasPrefix:@"color "]) {
         // color <rx> <ry> : đọc MÀU THẬT tại điểm tỉ lệ trên framebuffer -> OK RRGGBB
