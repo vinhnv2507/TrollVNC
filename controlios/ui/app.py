@@ -602,6 +602,8 @@ class JsAutoClickDialog(QDialog):
         pick_menu = QMenu(self.pick_btn)
         # (nhãn, kiểu chèn) — chọn kiểu rồi bấm 1 điểm trên khung lớn.
         for label, kind in (
+            ("nếu khớp màu → chạm  · if (matchColor) tap", "tapmatch"),
+            ("chờ ra màu → chạm  · if (waitColor) tap", "waittap"),
             ('matchColor(x, y, "màu", 15)  · chèn', "match"),
             ('waitColor(x, y, "màu", 10, 12)  · chèn', "wait"),
             ('getColor(x, y)  · chèn', "get"),
@@ -738,6 +740,8 @@ class JsAutoClickDialog(QDialog):
             return
         kind = getattr(self, "_pick_kind", "match")
         snippet = {
+            "tapmatch": f'if (matchColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 15)) tap({rx:.3f}, {ry:.3f})',
+            "waittap": f'if (waitColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 10, 15)) tap({rx:.3f}, {ry:.3f})',
             "match": f'matchColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 15)',
             "wait": f'waitColor({rx:.3f}, {ry:.3f}, "{hexcolor}", 10, 12)',
             "get": f'getColor({rx:.3f}, {ry:.3f})',

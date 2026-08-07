@@ -39,8 +39,14 @@ log('thông báo');              // ghi log daemon
 >
 > **Chèn thẳng vào kịch bản:** trong dialog **Auto-click JS** bấm **🎨 Lấy màu**
 > rồi bấm 1 điểm trên màn hình lớn → lệnh **tự chèn vào ô soạn + chép clipboard**.
-> Menu ▾ chọn kiểu: `matchColor` / `waitColor` / `getColor` / `tap(x,y)` / chỉ
-> chép `#RRGGBB`. (Bấm thẳng nút = `matchColor`.)
+> Menu ▾ chọn kiểu: **nếu khớp màu → chạm** `if (matchColor) tap` / **chờ ra màu
+> → chạm** `if (waitColor) tap` / `matchColor` / `waitColor` / `getColor` /
+> `tap(x,y)` / chỉ chép `#RRGGBB`. (Bấm thẳng nút = `matchColor`.)
+>
+> "Nếu khớp màu → chạm" là mẫu hay dùng nhất: **chỉ bấm khi điểm đó đúng màu**.
+> ```js
+> if (matchColor(0.806, 0.250, "35F7EF", 15)) tap(0.806, 0.250);
+> ```
 >
 > Khi lấy màu, PC **hỏi thẳng máy** (lệnh control `color rx ry`) để lấy **màu
 > THẬT** — daemon đọc pixel gốc trên framebuffer, đúng cái `getColor`/`matchColor`
