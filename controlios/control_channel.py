@@ -524,6 +524,20 @@ class ControlChannel:
         text = await self.command("autostatus")
         return "running" in text
 
+    async def get_autolog(self) -> tuple[bool, str]:
+        """(đang chạy?, nhật ký) của auto-click trên máy — để theo dõi tiến trình."""
+
+        text = await self.command("autolog")
+        parts = text.strip().split(maxsplit=2)
+        running = len(parts) > 1 and parts[1] == "running"
+        log = ""
+        if len(parts) > 2:
+            try:
+                log = base64.b64decode(parts[2]).decode("utf-8", errors="replace")
+            except Exception:
+                log = ""
+        return running, log
+
     async def set_scale(self, factor: float) -> None:
         """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.
 

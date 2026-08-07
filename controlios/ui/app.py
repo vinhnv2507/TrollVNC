@@ -118,6 +118,7 @@ class Bridge(QObject):
     script_done = Signal()
     apps_loaded = Signal(str, object, str)   # key, danh sách AppInfo, lỗi
     snapshots_loaded = Signal(str, object, str)  # key, danh sách Snapshot, lỗi
+    autolog_loaded = Signal(str, bool, str)      # key, đang chạy, nhật ký
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
@@ -598,6 +599,14 @@ class JsAutoClickDialog(QDialog):
         self.status.setStyleSheet("color: #9aa4b2;")
         layout.addWidget(self.status)
 
+        layout.addWidget(QLabel("Nhật ký tiến trình (máy đầu tiên đang chọn):"))
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setMaximumHeight(150)
+        self.log_view.setStyleSheet("font-family: Consolas, monospace; font-size: 12px; "
+                                    "background: #0b0d11; color: #b8c0cc;")
+        layout.addWidget(self.log_view)
+
         row = QDialogButtonBox()
         run = row.addButton("⬇▶ Đẩy & Chạy", QDialogButtonBox.AcceptRole)
         push = row.addButton("⬇ Chỉ đẩy", QDialogButtonBox.ActionRole)
@@ -610,6 +619,46 @@ class JsAutoClickDialog(QDialog):
         layout.addWidget(row)
 
         self._reload_names()
+
+        # Kéo nhật ký từ máy đầu tiên đang chọn mỗi ~1.2s để theo dõi tiến trình.
+        self._poll_key = None
+        self.window.bridge.autolog_loaded.connect(self._on_autolog)
+        self.poll_timer = QTimer(self)
+        self.poll_timer.setInterval(1200)
+        self.poll_timer.timeout.connect(self._poll_log)
+        self.poll_timer.start()
+
+    def closeEvent(self, event) -> None:
+        self.poll_timer.stop()
+        try:
+            self.window.bridge.autolog_loaded.disconnect(self._on_autolog)
+        except (RuntimeError, TypeError):
+            pass
+        super().closeEvent(event)
+
+    def _poll_log(self) -> None:
+        if not self.isVisible():
+            return
+        targets = self.window.action_targets()
+        if not targets:
+            return
+        self._poll_key = targets[0]
+        self.window.pool.autolog(
+            self._poll_key,
+            on_done=lambda k, running, log: self.window.bridge.autolog_loaded.emit(k, running, log))
+
+    def _on_autolog(self, key: str, running: bool, log: str) -> None:
+        if key != self._poll_key:
+            return
+        # Chỉ cập nhật khi đổi, để không nhảy con trỏ cuộn liên tục.
+        if log != self.log_view.toPlainText():
+            at_bottom = (self.log_view.verticalScrollBar().value()
+                         >= self.log_view.verticalScrollBar().maximum() - 4)
+            self.log_view.setPlainText(log)
+            if at_bottom:
+                sb = self.log_view.verticalScrollBar()
+                sb.setValue(sb.maximum())
+        self.status.setText(f"{key} · {'● đang chạy' if running else '○ đã dừng'}")
 
     # ---------------------------------------------------------- thư viện
     def _reload_names(self) -> None:

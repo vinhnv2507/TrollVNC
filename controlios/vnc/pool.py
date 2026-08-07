@@ -596,6 +596,18 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Auto-click: dừng", action, on_event, on_done)
 
+    def autolog(self, key: str, on_done) -> None:
+        """Lấy (đang chạy?, nhật ký) auto-click của MỘT máy. on_done(key, running, log)."""
+
+        async def run() -> None:
+            try:
+                running, log = await self._channel(key).get_autolog()
+                on_done(key, running, log)
+            except Exception as exc:
+                on_done(key, False, f"(không lấy được nhật ký: {exc})")
+
+        self._call_coro(run())
+
     def set_scale(self, keys: Iterable[str], factor: float,
                   on_event=None, on_done=None) -> None:
         """Đổi hệ số scale khung hình trên nhiều máy (giảm tải máy đời cũ).

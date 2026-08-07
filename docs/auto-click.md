@@ -54,7 +54,8 @@ launchApp("com.zing.zalo");           // mở app theo bundle id
 killApp("com.zing.zalo");             // đóng app
 openURL("https://x.com");             // mở URL (app mặc định)
 openURLIn("com.zing.zalo", "zalo://"); // mở URL bằng app chỉ định
-toast("Xong!");                       // banner thông báo trên máy (alert = toast)
+toast("Xong!");                       // ghi vào NHẬT KÝ + thử banner (alert = toast)
+log("bước 1 xong");                    // ghi nhật ký (xem trên PC hoặc log daemon)
 ```
 **Tệp / HTTP / JSON**
 ```js
@@ -85,6 +86,17 @@ autostart / autostop / autostatus
 autoget                        # OK <base64 kịch bản>
 ```
 Kịch bản lưu ở `/var/mobile/Library/controlios/autoscript.txt`.
+
+## Theo dõi tiến trình (nhật ký)
+`log("...")` và `toast("...")` ghi vào **nhật ký** trên máy. Trên **PC**: mở
+**Kịch bản ▾ → Auto-click JS** — có ô **“Nhật ký tiến trình”** tự kéo về từ máy
+đầu tiên đang chọn (~1.2s/lần), hiện cả `▶ bắt đầu`, `■ dừng`, `⚠ lỗi`. Đây là
+cách theo dõi đáng tin nhất.
+
+> `toast` **cũng** thử hiện banner trên màn iPhone, nhưng banner là **thông báo
+> hệ thống** nên chỉ hiện khi ControlIOS được **cấp quyền Thông báo** (Cài đặt →
+> Thông báo → ControlIOS) và thường không hiện khi đang ở trong app khác. Vì vậy
+> **nhật ký trên PC là chỗ xem chắc chắn**.
 
 ## Ghi chú
 - Chạy trong **daemon**, luồng riêng, tách khỏi luồng VNC. Lỗi JS **không sập
