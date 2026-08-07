@@ -4895,6 +4895,121 @@ static void tvAutoTap(STHIDEventGenerator *gen, CGPoint p, NSUInteger fingers) {
     [gen liftUpAtPoints:pts touchCount:fingers];
 }
 
+// ---- Tìm CHỮ trên màn (OCR + toạ độ) : findText -> tâm ô chứa chuỗi con ----
+static BOOL tvFindText(NSString *needle, double rx1, double ry1, double rx2, double ry2,
+                       double *foundRx, double *foundRy) {
+    if (needle.length == 0 || !gScreen || !gScreen->frameBuffer || gWidth <= 0 || gHeight <= 0)
+        return NO;
+    int x1 = (int)(MAX(0.0, rx1) * (gWidth - 1));
+    int y1 = (int)(MAX(0.0, ry1) * (gHeight - 1));
+    int x2 = (int)((rx2 <= 0 ? 1.0 : rx2) * (gWidth - 1));
+    int y2 = (int)((ry2 <= 0 ? 1.0 : ry2) * (gHeight - 1));
+    if (x2 <= x1)
+        x2 = gWidth - 1;
+    if (y2 <= y1)
+        y2 = gHeight - 1;
+
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef dp = CGDataProviderCreateWithData(
+        NULL, gScreen->frameBuffer, (size_t)gScreen->paddedWidthInBytes * gHeight, NULL);
+    CGImageRef full = CGImageCreate(
+        gWidth, gHeight, 8, 32, gScreen->paddedWidthInBytes, cs,
+        (CGBitmapInfo)(kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little), dp, NULL, false,
+        kCGRenderingIntentDefault);
+    CGColorSpaceRelease(cs);
+    CGDataProviderRelease(dp);
+    if (!full)
+        return NO;
+    CGImageRef crop = CGImageCreateWithImageInRect(full, CGRectMake(x1, y1, x2 - x1, y2 - y1));
+    CGImageRelease(full);
+    if (!crop)
+        return NO;
+
+    BOOL found = NO;
+    if (@available(iOS 13.0, *)) {
+        VNRecognizeTextRequest *req = [[VNRecognizeTextRequest alloc] init];
+        req.recognitionLevel = VNRequestTextRecognitionLevelAccurate;
+        req.usesLanguageCorrection = YES;
+        VNImageRequestHandler *h = [[VNImageRequestHandler alloc] initWithCGImage:crop options:@{}];
+        NSError *err = nil;
+        NSString *low = [needle lowercaseString];
+        if ([h performRequests:@[ req ] error:&err]) {
+            for (VNRecognizedTextObservation *o in req.results) {
+                VNRecognizedText *t = [[o topCandidates:1] firstObject];
+                if (t.string.length && [[t.string lowercaseString] containsString:low]) {
+                    CGRect bb = o.boundingBox; // chuẩn hoá theo CROP, gốc dưới-trái
+                    double cx = bb.origin.x + bb.size.width / 2.0;
+                    double cy = bb.origin.y + bb.size.height / 2.0;
+                    double px = x1 + cx * (x2 - x1);
+                    double py = y1 + (1.0 - cy) * (y2 - y1); // Vision y đảo -> dọc
+                    if (foundRx) *foundRx = px / (double)(gWidth - 1);
+                    if (foundRy) *foundRy = py / (double)(gHeight - 1);
+                    found = YES;
+                    break;
+                }
+            }
+        }
+    }
+    CGImageRelease(crop);
+    return found;
+}
+
+// ---- Biến BỀN qua các lần chạy (lưu JSON /var/mobile/Library/controlios) ----
+static NSMutableDictionary *gVars = nil;
+static NSString *tvVarsPath(void) { return @"/var/mobile/Library/controlios/vars.json"; }
+static void tvVarsLoad(void) {
+    if (gVars)
+        return;
+    NSData *d = [NSData dataWithContentsOfFile:tvVarsPath()];
+    id o = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:NULL] : nil;
+    gVars = [o isKindOfClass:[NSDictionary class]] ? [o mutableCopy] : [NSMutableDictionary dictionary];
+}
+static void tvVarsSave(void) {
+    if (!gVars)
+        return;
+    [[NSFileManager defaultManager] createDirectoryAtPath:[tvVarsPath() stringByDeletingLastPathComponent]
+                              withIntermediateDirectories:YES attributes:nil error:NULL];
+    NSData *d = [NSJSONSerialization dataWithJSONObject:gVars options:0 error:NULL];
+    [d writeToFile:tvVarsPath() atomically:YES];
+}
+
+// ---- Chạy đồng bộ trên luồng chính (UIKit) an toàn ----
+static void tvRunMainSync(void (^block)(void)) {
+    if ([NSThread isMainThread])
+        block();
+    else
+        dispatch_sync(dispatch_get_main_queue(), block);
+}
+static NSString *tvGetClipboard(void) {
+    __block NSString *s = @"";
+    tvRunMainSync(^{ s = [UIPasteboard generalPasteboard].string ?: @""; });
+    return s;
+}
+static void tvSetClipboard(NSString *s) {
+    tvRunMainSync(^{ [UIPasteboard generalPasteboard].string = (s ?: @""); });
+}
+
+// ---- Lưu ảnh chụp màn hiện tại ra PNG ----
+static BOOL tvSaveScreenshot(NSString *path) {
+    if (!gScreen || !gScreen->frameBuffer || gWidth <= 0 || gHeight <= 0 || path.length == 0)
+        return NO;
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGDataProviderRef dp = CGDataProviderCreateWithData(
+        NULL, gScreen->frameBuffer, (size_t)gScreen->paddedWidthInBytes * gHeight, NULL);
+    CGImageRef img = CGImageCreate(
+        gWidth, gHeight, 8, 32, gScreen->paddedWidthInBytes, cs,
+        (CGBitmapInfo)(kCGImageAlphaNoneSkipFirst | kCGBitmapByteOrder32Little), dp, NULL, false,
+        kCGRenderingIntentDefault);
+    CGColorSpaceRelease(cs);
+    CGDataProviderRelease(dp);
+    if (!img)
+        return NO;
+    UIImage *ui = [UIImage imageWithCGImage:img];
+    CGImageRelease(img);
+    NSData *png = UIImagePNGRepresentation(ui);
+    return [png writeToFile:path atomically:YES];
+}
+
 // Cài API native cho JS (kiểu AutoTouch). gen bắt trong block.
 static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
@@ -5070,7 +5185,75 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
         tvTrace([NSString stringWithFormat:@"findImage %@ = null", [path lastPathComponent] ?: @""]);
         return [JSValue valueWithNullInContext:ct];
     };
+
+    // findText(chuoi[, x1,y1,x2,y2]) -> {x,y} (tỉ lệ tâm) hoặc null. So khớp
+    // KHÔNG phân biệt hoa/thường, chứa chuỗi con.
+    ctx[@"findText"] = ^JSValue *(NSString *needle, JSValue *x1, JSValue *y1, JSValue *x2, JSValue *y2) {
+        double a = (x1 && ![x1 isUndefined]) ? [x1 toDouble] : 0;
+        double b = (y1 && ![y1 isUndefined]) ? [y1 toDouble] : 0;
+        double c = (x2 && ![x2 isUndefined]) ? [x2 toDouble] : 1;
+        double d = (y2 && ![y2 isUndefined]) ? [y2 toDouble] : 1;
+        JSContext *ct = [JSContext currentContext];
+        double fx, fy;
+        if (tvFindText(needle, a, b, c, d, &fx, &fy)) {
+            tvTrace([NSString stringWithFormat:@"findText \"%@\" = %.3f,%.3f", needle ?: @"", fx, fy]);
+            return [JSValue valueWithObject:@{@"x" : @(fx), @"y" : @(fy)} inContext:ct];
+        }
+        tvTrace([NSString stringWithFormat:@"findText \"%@\" = null", needle ?: @""]);
+        return [JSValue valueWithNullInContext:ct];
+    };
+
+    // Thời gian: now() -> mốc mili-giây (dùng đo thời lượng, giới hạn tần suất).
+    ctx[@"now"] = ^double { return [[NSDate date] timeIntervalSince1970] * 1000.0; };
+
+    // Biến BỀN qua các lần chạy: setVar(khoá, giá trị) / getVar(khoá[, mặc định]).
+    ctx[@"setVar"] = ^(NSString *k, JSValue *v) {
+        tvVarsLoad();
+        id val = (v && ![v isUndefined] && ![v isNull]) ? [v toObject] : [NSNull null];
+        gVars[k ?: @""] = val ?: [NSNull null];
+        tvVarsSave();
+        tvTrace([NSString stringWithFormat:@"setVar %@", k ?: @""]);
+    };
+    ctx[@"getVar"] = ^JSValue *(NSString *k, JSValue *def) {
+        tvVarsLoad();
+        id val = gVars[k ?: @""];
+        JSContext *ct = [JSContext currentContext];
+        if (val && ![val isKindOfClass:[NSNull class]])
+            return [JSValue valueWithObject:val inContext:ct];
+        return (def && ![def isUndefined]) ? def : [JSValue valueWithNullInContext:ct];
+    };
+
+    // Bảng tạm (clipboard) của iOS.
+    ctx[@"getClipboard"] = ^NSString * { return tvGetClipboard(); };
+    ctx[@"setClipboard"] = ^(NSString *s) { tvSetClipboard(s); tvTrace(@"setClipboard"); };
+
+    // Ảnh chụp màn hiện tại -> PNG.
+    ctx[@"saveScreenshot"] = ^BOOL(NSString *path) {
+        BOOL ok = tvSaveScreenshot(path);
+        tvTrace([NSString stringWithFormat:@"saveScreenshot %@ = %@", path ?: @"", ok ? @"ok" : @"lỗi"]);
+        return ok;
+    };
+
+    // Phím cứng: âm lượng / tắt tiếng / khoá màn (nút nguồn).
+    ctx[@"volumeUp"] = ^{ tvTrace(@"volumeUp"); [gen volumeIncrementPress]; };
+    ctx[@"volumeDown"] = ^{ tvTrace(@"volumeDown"); [gen volumeDecrementPress]; };
+    ctx[@"mute"] = ^{ tvTrace(@"mute"); [gen mutePress]; };
+    ctx[@"lockScreen"] = ^{ tvTrace(@"lockScreen"); [gen powerPress]; };
 }
+
+// Prelude JS: hàm tiện ích thuần JS dựng trên các API native, nạp TRƯỚC kịch bản.
+static NSString *const kAutoPrelude =
+    @"function swipeUp(d,t){d=d||0.4;swipe(0.5,0.5+d/2,0.5,0.5-d/2,t||0.3);}"
+    @"function swipeDown(d,t){d=d||0.4;swipe(0.5,0.5-d/2,0.5,0.5+d/2,t||0.3);}"
+    @"function swipeLeft(d,t){d=d||0.6;swipe(0.5+d/2,0.5,0.5-d/2,0.5,t||0.3);}"
+    @"function swipeRight(d,t){d=d||0.6;swipe(0.5-d/2,0.5,0.5+d/2,0.5,t||0.3);}"
+    @"function tapImage(p){var q=findImage(p);if(q){tap(q.x,q.y);return true;}return false;}"
+    @"function tapText(s){var q=findText(s);if(q){tap(q.x,q.y);return true;}return false;}"
+    @"function tapIfColor(x,y,c,tol){if(matchColor(x,y,c,tol===undefined?15:tol)){tap(x,y);return true;}return false;}"
+    @"function waitImage(p,timeout){var t=timeout||10,w=0;while(w<t){var q=findImage(p);if(q)return q;sleep(0.4);w+=0.4;}return null;}"
+    @"function waitText(s,timeout){var t=timeout||10,w=0;while(w<t){var q=findText(s);if(q)return q;sleep(0.4);w+=0.4;}return null;}"
+    @"function repeat(n,fn){for(var i=0;i<n;i++)fn(i);}"
+    @"function retry(n,fn){for(var i=0;i<n;i++){if(fn(i))return true;sleep(0.5);}return false;}";
 
 static void tvAutoStart(void) {
     if (gAutoRunning.load())
@@ -5087,6 +5270,7 @@ static void tvAutoStart(void) {
             gAutoTrace.store(true); // mỗi lần chạy mặc định ghi tiến trình
             JSContext *ctx = [[JSContext alloc] init];
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
+            [ctx evaluateScript:kAutoPrelude]; // hàm tiện ích (swipeUp, tapText, retry…)
             tvAutoLog(@"▶ bắt đầu");
             TVLog(@"Auto-JS: chạy");
             [ctx evaluateScript:script]; // lỗi/dừng -> exceptionHandler nuốt gọn
