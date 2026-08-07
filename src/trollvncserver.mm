@@ -4582,11 +4582,15 @@ static NSString *tvAutoScriptPath(void) {
 }
 
 static CGPoint tvAutoPoint(double rx, double ry) {
-    double w = gSrcWidth > 0 ? (double)gSrcWidth : (double)gWidth;
-    double h = gSrcHeight > 0 ? (double)gSrcHeight : (double)gHeight;
+    // Toạ độ tỉ lệ tính theo KHUNG ĐANG PHỤC VỤ (gWidth×gHeight) — CÙNG không gian
+    // với getColor/matchColor/findText/OCR. Đưa về điểm thiết bị qua ĐÚNG đường
+    // map của điều khiển VNC (vncPointToDevicePoint) để KHỬ XOAY + KHỬ SCALE, nếu
+    // không, máy có xoay/offset xoay thì cú chạm sẽ rơi sai chỗ.
     rx = rx < 0 ? 0 : (rx > 1 ? 1 : rx);
     ry = ry < 0 ? 0 : (ry > 1 ? 1 : ry);
-    return CGPointMake((CGFloat)(rx * (w - 1)), (CGFloat)(ry * (h - 1)));
+    int vx = (int)(rx * (double)((gWidth > 0 ? gWidth : 1) - 1));
+    int vy = (int)(ry * (double)((gHeight > 0 ? gHeight : 1) - 1));
+    return vncPointToDevicePoint(vx, vy);
 }
 
 // Ngủ theo nhịp nhỏ để DỪNG nhanh khi có yêu cầu dừng.
