@@ -1408,7 +1408,8 @@ class MainWindow(QMainWindow):
         self.detail.text_typed.connect(self._type_text)
         self.detail.keys_pressed.connect(self._press_keys)
         self.detail.paste_requested.connect(self._paste_from_pc)
-        self.detail.copy_requested.connect(self._copy_to_pc)
+        self.detail.copy_requested.connect(lambda: self._grab_ios_clipboard("c"))
+        self.detail.cut_requested.connect(lambda: self._grab_ios_clipboard("x"))
         self.bridge.clipboard_pulled.connect(self._on_clipboard_pulled)
 
         self.pool.start()
@@ -2444,14 +2445,15 @@ class MainWindow(QMainWindow):
             on_done=_after)
         self.statusBar().showMessage(f"Đang dán {len(text)} ký tự vào {len(targets)} máy…", 3000)
 
-    def _copy_to_pc(self) -> None:
-        """Ctrl+C trên PC: bảo iOS chép (Cmd+C) rồi kéo clipboard iOS về PC."""
+    def _grab_ios_clipboard(self, letter: str) -> None:
+        """Ctrl+C (letter='c', chép) / Ctrl+X (letter='x', cắt) trên PC: bảo iOS
+        chép/cắt phần đang chọn (Cmd+C / Cmd+X) rồi kéo clipboard iOS về PC."""
         key = self.detail.key
         if not key:
             return
-        # Cmd+C để iOS chép phần đang chọn vào clipboard iOS, rồi mới đọc về.
-        self.pool.press_keys([key], "Super_L", "c")
-        self.statusBar().showMessage("Đang lấy clipboard từ máy…", 2000)
+        self.pool.press_keys([key], "Super_L", letter)
+        self.statusBar().showMessage(
+            f"Đang {'cắt' if letter == 'x' else 'lấy'} clipboard từ máy…", 2000)
         QTimer.singleShot(450, lambda k=key: self.pool.get_clipboard(
             k, on_done=lambda kk, text, err: self.bridge.clipboard_pulled.emit(
                 kk, text or "", err or "")))

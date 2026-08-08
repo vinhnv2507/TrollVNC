@@ -72,6 +72,7 @@ class DetailView(QWidget):
     keys_pressed = Signal(list)                 # ["Ctrl", "c"]
     paste_requested = Signal()                  # Ctrl+V: dán chữ từ PC vào iOS
     copy_requested = Signal()                   # Ctrl+C: lấy clipboard iOS ra PC
+    cut_requested = Signal()                    # Ctrl+X: cắt trên iOS rồi lấy ra PC
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -221,6 +222,13 @@ class DetailView(QWidget):
                 return
             if event.key() == Qt.Key_C:
                 self.copy_requested.emit()
+                return
+            if event.key() == Qt.Key_X:
+                self.cut_requested.emit()
+                return
+            if event.key() == Qt.Key_A:
+                # Cmd+A trên iOS = chọn tất cả (daemon map Super/Meta -> Command).
+                self.keys_pressed.emit(["Super_L", "a"])
                 return
 
         # Không chặn autoRepeat: giữ phím thì máy nhận nhiều lần, đúng như thật.
