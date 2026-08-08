@@ -135,6 +135,21 @@ class DevicePool:
         """Bulk update, called on every scroll/selection change."""
         self._call(self._set_tiers, tiers)
 
+    def reconnect_now(self, keys: Optional[Iterable[str]] = None) -> None:
+        """Thử nối lại NGAY các máy đang rớt (bỏ qua chờ backoff). keys=None ->
+        tất cả. Dùng sau khi cài đè + mở lại app trên iOS để khỏi đợi backoff."""
+        self._call(self._reconnect_now, keys)
+
+    def _reconnect_now(self, keys: Optional[Iterable[str]]) -> None:
+        target = set(keys) if keys is not None else None
+        for key, session in self._sessions.items():
+            if target is not None and key not in target:
+                continue
+            if session.is_running():
+                session.reconnect_now()   # đang backoff -> bừng dậy nối lại ngay
+            else:
+                session.start()           # đang ngủ hẳn -> khởi động lại
+
     def _set_tiers(self, tiers: Mapping[str, Tier]) -> None:
         now = time.monotonic()
         for key, session in self._sessions.items():

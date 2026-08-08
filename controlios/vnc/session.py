@@ -140,6 +140,8 @@ class VncSession:
         self._tier_changed = asyncio.Event()
         self._frame_ready = asyncio.Event()
         self._stop = asyncio.Event()
+        # Ngắt chờ backoff để NỐI LẠI NGAY (sau khi mở lại app trên iOS chẳng hạn).
+        self._wake = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
 
     # ---------------------------------------------------------------- control
@@ -179,6 +181,10 @@ class VncSession:
     def request_resync(self) -> None:
         """Nối lại phiên: dùng khi framebuffer đổi kích thước (đổi scale/xoay máy)."""
         self._resync.set()
+
+    def reconnect_now(self) -> None:
+        """Bỏ qua chờ backoff, thử nối lại ngay (sau khi mở lại app trên máy)."""
+        self._wake.set()
 
     def set_tier(self, tier: Tier) -> None:
         if tier == self.tier:
@@ -396,8 +402,14 @@ class VncSession:
                 await asyncio.sleep(0.3)
                 delay = self.settings.reconnect_delay
             else:
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self.settings.reconnect_max)
+                # Chờ backoff nhưng BỪNG DẬY NGAY nếu có yêu cầu nối lại (mở lại
+                # app trên máy) -> khỏi phải đợi hết chu kỳ backoff dài.
+                try:
+                    await asyncio.wait_for(self._wake.wait(), timeout=delay)
+                    self._wake.clear()
+                    delay = self.settings.reconnect_delay
+                except asyncio.TimeoutError:
+                    delay = min(delay * 2, self.settings.reconnect_max)
 
         self._set_state(State.OFFLINE)
 

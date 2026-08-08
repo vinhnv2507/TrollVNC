@@ -126,7 +126,9 @@ class Settings:
 
     # Seconds between reconnect attempts, doubled up to reconnect_max.
     reconnect_delay: float = 3.0
-    reconnect_max: float = 60.0
+    # Trần backoff: rớt lâu vẫn thử lại ~20s/lần (thay vì tới 60s) để sau khi mở
+    # lại app trên máy thì nối lại sớm. Có thể chỉnh trong config.
+    reconnect_max: float = 20.0
 
     # Seconds without a frame before a session is considered stalled.
     stall_timeout: float = 20.0

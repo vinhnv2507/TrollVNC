@@ -1456,6 +1456,12 @@ class MainWindow(QMainWindow):
         usb.triggered.connect(self._scan_usb)
         bar.addAction(usb)
 
+        reconnect = QAction("Nối lại ngay", self)
+        reconnect.setToolTip("Thử nối lại NGAY mọi máy đang rớt (bỏ qua chờ backoff) "
+                             "— dùng sau khi cài đè bản mới rồi mở lại app trên iOS.")
+        reconnect.triggered.connect(self._reconnect_all)
+        bar.addAction(reconnect)
+
         bar.addSeparator()
         bar.addWidget(QLabel(" Trang: "))
         self.page_combo = QComboBox()
@@ -2423,6 +2429,10 @@ class MainWindow(QMainWindow):
         targets = self._targets()
         if targets:
             self.pool.press_keys(targets, *keys)
+
+    def _reconnect_all(self) -> None:
+        self.pool.reconnect_now()          # None -> tất cả
+        self.statusBar().showMessage("Đang thử nối lại tất cả máy đang rớt…", 4000)
 
     def _paste_from_pc(self) -> None:
         """Ctrl+V trên PC: đưa chữ trong clipboard PC xuống iOS rồi DÁN (Cmd+V)."""
