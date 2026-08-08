@@ -165,6 +165,11 @@ class Settings:
     device_low_latency: bool = True
     device_orientation_sync: bool = False
 
+    # Tập trung băng thông: khi đang xem/điều khiển 1 máy thì TẮT stream lưới, dồn
+    # băng thông cho máy đó -> giảm trễ mạnh trên farm WiFi đông máy. Tắt nếu muốn
+    # lưới vẫn cập nhật lúc điều khiển.
+    focus_streaming: bool = True
+
     # Cuộn "thuận iOS": lăn bánh xe lên -> nội dung đi như vuốt trên iPhone. Bật
     # (mặc định) đảo chiều lăn cho khớp cảm giác cuộn của iOS; tắt để giữ chiều
     # kiểu desktop.

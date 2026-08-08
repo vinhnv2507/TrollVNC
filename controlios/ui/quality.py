@@ -27,6 +27,9 @@ from ..config import Settings
 PRESETS = [
     ("Mượt — nhẹ máy nhất", 8.0, 640, 0.5, 240),
     ("Cân bằng", 12.0, 900, 1.0, 320),
+    # Ít trễ nhất: fps cao + khung NHỎ (720px) → mỗi khung truyền nhanh nên màn
+    # PC bám sát iPhone. Ưu tiên độ trễ thấp hơn độ nét.
+    ("Nhanh — ít trễ (30fps)", 30.0, 720, 1.0, 320),
     ("Nét — nặng nhất", 20.0, 0, 2.0, 420),
 ]
 
@@ -132,6 +135,13 @@ class QualityDialog(QDialog):
             "-> hết cảnh chớp đen/nối lại giữa chừng. Bật nếu thật sự cần xem xoay."
         )
         smooth_form.addRow("", self.orient_sync)
+        self.focus_streaming = QCheckBox("Chỉ truyền máy đang xem (tắt lưới khi điều khiển)")
+        self.focus_streaming.setToolTip(
+            "BẬT (khuyên cho farm đông): khi mở 1 máy xem/điều khiển, tạm NGƯNG "
+            "stream các ô lưới -> dồn hết băng thông WiFi cho máy đó -> giảm trễ "
+            "mạnh. Lưới sẽ đứng hình khi đang điều khiển; đóng máy ra là lưới chạy lại."
+        )
+        smooth_form.addRow("", self.focus_streaming)
         layout.addWidget(smooth_box)
 
         self.natural_scroll = QCheckBox("Cuộn thuận iOS (lăn bánh xe khớp chiều vuốt iPhone)")
@@ -173,6 +183,7 @@ class QualityDialog(QDialog):
         self._select_scale(self.settings.device_scale)
         self.low_latency.setChecked(getattr(self.settings, "device_low_latency", True))
         self.orient_sync.setChecked(getattr(self.settings, "device_orientation_sync", False))
+        self.focus_streaming.setChecked(getattr(self.settings, "focus_streaming", True))
         self.natural_scroll.setChecked(getattr(self.settings, "natural_scroll", True))
 
     def _select_scale(self, value: float) -> None:
@@ -191,6 +202,7 @@ class QualityDialog(QDialog):
         self.settings.device_scale = float(self.scale_combo.currentData())
         self.settings.device_low_latency = self.low_latency.isChecked()
         self.settings.device_orientation_sync = self.orient_sync.isChecked()
+        self.settings.focus_streaming = self.focus_streaming.isChecked()
         self.settings.natural_scroll = self.natural_scroll.isChecked()
 
     def scale_value(self) -> float:

@@ -1289,6 +1289,7 @@ class MainWindow(QMainWindow):
         )
 
         self.grid = DeviceGrid(tile_width=150)
+        self.grid.set_focus_streaming(getattr(self.registry.settings, "focus_streaming", True))
         self.detail = DetailView()
 
         # Khung lớn có nhãn tên máy ở trên để biết đang điều khiển máy nào.
@@ -1865,6 +1866,7 @@ class MainWindow(QMainWindow):
         # Phiên đọc Settings ở mỗi vòng nhịp nên đổi là ăn ngay, khỏi nối lại.
         self.registry.save(self.registry_path)
         settings = self.registry.settings
+        self.grid.set_focus_streaming(settings.focus_streaming)
 
         # Độ mượt (Q/defer/xoay) đi qua control socket — KHÔNG resize nên áp thẳng
         # lên máy online, không nối lại. Chỉ phát khi đổi.

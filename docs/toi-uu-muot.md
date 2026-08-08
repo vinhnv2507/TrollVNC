@@ -2,6 +2,15 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## Trễ ~1s trên farm đông máy? → BẬT "Chỉ truyền máy đang xem"
+Nguyên nhân số 1 gây trễ trên farm WiFi: mở 1 máy điều khiển nhưng **các ô lưới
+vẫn đang stream** → 249 máy kia tranh băng thông của máy bạn đang bấm.
+
+**Chất lượng → "Chỉ truyền máy đang xem (tắt lưới khi điều khiển)"** (mặc định
+BẬT): khi mở 1 máy, tạm NGƯNG stream toàn bộ lưới → dồn trọn băng thông cho máy
+đó → trễ giảm mạnh. Lưới đứng hình lúc đang điều khiển; đóng máy ra thì lưới chạy
+lại. Đây là đòn bẩy trễ lớn nhất, **có ngay trên PC không cần cài lại máy**.
+
 ## Chỉnh NGAY trên PC (không cần cài lại) — **Chất lượng**
 Menu **Chất lượng** trên thanh công cụ, nhóm **"Độ mượt (áp thẳng lên máy)"**:
 

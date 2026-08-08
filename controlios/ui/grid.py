@@ -50,6 +50,9 @@ class DeviceGrid(QScrollArea):
         self.control_enabled = False
         #: ô vừa được thao tác — tạm nâng nhịp để thấy phản hồi
         self._control_key: Optional[str] = None
+        #: chế độ tập trung — khi đang xem/điều khiển 1 máy thì TẮT stream lưới,
+        #: dồn băng thông cho máy đó (giảm trễ trên farm WiFi đông máy).
+        self._focus_streaming = True
         self._columns = 0            # số cột đang dùng
         self._forced_columns = 0     # 0 = tự động
         self._laying_out = False
@@ -249,6 +252,15 @@ class DeviceGrid(QScrollArea):
         first = first_row * columns
         last = (last_row + 1) * columns
 
+        live_key = self._control_key or self._focus_key
+        if self._focus_streaming and live_key in self.tiles:
+            # Tập trung: chỉ máy đang xem chạy LIVE, tất cả còn lại NGƯNG stream ->
+            # máy đó chiếm trọn băng thông -> trễ giảm mạnh trên farm đông máy.
+            tiers = {key: Tier.IDLE for key in self.order}
+            tiers[live_key] = Tier.LIVE
+            self.tiers_changed.emit(tiers)
+            return
+
         tiers = {key: Tier.IDLE for key in self.order}
         for key in self.order[first:last]:
             tiers[key] = Tier.GRID
@@ -257,3 +269,9 @@ class DeviceGrid(QScrollArea):
         if self._control_key in tiers:
             tiers[self._control_key] = Tier.LIVE
         self.tiers_changed.emit(tiers)
+
+    def set_focus_streaming(self, on: bool) -> None:
+        """Bật/tắt chế độ tập trung (chỉ stream máy đang xem)."""
+        if on != self._focus_streaming:
+            self._focus_streaming = on
+            self._publish_tiers()
