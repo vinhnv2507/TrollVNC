@@ -1,0 +1,8 @@
+Package: com.controlios.keeper
+Name: ControlIOS Keeper
+Version: 1.0
+Architecture: iphoneos-arm64
+Description: Giu cho app ControlIOS luon song; tu mo lai sau khi cai de/reboot.
+Maintainer: ControlIOS
+Author: ControlIOS
+Section: Utilities

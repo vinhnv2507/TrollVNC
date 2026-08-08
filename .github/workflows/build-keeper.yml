@@ -1,0 +1,44 @@
+name: Build ControlIOS Keeper
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up theos
+        uses: actions/checkout@v4
+        with:
+          repository: theos/theos
+          path: theos
+          submodules: recursive
+
+      - name: Install iOS SDK
+        run: |
+          set -e
+          cd theos/sdks
+          curl -L -o sdk.zip https://github.com/theos/sdks/archive/refs/heads/master.zip
+          unzip -q sdk.zip
+          mv sdks-master/*.sdk . || true
+          ls -la
+
+      - name: Build .tipa
+        env:
+          THEOS: ${{ github.workspace }}/theos
+        run: |
+          set -e
+          cd keeper
+          make clean || true
+          make tipa FINALPACKAGE=1
+          ls -la packages || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ControlIOSKeeper-tipa
+          path: keeper/packages/*.tipa
+          if-no-files-found: error
