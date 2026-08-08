@@ -120,6 +120,7 @@ class Bridge(QObject):
     snapshots_loaded = Signal(str, object, str)  # key, danh sách Snapshot, lỗi
     autolog_loaded = Signal(str, bool, str)      # key, đang chạy, nhật ký
     color_read = Signal(str, float, float, str, str)  # key, rx, ry, "RRGGBB", lỗi (đều rỗng nếu trượt)
+    clipboard_pulled = Signal(str, str, str)     # key, nội dung clipboard iOS, lỗi
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
@@ -1406,6 +1407,9 @@ class MainWindow(QMainWindow):
         self.detail.scrolled.connect(self._on_scrolled)
         self.detail.text_typed.connect(self._type_text)
         self.detail.keys_pressed.connect(self._press_keys)
+        self.detail.paste_requested.connect(self._paste_from_pc)
+        self.detail.copy_requested.connect(self._copy_to_pc)
+        self.bridge.clipboard_pulled.connect(self._on_clipboard_pulled)
 
         self.pool.start()
 
@@ -2418,6 +2422,47 @@ class MainWindow(QMainWindow):
         targets = self._targets()
         if targets:
             self.pool.press_keys(targets, *keys)
+
+    def _paste_from_pc(self) -> None:
+        """Ctrl+V trên PC: đưa chữ trong clipboard PC xuống iOS rồi DÁN (Cmd+V)."""
+        text = QApplication.clipboard().text()
+        if not text:
+            self.statusBar().showMessage("Clipboard PC trống — không có gì để dán.", 3000)
+            return
+        targets = self._targets()
+        if not targets:
+            return
+
+        def _after(_desc, ok_count: int, _fails) -> None:
+            # Bấm Cmd+V SAU khi clipboard iOS đã đặt xong (không thì dán nhầm cũ).
+            if ok_count:
+                self.pool.press_keys(targets, "Super_L", "v")
+
+        self.pool.set_clipboard(
+            targets, text,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=_after)
+        self.statusBar().showMessage(f"Đang dán {len(text)} ký tự vào {len(targets)} máy…", 3000)
+
+    def _copy_to_pc(self) -> None:
+        """Ctrl+C trên PC: bảo iOS chép (Cmd+C) rồi kéo clipboard iOS về PC."""
+        key = self.detail.key
+        if not key:
+            return
+        # Cmd+C để iOS chép phần đang chọn vào clipboard iOS, rồi mới đọc về.
+        self.pool.press_keys([key], "Super_L", "c")
+        self.statusBar().showMessage("Đang lấy clipboard từ máy…", 2000)
+        QTimer.singleShot(450, lambda k=key: self.pool.get_clipboard(
+            k, on_done=lambda kk, text, err: self.bridge.clipboard_pulled.emit(
+                kk, text or "", err or "")))
+
+    def _on_clipboard_pulled(self, key: str, text: str, err: str) -> None:
+        if err and not text:
+            self.statusBar().showMessage(f"Không lấy được clipboard máy: {err}", 4000)
+            return
+        QApplication.clipboard().setText(text)
+        self.statusBar().showMessage(
+            f"Đã chép {len(text)} ký tự từ máy sang PC.", 4000)
 
     def _on_skipped_chars(self, key: str, skipped: str) -> None:
         self.bridge.message.emit(

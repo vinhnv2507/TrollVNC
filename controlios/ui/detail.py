@@ -70,6 +70,8 @@ class DetailView(QWidget):
     scrolled = Signal(int, int, int, int)       # x, y, dx, dy (số nấc)
     text_typed = Signal(str)
     keys_pressed = Signal(list)                 # ["Ctrl", "c"]
+    paste_requested = Signal()                  # Ctrl+V: dán chữ từ PC vào iOS
+    copy_requested = Signal()                   # Ctrl+C: lấy clipboard iOS ra PC
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -211,6 +213,16 @@ class DetailView(QWidget):
             self.scrolled.emit(point[0], point[1], dx, dy)
 
     def keyPressEvent(self, event) -> None:
+        # Ctrl+V / Ctrl+C: cầu nối clipboard PC <-> iOS (không gửi phím thô).
+        mods = event.modifiers()
+        if (mods & Qt.ControlModifier) and not (mods & Qt.AltModifier):
+            if event.key() == Qt.Key_V:
+                self.paste_requested.emit()
+                return
+            if event.key() == Qt.Key_C:
+                self.copy_requested.emit()
+                return
+
         # Không chặn autoRepeat: giữ phím thì máy nhận nhiều lần, đúng như thật.
         modifiers = self._modifier_names(event.modifiers())
         name = SPECIAL_KEYS.get(event.key())

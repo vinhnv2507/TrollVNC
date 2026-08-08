@@ -723,6 +723,19 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Đặt clipboard", action, on_event, on_done)
 
+    def get_clipboard(self, key: str, on_done) -> None:
+        """Đọc clipboard của MỘT máy (UTF-8). on_done(key, text_or_None, err)."""
+
+        async def run() -> None:
+            try:
+                text = await asyncio.wait_for(
+                    self._channel(key).get_clipboard(), timeout=4.0)
+                on_done(key, text, None)
+            except Exception as exc:
+                on_done(key, None, str(exc))
+
+        self._call_coro(run())
+
     def push_photo(self, keys: Iterable[str], local: Path | str,
                    on_event=None, on_done=None) -> None:
         """Đẩy ảnh/video rồi nạp vào Thư viện Ảnh trên nhiều máy.
