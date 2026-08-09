@@ -10,6 +10,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install ldid (theos signer)
+        run: brew install ldid
+
       - name: Set up theos
         uses: actions/checkout@v4
         with:
