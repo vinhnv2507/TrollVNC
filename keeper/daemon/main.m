@@ -8,6 +8,7 @@
 #import <arpa/inet.h>
 #import <dlfcn.h>
 #import <netinet/in.h>
+#import <signal.h>
 #import <sys/event.h>
 #import <sys/param.h>
 #import <sys/socket.h>
@@ -38,6 +39,27 @@ static int tvBindSelf(int port) {
     }
     listen(fd, 4);
     return fd;
+}
+
+// Giết mọi tiến trình cùng tên KHÁC self (để keeperd mới thay keeperd cũ khi bạn
+// cài đè bản Keeper mới — cũ là root, chạy root nên kill được).
+static void tvKillOthers(const char *name, pid_t self) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t len = 0;
+    if (sysctl(mib, 4, NULL, &len, NULL, 0) < 0 || len == 0)
+        return;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(len);
+    if (!procs)
+        return;
+    if (sysctl(mib, 4, procs, &len, NULL, 0) == 0) {
+        int n = (int)(len / sizeof(struct kinfo_proc));
+        for (int i = 0; i < n; i++) {
+            pid_t p = procs[i].kp_proc.p_pid;
+            if (p != self && strncmp(procs[i].kp_proc.p_comm, name, MAXCOMLEN) == 0)
+                kill(p, SIGKILL);
+        }
+    }
+    free(procs);
 }
 
 // Tìm PID của tiến trình theo tên (p_comm bị cắt còn tối đa MAXCOMLEN ký tự).
@@ -107,9 +129,16 @@ static void tvWaitForExit(pid_t pid) {
 
 int main(int argc, char *argv[]) {
     @autoreleasepool {
+        // Thay thế keeperd cũ (nếu có): giết bản cũ rồi chiếm cổng -> cài đè Keeper
+        // mới là chạy đúng logic mới, không kẹt bản cũ.
+        tvKillOthers("keeperd", getpid());
         int self_fd = tvBindSelf(kSelfPort);
+        for (int i = 0; i < 10 && self_fd < 0; i++) {
+            usleep(300000); // chờ cổng nhả sau khi giết bản cũ
+            self_fd = tvBindSelf(kSelfPort);
+        }
         if (self_fd < 0) {
-            NSLog(@"[keeperd] đã có thể hiện khác — thoát");
+            NSLog(@"[keeperd] không chiếm được cổng — thoát");
             return 0;
         }
         NSLog(@"[keeperd] canh %s bằng kqueue", kWatchProc);

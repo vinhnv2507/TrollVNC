@@ -11,10 +11,14 @@
 static const int kSelfPort = 46753;
 
 // Spawn keeperd làm tiến trình ROOT, tách session (POSIX_SPAWN_SETSID) -> sống độc
-// lập với app, không chết khi app bị vuốt tắt. Dùng persona giống TrollVNC.
-extern int posix_spawnattr_set_persona_np(posix_spawnattr_t *, uid_t, uint32_t);
-extern int posix_spawnattr_set_persona_uid_np(posix_spawnattr_t *, uid_t);
-extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t);
+// lập với app. Khai báo WEAK để nếu máy thiếu symbol thì app KHÔNG fail launch
+// (chỉ báo lỗi trên màn hình thay vì trắng xoá).
+extern int posix_spawnattr_set_persona_np(posix_spawnattr_t *, uid_t, uint32_t)
+    __attribute__((weak_import));
+extern int posix_spawnattr_set_persona_uid_np(posix_spawnattr_t *, uid_t)
+    __attribute__((weak_import));
+extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
+    __attribute__((weak_import));
 #ifndef POSIX_SPAWN_SETSID
 #define POSIX_SPAWN_SETSID 0x0400
 #endif
@@ -27,7 +31,9 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t);
 
 - (BOOL)application:(UIApplication *)application
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
+    // Dựng UI TRƯỚC, đảm bảo luôn hiển thị (không dính việc spawn).
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
+    self.window.backgroundColor = [UIColor blackColor];
     UIViewController *vc = [UIViewController new];
     vc.view.backgroundColor = [UIColor blackColor];
     _status = [[UILabel alloc] initWithFrame:vc.view.bounds];
@@ -41,9 +47,15 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t);
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
 
-    [self ensureKeeperd];
-
-    // Cập nhật trạng thái mỗi 3s cho dễ theo dõi; và spawn lại nếu daemon chết.
+    // Spawn SAU khi UI đã hiện. LUÔN spawn một keeperd mới lúc mở app: keeperd mới
+    // sẽ giết bản cũ và chiếm cổng -> cài đè bản Keeper mới là chạy đúng logic mới,
+    // không kẹt keeperd cũ đang chạy nền.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+                       int rc = [self spawnKeeperd];
+                       [self setStatus:(rc == 0 ? @"Đã bật daemon mới — chờ vài giây…"
+                                                : [NSString stringWithFormat:@"Spawn lỗi (mã %d)", rc])];
+                   });
     _uiTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
                                                 target:self
                                               selector:@selector(ensureKeeperd)
@@ -56,33 +68,38 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t);
     [self ensureKeeperd];
 }
 
+- (void)setStatus:(NSString *)text {
+    _status.text = [NSString stringWithFormat:@"ControlIOS Keeper\n%@", text];
+}
+
 // Nếu daemon chưa chạy (cổng 46753 đóng) thì spawn.
 - (void)ensureKeeperd {
     if ([self portOpen:kSelfPort]) {
-        _status.text = @"ControlIOS Keeper\n● Daemon đang chạy nền ✓\n(có thể tắt app này, daemon vẫn sống)";
+        [self setStatus:@"● Daemon đang chạy nền ✓\n(có thể tắt app này, daemon vẫn sống)"];
         return;
     }
     int rc = [self spawnKeeperd];
-    _status.text = [NSString stringWithFormat:@"ControlIOS Keeper\nĐã spawn daemon (mã %d)\n"
-                                              @"Chờ vài giây để nó nhận cổng…", rc];
+    if (rc == 0)
+        [self setStatus:@"Đã bật daemon — chờ vài giây…"];
+    else
+        [self setStatus:[NSString stringWithFormat:@"Chưa bật được daemon (mã %d)\nthử lại…", rc]];
 }
 
 - (int)spawnKeeperd {
     NSString *path = [[NSBundle mainBundle] pathForResource:@"keeperd" ofType:@""];
-    if (!path) {
-        NSLog(@"[Keeper] thiếu keeperd trong bundle");
+    if (!path)
         return -1;
-    }
-    // Cho chắc có quyền chạy.
     chmod(path.fileSystemRepresentation, 0755);
 
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
-    // Chạy như ROOT qua persona (cần entitlement com.apple.private.persona-mgmt).
-    posix_spawnattr_set_persona_np(&attr, 99, PERSONA_FLAGS_OVERRIDE);
-    posix_spawnattr_set_persona_uid_np(&attr, 0);
-    posix_spawnattr_set_persona_gid_np(&attr, 0);
-    // Tách session -> daemon sống độc lập khi app bị tắt.
+    // Chạy ROOT qua persona nếu có symbol; thiếu thì spawn thường (vẫn tách session).
+    if (posix_spawnattr_set_persona_np && posix_spawnattr_set_persona_uid_np &&
+        posix_spawnattr_set_persona_gid_np) {
+        posix_spawnattr_set_persona_np(&attr, 99, PERSONA_FLAGS_OVERRIDE);
+        posix_spawnattr_set_persona_uid_np(&attr, 0);
+        posix_spawnattr_set_persona_gid_np(&attr, 0);
+    }
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETSID);
 
     const char *cpath = path.fileSystemRepresentation;
