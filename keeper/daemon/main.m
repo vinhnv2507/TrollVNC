@@ -116,19 +116,18 @@ int main(int argc, char *argv[]) {
         for (;;) {
             pid_t pid = tvFindProc(kWatchProc);
             if (pid <= 0) {
-                // ControlIOS chưa chạy -> mở, rồi chờ tiến trình xuất hiện.
-                tvLaunchTarget();
-                for (int i = 0; i < 60 && (pid = tvFindProc(kWatchProc)) <= 0; i++)
-                    sleep(1);
-                if (pid <= 0) {
-                    sleep(2); // mở không lên (khoá máy?) -> thử lại vòng sau
-                    continue;
-                }
+                // ControlIOS chưa chạy. Lúc CÀI ĐÈ, TrollStore mất ~10-15s ghi bundle
+                // mới, trong lúc đó mở app sẽ hụt -> THỬ MỞ LẠI mỗi 2s tới khi lên, để
+                // bật đúng khoảnh khắc cài xong (không đợi hết một vòng poll dài).
+                do {
+                    tvLaunchTarget();
+                    sleep(2);
+                    pid = tvFindProc(kWatchProc);
+                } while (pid <= 0);
             }
             NSLog(@"[keeperd] đang canh pid %d", pid);
-            tvWaitForExit(pid);                 // ngủ tới khi ControlIOS chết
+            tvWaitForExit(pid);                 // ngủ tới khi ControlIOS chết (0% CPU)
             NSLog(@"[keeperd] ControlIOS chết -> mở lại ngay");
-            // Vòng lặp: tvFindProc <=0 -> mở lại tức thì.
         }
     }
     return 0;
