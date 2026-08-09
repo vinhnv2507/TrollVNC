@@ -43,7 +43,7 @@ make tipa FINALPACKAGE=1
 - Nếu iOS jetsam giết keeperd (hiếm, khi cực thiếu RAM), mở app Keeper lại để spawn.
 
 ## Chỉnh
-- `keeper/keeperd/main.m`: `kSleepSeconds` (nhịp), `kFailsBeforeLaunch`,
+- `keeper/daemon/main.m`: `kSleepSeconds` (nhịp), `kFailsBeforeLaunch`,
   `kLaunchSuspended` (false = mở foreground; true = thử mở nền).
 - Yêu cầu entitlement: app cần `com.apple.private.persona-mgmt` để spawn root;
   keeperd cần `com.apple.springboard.launchapplications` để mở app.

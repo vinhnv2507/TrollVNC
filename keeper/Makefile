@@ -5,10 +5,10 @@ include $(THEOS)/makefiles/common.mk
 
 # ---- Daemon nền độc lập ----
 TOOL_NAME := keeperd
-keeperd_FILES := keeperd/main.m
+keeperd_FILES := daemon/main.m
 keeperd_FRAMEWORKS := Foundation CoreFoundation
 keeperd_CFLAGS := -fobjc-arc
-keeperd_CODESIGN_FLAGS := -Skeeperd/entitlements.plist
+keeperd_CODESIGN_FLAGS := -Sdaemon/entitlements.plist
 keeperd_INSTALL_PATH := /usr/local/bin
 
 # ---- App bệ phóng ----
