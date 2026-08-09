@@ -4,13 +4,9 @@
 <dict>
 	<key>platform-application</key>
 	<true/>
-	<key>com.apple.private.persona-mgmt</key>
-	<true/>
 	<key>com.apple.springboard.launchapplications</key>
 	<true/>
 	<key>com.apple.backboardd.launchapplications</key>
-	<true/>
-	<key>com.apple.multitasking.unlimitedassertions</key>
 	<true/>
 	<key>com.apple.private.security.no-sandbox</key>
 	<true/>

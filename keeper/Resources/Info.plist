@@ -26,7 +26,6 @@
 	<string>14.0</string>
 	<key>UIBackgroundModes</key>
 	<array>
-		<string>audio</string>
 		<string>network-authentication</string>
 	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

@@ -1,27 +1,28 @@
 # ControlIOS Keeper
 
-App phụ **rất nhỏ**, cài **một lần** cho mỗi máy, chạy nền và **tự mở lại app
-ControlIOS** khi nó chết — nhờ vậy sau khi bạn cài đè bản ControlIOS mới, máy tự
-hồi phục **không cần mở tay**.
+Giữ cho app ControlIOS luôn sống: cài **một lần**/máy, sau đó **tự mở lại
+ControlIOS** khi nó chết (kể cả sau khi bạn cài đè bản mới) — **không cần mở tay**.
 
-## Vì sao cần
-Trên TrollStore (chưa jailbreak), cài đè sẽ kill tiến trình cũ và iOS **không tự
-chạy lại** app nền. Nhưng bản thân app ControlIOS đã có **watchdog 3 giây** tự
-dựng lại server — chỉ thiếu khâu "làm app chạy lại". Keeper lấp đúng khâu đó:
+## Cách hoạt động (đã đổi sang DAEMON độc lập)
+Gồm 2 phần:
+- **keeperd** — một *daemon* nền (tiến trình root, tách session) canh cổng **46751**
+  (ControlIOS mở cổng này khi còn sống). Chết ~60s → gọi SpringBoard
+  `SBSLaunch("com.controlios.app")`. keeperd **sống độc lập với app**, không chết
+  khi bạn vuốt tắt app hay khi cài đè ControlIOS. Giống hệt cách ControlIOS spawn
+  `trollvncmanager`.
+- **App ControlIOS Keeper** — chỉ là *bệ phóng*: mở app một lần, nó **spawn keeperd**
+  (root, `POSIX_SPAWN_SETSID`, dùng persona như TrollVNC). Xong có thể **tắt app**,
+  keeperd vẫn chạy.
 
-- Keeper mở cổng kiểm tra `46751` (ControlIOS mở cổng này khi còn sống).
-- Cứ 20s Keeper thử cổng đó. Chết liên tục ~60s (3 lần) → gọi SpringBoard
-  `SBSLaunchApplication("com.controlios.app")` → ControlIOS chạy lại → watchdog
-  của nó tự lo server.
-- **Keeper KHÔNG bị cài đè** khi bạn update ControlIOS, nên nó sống sót và hồi
-  phục ControlIOS sau mỗi lần cài đè.
+> Vì sao phải là daemon: iOS treo/giết app nền — audio keep-alive không đủ và chết
+> khi vuốt tắt. Chỉ tiến trình tách khỏi vòng đời app mới bất tử qua force-quit.
 
 ## Build .tipa
-### Cách 1 — GitHub Actions (khuyên dùng)
+### GitHub Actions
 Actions → **Build ControlIOS Keeper** → Run workflow → tải artifact
-`ControlIOSKeeper-tipa` → có `ControlIOSKeeper.tipa`.
+`ControlIOSKeeper-tipa`.
 
-### Cách 2 — máy Mac có theos
+### Máy Mac có theos
 ```sh
 cd keeper
 make tipa FINALPACKAGE=1
@@ -29,26 +30,20 @@ make tipa FINALPACKAGE=1
 ```
 
 ## Cài & dùng
-1. Mở `ControlIOSKeeper.tipa` bằng **TrollStore** → Install (một lần cho mỗi máy).
-2. **Mở app "ControlIOS Keeper" một lần** để nó bắt đầu chạy nền (từ đó về sau tự
-   chạy; chỉ mở lại nếu máy reboot hoặc iOS thu hồi bộ nhớ).
-3. Xong. Từ giờ khi bạn cài đè ControlIOS, Keeper tự mở lại ControlIOS trong ~1
-   phút. Trên PC bấm **"Nối lại ngay"** nếu muốn bám lại tức thì.
+1. TrollStore cài `ControlIOSKeeper.tipa` (một lần/máy).
+2. **Mở app "ControlIOS Keeper" một lần** → nó spawn keeperd. Màn hình hiện
+   "● Daemon đang chạy nền ✓". Từ đó **tắt app thoải mái**, keeperd vẫn sống.
+3. Xong. Cài đè ControlIOS → keeperd tự mở lại trong ~1 phút. PC bấm **"Nối lại
+   ngay"** nếu muốn bám tức thì.
 
-> Lưu ý reboot: sau khi máy khởi động lại, cả Keeper lẫn ControlIOS đều chưa chạy
-> (TrollStore không có launchd nền). Cần mở **Keeper** một lần sau reboot; sau đó
-> Keeper lo phần còn lại. Nếu muốn tự chạy cả sau reboot thì cần máy jailbreak
-> (LaunchDaemon) — TrollStore thuần không làm được.
-
-## Giữ nền bằng cách nào
-Để không bị iOS treo khi ở nền, Keeper **phát một file âm thanh IM LẶNG lặp vô
-hạn** (background mode `audio`, `MixWithOthers` nên không cắt âm app khác). Nhờ
-vậy timer kiểm tra tiếp tục chạy trong nền. (Chỉ `network-authentication` không
-đủ để giữ app sống.)
+## Giới hạn
+- **Sau REBOOT**: keeperd chưa chạy (TrollStore không có launchd) → mở app Keeper
+  **một lần** sau reboot để spawn lại keeperd. Rồi keeperd lo phần còn lại. Tự chạy
+  sau reboot cần máy jailbreak (LaunchDaemon).
+- Nếu iOS jetsam giết keeperd (hiếm, khi cực thiếu RAM), mở app Keeper lại để spawn.
 
 ## Chỉnh
-Trong `AppDelegate.m`:
-- `kCheckInterval` (20s), `kFailsBeforeLaunch` (3) — nhịp kiểm tra và độ trễ trước
-  khi mở lại.
-- `kLaunchSuspended` — `false` mở ControlIOS foreground (chắc chắn chạy, hiện app
-  một nhịp); đổi `true` để thử mở nền (không cướp app đang mở) nếu máy bạn hỗ trợ.
+- `keeper/keeperd/main.m`: `kSleepSeconds` (nhịp), `kFailsBeforeLaunch`,
+  `kLaunchSuspended` (false = mở foreground; true = thử mở nền).
+- Yêu cầu entitlement: app cần `com.apple.private.persona-mgmt` để spawn root;
+  keeperd cần `com.apple.springboard.launchapplications` để mở app.
