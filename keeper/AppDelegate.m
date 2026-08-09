@@ -33,16 +33,16 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
     didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Dựng UI TRƯỚC, đảm bảo luôn hiển thị (không dính việc spawn).
     self.window = [[UIWindow alloc] initWithFrame:[UIScreen mainScreen].bounds];
-    self.window.backgroundColor = [UIColor blackColor];
+    self.window.backgroundColor = [UIColor darkGrayColor];
     UIViewController *vc = [UIViewController new];
-    vc.view.backgroundColor = [UIColor blackColor];
+    vc.view.backgroundColor = [UIColor darkGrayColor];
     _status = [[UILabel alloc] initWithFrame:vc.view.bounds];
     _status.numberOfLines = 0;
     _status.textAlignment = NSTextAlignmentCenter;
-    _status.textColor = [UIColor whiteColor];
-    _status.font = [UIFont systemFontOfSize:15];
+    _status.textColor = [UIColor yellowColor];  // vàng: thấy trên mọi nền
+    _status.font = [UIFont boldSystemFontOfSize:16];
     _status.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
-    _status.text = @"ControlIOS Keeper\nĐang khởi động daemon…";
+    _status.text = @"ControlIOS Keeper\nĐang khởi động…";
     [vc.view addSubview:_status];
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
@@ -65,17 +65,18 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
     _status.text = [NSString stringWithFormat:@"ControlIOS Keeper\n%@", text];
 }
 
-// Nếu daemon chưa chạy (cổng 46753 đóng) thì spawn.
+// Theo dõi + spawn lại nếu daemon chết. Kèm CHẨN ĐOÁN để dễ báo lỗi.
 - (void)ensureKeeperd {
-    if ([self portOpen:kSelfPort]) {
-        [self setStatus:@"● Daemon đang chạy nền ✓\n(có thể tắt app này, daemon vẫn sống)"];
-        return;
-    }
-    int rc = [self spawnKeeperd];
-    if (rc == 0)
-        [self setStatus:@"Đã bật daemon — chờ vài giây…"];
-    else
-        [self setStatus:[NSString stringWithFormat:@"Chưa bật được daemon (mã %d)\nthử lại…", rc]];
+    BOOL bundled = [[NSBundle mainBundle] pathForResource:@"keeperd" ofType:@""] != nil;
+    BOOL running = [self portOpen:kSelfPort];
+    if (!running)
+        [self spawnKeeperd];
+    [self setStatus:[NSString stringWithFormat:
+                                @"keeperd trong bundle: %@\nDaemon đang chạy: %@\n"
+                                @"%@",
+                                bundled ? @"CÓ ✓" : @"KHÔNG ✗ (lỗi build)",
+                                running ? @"● CÓ ✓" : @"chưa (đang bật…)",
+                                running ? @"Có thể TẮT app này, daemon vẫn sống." : @""]];
 }
 
 - (int)spawnKeeperd {
