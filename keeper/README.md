@@ -40,6 +40,12 @@ make tipa FINALPACKAGE=1
 > Keeper lo phần còn lại. Nếu muốn tự chạy cả sau reboot thì cần máy jailbreak
 > (LaunchDaemon) — TrollStore thuần không làm được.
 
+## Giữ nền bằng cách nào
+Để không bị iOS treo khi ở nền, Keeper **phát một file âm thanh IM LẶNG lặp vô
+hạn** (background mode `audio`, `MixWithOthers` nên không cắt âm app khác). Nhờ
+vậy timer kiểm tra tiếp tục chạy trong nền. (Chỉ `network-authentication` không
+đủ để giữ app sống.)
+
 ## Chỉnh
 Trong `AppDelegate.m`:
 - `kCheckInterval` (20s), `kFailsBeforeLaunch` (3) — nhịp kiểm tra và độ trễ trước

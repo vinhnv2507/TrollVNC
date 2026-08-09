@@ -1,4 +1,5 @@
 #import "AppDelegate.h"
+#import <AVFoundation/AVFoundation.h>
 #import <dlfcn.h>
 #import <arpa/inet.h>
 #import <netinet/in.h>
@@ -8,16 +9,16 @@
 static const int kAlivePort = 46751;                       // cổng "còn sống" của ControlIOS
 static NSString *const kTargetBundleID = @"com.controlios.app";
 static const NSTimeInterval kCheckInterval = 20.0;         // kiểm tra mỗi 20s
-static const int kFailsBeforeLaunch = 3;                   // chết ~60s mới mở lại (tránh mở nhầm lúc server đang tự khởi động lại)
-// Mở NỀN hay FOREGROUND. true = nền (không cướp app đang mở) nhưng vài máy/phiên
-// bản có thể không khởi động hẳn; false = foreground (chắc chắn chạy, nhưng hiện
-// app ControlIOS lên một nhịp). Chết-rồi-mở-lại là hiếm (chỉ sau cài đè/reboot).
+static const int kFailsBeforeLaunch = 3;                   // chết ~60s mới mở lại
+// Mở NỀN hay FOREGROUND. false = foreground (chắc chắn chạy, hiện app một nhịp);
+// true = thử mở nền (không cướp app đang mở).
 static const Boolean kLaunchSuspended = false;
 
 @implementation AppDelegate {
     dispatch_source_t _timer;
     int _fails;
     UILabel *_status;
+    AVAudioPlayer *_silence;   // phát im lặng để GIỮ APP SỐNG trong nền
 }
 
 - (BOOL)application:(UIApplication *)application
@@ -36,8 +37,15 @@ static const Boolean kLaunchSuspended = false;
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
 
-    // GCD timer chạy trên hàng đợi nền; background mode network-authentication giữ
-    // app này sống trong nền để tiếp tục kiểm tra.
+    [self startSilentAudio];   // giữ app sống trong nền
+
+    // Nghe gián đoạn âm thanh (cuộc gọi, app khác) để bật lại -> không rớt nền.
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(audioInterrupted:)
+                                                 name:AVAudioSessionInterruptionNotification
+                                               object:nil];
+
+    // GCD timer chạy trên hàng đợi nền.
     _timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0,
                                     dispatch_get_global_queue(QOS_CLASS_UTILITY, 0));
     dispatch_source_set_timer(_timer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(3 * NSEC_PER_SEC)),
@@ -48,6 +56,69 @@ static const Boolean kLaunchSuspended = false;
     });
     dispatch_resume(_timer);
     return YES;
+}
+
+// ---- Giữ app sống bằng âm thanh IM LẶNG (background mode = audio) ----
+- (void)startSilentAudio {
+    NSError *err = nil;
+    AVAudioSession *sess = [AVAudioSession sharedInstance];
+    // MixWithOthers: KHÔNG cắt nhạc/âm của app kiếm tiền đang chạy.
+    [sess setCategory:AVAudioSessionCategoryPlayback
+          withOptions:AVAudioSessionCategoryOptionMixWithOthers
+                error:&err];
+    [sess setActive:YES error:&err];
+
+    NSString *path = [self silentWavPath];
+    NSURL *url = [NSURL fileURLWithPath:path];
+    _silence = [[AVAudioPlayer alloc] initWithContentsOfURL:url error:&err];
+    _silence.numberOfLoops = -1;   // lặp vô hạn
+    // Mẫu âm toàn số 0 nên vẫn im tuyệt đối; để volume 1.0 cho iOS coi là audio
+    // ĐANG phát -> giữ app sống nền chắc hơn (volume 0 có thể bị coi là "không kêu").
+    _silence.volume = 1.0;
+    [_silence prepareToPlay];
+    [_silence play];
+}
+
+- (void)audioInterrupted:(NSNotification *)note {
+    NSNumber *type = note.userInfo[AVAudioSessionInterruptionTypeKey];
+    if (type.unsignedIntegerValue == AVAudioSessionInterruptionTypeEnded) {
+        // Hết gián đoạn -> bật lại để tiếp tục giữ nền.
+        [[AVAudioSession sharedInstance] setActive:YES error:NULL];
+        [_silence play];
+    }
+}
+
+// Tạo file WAV im lặng (mono 8kHz 16-bit, ~0.5s) trong thư mục tạm.
+- (NSString *)silentWavPath {
+    NSString *path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"keeper_silence.wav"];
+    if ([[NSFileManager defaultManager] fileExistsAtPath:path])
+        return path;
+
+    int sampleRate = 8000, seconds = 1, channels = 1, bits = 16;
+    int byteRate = sampleRate * channels * bits / 8;
+    int dataSize = byteRate * seconds;
+    int blockAlign = channels * bits / 8;
+    int chunkSize = 36 + dataSize;
+
+    NSMutableData *d = [NSMutableData data];
+    void (^u32)(uint32_t) = ^(uint32_t v) { [d appendBytes:&v length:4]; };
+    void (^u16)(uint16_t) = ^(uint16_t v) { [d appendBytes:&v length:2]; };
+    [d appendBytes:"RIFF" length:4];
+    u32((uint32_t)chunkSize);
+    [d appendBytes:"WAVE" length:4];
+    [d appendBytes:"fmt " length:4];
+    u32(16);                       // subchunk1 size
+    u16(1);                        // PCM
+    u16((uint16_t)channels);
+    u32((uint32_t)sampleRate);
+    u32((uint32_t)byteRate);
+    u16((uint16_t)blockAlign);
+    u16((uint16_t)bits);
+    [d appendBytes:"data" length:4];
+    u32((uint32_t)dataSize);
+    [d increaseLengthBy:dataSize]; // toàn số 0 = im lặng
+    [d writeToFile:path atomically:YES];
+    return path;
 }
 
 - (void)tick {
