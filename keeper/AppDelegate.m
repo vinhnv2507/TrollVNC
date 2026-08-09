@@ -47,15 +47,8 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
     self.window.rootViewController = vc;
     [self.window makeKeyAndVisible];
 
-    // Spawn SAU khi UI đã hiện. LUÔN spawn một keeperd mới lúc mở app: keeperd mới
-    // sẽ giết bản cũ và chiếm cổng -> cài đè bản Keeper mới là chạy đúng logic mới,
-    // không kẹt keeperd cũ đang chạy nền.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)),
-                   dispatch_get_main_queue(), ^{
-                       int rc = [self spawnKeeperd];
-                       [self setStatus:(rc == 0 ? @"Đã bật daemon mới — chờ vài giây…"
-                                                : [NSString stringWithFormat:@"Spawn lỗi (mã %d)", rc])];
-                   });
+    // keeperd đã được spawn trong main() (trước UI). Ở đây chỉ theo dõi trạng thái;
+    // nếu daemon chết thì timer sẽ spawn lại.
     _uiTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
                                                 target:self
                                               selector:@selector(ensureKeeperd)

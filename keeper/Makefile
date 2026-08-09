@@ -22,10 +22,11 @@ ControlIOSKeeper_INSTALL_PATH := /Applications
 include $(THEOS_MAKE_PATH)/tool.mk
 include $(THEOS_MAKE_PATH)/application.mk
 
-# Nhét keeperd (đã ký entitlements) vào trong bundle app để app spawn.
+# Nhét keeperd (đã ký entitlements, lấy từ staging install path) vào bundle app.
 after-stage::
-	@cp "$(THEOS_OBJ_DIR)/keeperd" \
+	@cp "$(THEOS_STAGING_DIR)/usr/local/bin/keeperd" \
 	    "$(THEOS_STAGING_DIR)/Applications/ControlIOSKeeper.app/keeperd"
+	@chmod 755 "$(THEOS_STAGING_DIR)/Applications/ControlIOSKeeper.app/keeperd"
 	@echo "Đã nhét keeperd vào ControlIOSKeeper.app"
 
 # Đóng gói .tipa để cài bằng TrollStore.
