@@ -38,10 +38,20 @@ make tipa FINALPACKAGE=1
 3. Xong. Cài đè ControlIOS → keeperd tự mở lại trong ~1 phút. PC bấm **"Nối lại
    ngay"** nếu muốn bám tức thì.
 
+## Tự hồi phục sau reboot (best-effort)
+Keeper đăng ký một **BGProcessingTask** (BackgroundTasks). Sau khi máy khởi động
+lại **và được mở khoá một lần**, iOS sẽ **tự bật lại app Keeper** khi có cơ hội
+(hay chạy lúc đang sạc) để chạy task → app launch → `main()` spawn keeperd → hồi
+phục **không cần mở tay**. Thời điểm do iOS quyết (có thể vài phút–vài giờ), nên
+đây là best-effort. Muốn chắc/nhanh hơn: thêm Automation Shortcuts **"Theo giờ"**
+hoặc **"Khi cắm sạc"** → Mở app ControlIOS Keeper (hai trigger này hỗ trợ tắt
+"Hỏi trước khi chạy"; trigger Wi-Fi thì không).
+
 ## Giới hạn
-- **Sau REBOOT**: keeperd chưa chạy (TrollStore không có launchd) → mở app Keeper
-  **một lần** sau reboot để spawn lại keeperd. Rồi keeperd lo phần còn lại. Tự chạy
-  sau reboot cần máy jailbreak (LaunchDaemon).
+- **Trước lần MỞ KHOÁ đầu sau cold-boot (BFU)**: iOS mã hoá toàn bộ, KHÔNG tiến
+  trình/automation nào chạy — kể cả Shortcuts. Bắt buộc nhập passcode 1 lần. Không
+  cách nào lách trên máy chưa jailbreak.
+- Tự chạy NGAY khi boot (không cần mở khoá) chỉ có nếu **jailbreak** (LaunchDaemon).
 - Nếu iOS jetsam giết keeperd (hiếm, khi cực thiếu RAM), mở app Keeper lại để spawn.
 
 ## Chỉnh

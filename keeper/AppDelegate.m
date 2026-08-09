@@ -1,4 +1,5 @@
 #import "AppDelegate.h"
+#import <BackgroundTasks/BackgroundTasks.h>
 #import <arpa/inet.h>
 #import <crt_externs.h>
 #import <netinet/in.h>
@@ -9,6 +10,9 @@
 
 // keeperd tự giữ cổng này; app dò để biết daemon đã chạy chưa.
 static const int kSelfPort = 46753;
+// BackgroundTasks: iOS tự khởi động lại app này (sau boot, khi có cơ hội) để chạy
+// task -> app launch -> main() spawn keeperd -> hồi phục mà KHÔNG cần mở tay.
+static NSString *const kBGReviveID = @"com.controlios.keeper.revive";
 
 // Spawn keeperd làm tiến trình ROOT, tách session (POSIX_SPAWN_SETSID) -> sống độc
 // lập với app. Khai báo WEAK để nếu máy thiếu symbol thì app KHÔNG fail launch
@@ -54,7 +58,33 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
                                               selector:@selector(ensureKeeperd)
                                               userInfo:nil
                                                repeats:YES];
+
+    // Đăng ký BackgroundTasks: iOS sẽ tự bật lại app này sau boot/khi rảnh để chạy
+    // task (chỉ cần launch là main() đã spawn keeperd). Best-effort, thời điểm do
+    // iOS quyết (hay chạy khi đang sạc). Vẫn cần MỞ KHOÁ máy 1 lần sau cold-boot.
+    if (@available(iOS 13.0, *)) {
+        [[BGTaskScheduler sharedScheduler]
+            registerForTaskWithIdentifier:kBGReviveID
+                               usingQueue:nil
+                            launchHandler:^(BGTask *task) {
+                                [self scheduleRevive];       // đặt lại cho lần sau
+                                [self ensureKeeperd];        // chắc chắn keeperd chạy
+                                [task setTaskCompletedWithSuccess:YES];
+                            }];
+        [self scheduleRevive];
+    }
     return YES;
+}
+
+- (void)scheduleRevive {
+    if (@available(iOS 13.0, *)) {
+        BGProcessingTaskRequest *req =
+            [[BGProcessingTaskRequest alloc] initWithIdentifier:kBGReviveID];
+        req.requiresNetworkConnectivity = NO;
+        req.requiresExternalPower = NO;   // cho phép chạy cả khi không sạc
+        req.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:60];
+        [[BGTaskScheduler sharedScheduler] submitTaskRequest:req error:NULL];
+    }
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {

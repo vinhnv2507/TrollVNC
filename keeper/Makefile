@@ -14,7 +14,7 @@ keeperd_INSTALL_PATH := /usr/local/bin
 # ---- App bệ phóng ----
 APPLICATION_NAME := ControlIOSKeeper
 ControlIOSKeeper_FILES := main.m AppDelegate.m
-ControlIOSKeeper_FRAMEWORKS := UIKit CoreGraphics CoreFoundation
+ControlIOSKeeper_FRAMEWORKS := UIKit CoreGraphics CoreFoundation BackgroundTasks
 ControlIOSKeeper_CFLAGS := -fobjc-arc
 ControlIOSKeeper_CODESIGN_FLAGS := -Sentitlements.plist
 ControlIOSKeeper_INSTALL_PATH := /Applications
