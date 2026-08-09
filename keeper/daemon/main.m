@@ -1,41 +1,26 @@
-// keeperd — tiến trình nền ĐỘC LẬP (không thuộc vòng đời app Keeper). Được app
-// Keeper spawn ra như một daemon (root, tách session) nên sống sót cả khi app bị
-// vuốt tắt. Nhiệm vụ: canh cổng "còn sống" 46751 của ControlIOS; chết một lúc thì
-// nhờ SpringBoard mở lại com.controlios.app. Giống cách trollvncmanager giữ server.
+// keeperd — daemon nền ĐỘC LẬP (không thuộc vòng đời app Keeper). App Keeper spawn
+// nó ra (root, tách session) nên sống sót cả khi app bị vuốt tắt / ControlIOS cài
+// đè. Nhiệm vụ: mở lại com.controlios.app khi tiến trình trollvncmanager chết.
+//
+// Dùng kqueue NOTE_EXIT: BLOCK chờ sự kiện tiến trình chết -> phản ứng TỨC THÌ và
+// gần như 0% CPU (không poll định kỳ). Nhẹ và nhanh nhất cho máy iOS.
 #import <Foundation/Foundation.h>
 #import <arpa/inet.h>
 #import <dlfcn.h>
 #import <netinet/in.h>
+#import <sys/event.h>
+#import <sys/param.h>
 #import <sys/socket.h>
+#import <sys/sysctl.h>
+#import <sys/types.h>
 #import <unistd.h>
 
-static const int kAlivePort = 46751;              // ControlIOS còn sống
-static const int kSelfPort = 46753;               // keeperd tự giữ (một-thể-hiện + để app dò)
+static const int kSelfPort = 46753;                       // keeperd tự giữ (một-thể-hiện)
 static NSString *const kTargetBundleID = @"com.controlios.app";
-static const int kSleepSeconds = 2;               // nhịp kiểm tra NHANH (~real-time)
-static const int kFailsBeforeLaunch = 2;          // chết ~4s là mở lại
-static const int kLaunchCooldown = 10;            // sau khi mở, chờ ControlIOS lên rồi mới soi tiếp
-static const Boolean kLaunchSuspended = false;    // false = foreground; true = thử mở nền
+static const char *kWatchProc = "trollvncmanager";        // tiến trình giữ ControlIOS sống
+static const Boolean kLaunchSuspended = false;            // false = foreground; true = thử mở nền
 
-static BOOL tvPortOpen(int port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-        return NO;
-    struct timeval tv = {2, 0};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    int r = connect(fd, (struct sockaddr *)&addr, sizeof(addr));
-    close(fd);
-    return r == 0;
-}
-
-// Giữ cổng tự-nhận diện: bind thành công = mình là thể hiện duy nhất; thất bại =
-// đã có keeperd khác chạy -> thoát.
+// Giữ cổng tự-nhận diện: bind được = thể hiện duy nhất; thất bại = đã có keeperd.
 static int tvBindSelf(int port) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0)
@@ -55,6 +40,32 @@ static int tvBindSelf(int port) {
     return fd;
 }
 
+// Tìm PID của tiến trình theo tên (p_comm bị cắt còn tối đa MAXCOMLEN ký tự).
+static pid_t tvFindProc(const char *name) {
+    int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
+    size_t len = 0;
+    if (sysctl(mib, 4, NULL, &len, NULL, 0) < 0 || len == 0)
+        return -1;
+    struct kinfo_proc *procs = (struct kinfo_proc *)malloc(len);
+    if (!procs)
+        return -1;
+    if (sysctl(mib, 4, procs, &len, NULL, 0) < 0) {
+        free(procs);
+        return -1;
+    }
+    pid_t found = -1;
+    int n = (int)(len / sizeof(struct kinfo_proc));
+    for (int i = 0; i < n; i++) {
+        if (strncmp(procs[i].kp_proc.p_comm, name, MAXCOMLEN) == 0) {
+            found = procs[i].kp_proc.p_pid;
+            break;
+        }
+    }
+    free(procs);
+    return found;
+}
+
+// Nhờ SpringBoard mở lại app đích.
 static int tvLaunchTarget(void) {
     void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
                      "SpringBoardServices",
@@ -77,6 +88,23 @@ static int tvLaunchTarget(void) {
     return err;
 }
 
+// Chặn tới khi PID chết (kqueue NOTE_EXIT). Trả về khi tiến trình thoát; hoặc trả
+// ngay nếu PID đã chết / không đăng ký được.
+static void tvWaitForExit(pid_t pid) {
+    int kq = kqueue();
+    if (kq < 0)
+        return;
+    struct kevent ke;
+    EV_SET(&ke, pid, EVFILT_PROC, EV_ADD | EV_ONESHOT, NOTE_EXIT, 0, NULL);
+    if (kevent(kq, &ke, 1, NULL, 0, NULL) == -1) {
+        close(kq); // PID đã chết trước khi kịp đăng ký
+        return;
+    }
+    struct kevent out;
+    kevent(kq, NULL, 0, &out, 1, NULL); // BLOCK, 0% CPU tới khi NOTE_EXIT
+    close(kq);
+}
+
 int main(int argc, char *argv[]) {
     @autoreleasepool {
         int self_fd = tvBindSelf(kSelfPort);
@@ -84,19 +112,23 @@ int main(int argc, char *argv[]) {
             NSLog(@"[keeperd] đã có thể hiện khác — thoát");
             return 0;
         }
-        NSLog(@"[keeperd] bắt đầu canh ControlIOS");
-        int fails = 0;
+        NSLog(@"[keeperd] canh %s bằng kqueue", kWatchProc);
         for (;;) {
-            if (tvPortOpen(kAlivePort)) {
-                fails = 0;
-                sleep((unsigned)kSleepSeconds);
-            } else if (++fails >= kFailsBeforeLaunch) {
-                fails = 0;
+            pid_t pid = tvFindProc(kWatchProc);
+            if (pid <= 0) {
+                // ControlIOS chưa chạy -> mở, rồi chờ tiến trình xuất hiện.
                 tvLaunchTarget();
-                sleep((unsigned)kLaunchCooldown); // chờ ControlIOS khởi động xong
-            } else {
-                sleep((unsigned)kSleepSeconds);    // fail lần đầu -> soi lại nhanh
+                for (int i = 0; i < 60 && (pid = tvFindProc(kWatchProc)) <= 0; i++)
+                    sleep(1);
+                if (pid <= 0) {
+                    sleep(2); // mở không lên (khoá máy?) -> thử lại vòng sau
+                    continue;
+                }
             }
+            NSLog(@"[keeperd] đang canh pid %d", pid);
+            tvWaitForExit(pid);                 // ngủ tới khi ControlIOS chết
+            NSLog(@"[keeperd] ControlIOS chết -> mở lại ngay");
+            // Vòng lặp: tvFindProc <=0 -> mở lại tức thì.
         }
     }
     return 0;

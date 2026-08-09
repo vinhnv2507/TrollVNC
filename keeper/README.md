@@ -5,10 +5,12 @@ ControlIOS** khi nó chết (kể cả sau khi bạn cài đè bản mới) — 
 
 ## Cách hoạt động (đã đổi sang DAEMON độc lập)
 Gồm 2 phần:
-- **keeperd** — một *daemon* nền (tiến trình root, tách session) canh cổng **46751**
-  (ControlIOS mở cổng này khi còn sống). Chết ~60s → gọi SpringBoard
-  `SBSLaunch("com.controlios.app")`. keeperd **sống độc lập với app**, không chết
-  khi bạn vuốt tắt app hay khi cài đè ControlIOS. Giống hệt cách ControlIOS spawn
+- **keeperd** — một *daemon* nền (tiến trình root, tách session) **canh tiến trình
+  `trollvncmanager` của ControlIOS bằng kqueue `NOTE_EXIT`**: nó *block chờ* sự
+  kiện tiến trình chết → phản ứng **TỨC THÌ** và gần như **0% CPU** (không poll
+  định kỳ, ngủ hẳn tới khi có sự kiện). Khi ControlIOS chết (cài đè/kill) →
+  `SBSLaunch("com.controlios.app")` ngay. keeperd **sống độc lập với app**, không
+  chết khi vuốt tắt app hay cài đè ControlIOS. Giống cách ControlIOS spawn
   `trollvncmanager`.
 - **App ControlIOS Keeper** — chỉ là *bệ phóng*: mở app một lần, nó **spawn keeperd**
   (root, `POSIX_SPAWN_SETSID`, dùng persona như TrollVNC). Xong có thể **tắt app**,
