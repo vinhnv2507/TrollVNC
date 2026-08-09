@@ -12,8 +12,9 @@
 static const int kAlivePort = 46751;              // ControlIOS còn sống
 static const int kSelfPort = 46753;               // keeperd tự giữ (một-thể-hiện + để app dò)
 static NSString *const kTargetBundleID = @"com.controlios.app";
-static const int kSleepSeconds = 20;              // nhịp kiểm tra
-static const int kFailsBeforeLaunch = 3;          // chết ~60s mới mở lại
+static const int kSleepSeconds = 2;               // nhịp kiểm tra NHANH (~real-time)
+static const int kFailsBeforeLaunch = 2;          // chết ~4s là mở lại
+static const int kLaunchCooldown = 10;            // sau khi mở, chờ ControlIOS lên rồi mới soi tiếp
 static const Boolean kLaunchSuspended = false;    // false = foreground; true = thử mở nền
 
 static BOOL tvPortOpen(int port) {
@@ -88,11 +89,14 @@ int main(int argc, char *argv[]) {
         for (;;) {
             if (tvPortOpen(kAlivePort)) {
                 fails = 0;
+                sleep((unsigned)kSleepSeconds);
             } else if (++fails >= kFailsBeforeLaunch) {
                 fails = 0;
                 tvLaunchTarget();
+                sleep((unsigned)kLaunchCooldown); // chờ ControlIOS khởi động xong
+            } else {
+                sleep((unsigned)kSleepSeconds);    // fail lần đầu -> soi lại nhanh
             }
-            sleep((unsigned)kSleepSeconds);
         }
     }
     return 0;
