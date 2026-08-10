@@ -67,6 +67,42 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.server.unpatched = True
         await self.channel.set_smoothness(1, 0.008, False)  # không được ném
 
+    async def test_keeper_status_reads_both_flags(self) -> None:
+        self.server.keeperd_running = True
+        self.server.keeper_app_running = True
+        self.assertEqual(await self.channel.get_keeper_status(), (True, True))
+
+    async def test_keeper_status_reports_dead_keeperd(self) -> None:
+        self.server.keeperd_running = False
+        self.server.keeper_app_running = False
+        self.assertEqual(await self.channel.get_keeper_status(), (False, False))
+
+    async def test_ensure_keeper_starts_when_dead(self) -> None:
+        self.server.keeperd_running = False
+        started, note = await self.channel.ensure_keeper()
+        self.assertTrue(started)
+        self.assertEqual(self.server.keeper_starts, 1)
+        self.assertTrue(self.server.keeperd_running)
+        self.assertIn("keeperd", note)
+
+    async def test_ensure_keeper_leaves_live_keeperd_alone(self) -> None:
+        # Đang sống thì KHÔNG được gọi start — tránh spawn trùng cho ~250 máy.
+        self.server.keeperd_running = True
+        started, _note = await self.channel.ensure_keeper()
+        self.assertFalse(started)
+        self.assertEqual(self.server.keeper_starts, 0)
+
+    async def test_ensure_keeper_rejects_spawn_without_daemon(self) -> None:
+        self.server.keeperd_running = False
+        self.server.keeper_start_noop = True
+        with self.assertRaisesRegex(ControlError, "chưa hoạt động"):
+            await self.channel.ensure_keeper()
+
+    async def test_keeper_status_raises_when_unpatched(self) -> None:
+        self.server.unpatched = True
+        with self.assertRaises(ControlError):
+            await self.channel.get_keeper_status()
+
     async def test_push_prelude_sends_base64(self) -> None:
         import base64
         await self.channel.push_prelude("function foo(){}")

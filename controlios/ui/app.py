@@ -40,6 +40,9 @@ PAGE_SIZES = [("50 máy", 50), ("100 máy", 100), ("250 máy", 250), ("Tất c�
 COLUMN_CHOICES = [("Cột: tự động", 0), ("4 cột", 4), ("6 cột", 6), ("8 cột", 8),
                   ("10 cột", 10), ("12 cột", 12)]
 CAPTURES_DIR = PROJECT_ROOT / "captures"
+# Chu kỳ tự canh Keeper. 5 phút: keeperd chết là chuyện hiếm (chỉ khi cài đè hoặc
+# hết RAM), soát dày hơn chỉ tốn thêm một vòng control socket cho ~250 máy.
+KEEPER_WATCH_INTERVAL_MS = 5 * 60 * 1000
 
 SAMPLE_SCRIPT = """\
 # Toạ độ là TỈ LỆ màn hình (0..1), không phải pixel,
@@ -1341,6 +1344,24 @@ class MainWindow(QMainWindow):
                 lambda _checked=False, s=state: self._set_assistive_touch(s))
         at_button.setMenu(at_menu)
         gesture_row.addWidget(at_button)
+
+        # Keeper: keeperd canh ControlIOS trên máy, PC canh keeperd. Nút này để
+        # soát tay; còn vòng tự động chạy theo chu kỳ trong _tick_keeper_watch.
+        keeper_button = QToolButton()
+        keeper_button.setText("🛡 Keeper")
+        keeper_button.setToolTip("Kiểm tra ControlIOSKeeper trên máy, bật lại nếu nó chết")
+        keeper_button.setPopupMode(QToolButton.InstantPopup)
+        keeper_menu = QMenu(keeper_button)
+        keeper_check_act = keeper_menu.addAction("Kiểm tra + bật lại nếu chết")
+        keeper_check_act.triggered.connect(lambda _checked=False: self._ensure_keeper())
+        keeper_menu.addSeparator()
+        self.keeper_watch_act = keeper_menu.addAction("Tự động canh mọi máy")
+        self.keeper_watch_act.setCheckable(True)
+        self.keeper_watch_act.setToolTip(
+            "Định kỳ soát Keeper trên tất cả máy đang kết nối và bật lại máy nào chết")
+        self.keeper_watch_act.toggled.connect(self._set_keeper_watch)
+        keeper_button.setMenu(keeper_menu)
+        gesture_row.addWidget(keeper_button)
         detail_layout.addLayout(gesture_row)
 
         self.splitter = QSplitter(Qt.Horizontal)
@@ -1427,6 +1448,10 @@ class MainWindow(QMainWindow):
         self._stats_timer = QTimer(self)
         self._stats_timer.timeout.connect(self._refresh_stats)
         self._stats_timer.start(1000)
+
+        # Vòng canh Keeper: chỉ chạy khi người dùng bật trong menu 🛡 Keeper.
+        self._keeper_timer = QTimer(self)
+        self._keeper_timer.timeout.connect(self._tick_keeper_watch)
 
     # ---------------------------------------------------------------- toolbar
 
@@ -2058,6 +2083,46 @@ class MainWindow(QMainWindow):
             targets, state,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
+
+    def _ensure_keeper(self, keys: Optional[List[str]] = None) -> None:
+        """Soát Keeper trên các máy đã chọn (hoặc danh sách truyền vào)."""
+
+        targets = list(keys) if keys is not None else self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        self.pool.ensure_keeper(
+            targets,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
+
+    def _set_keeper_watch(self, enabled: bool) -> None:
+        """Bật/tắt vòng tự canh Keeper cho toàn bộ máy đang kết nối."""
+
+        if enabled:
+            self._keeper_timer.start(KEEPER_WATCH_INTERVAL_MS)
+            self.bridge.message.emit(
+                f"Tự canh Keeper: BẬT (mỗi {KEEPER_WATCH_INTERVAL_MS // 60000} phút)")
+        else:
+            self._keeper_timer.stop()
+            self.bridge.message.emit("Tự canh Keeper: TẮT")
+
+    def _tick_keeper_watch(self) -> None:
+        """Một nhịp tự canh: soát mọi máy đang ONLINE, im lặng nếu đều sống.
+
+        Chỉ soát máy đang ONLINE — máy chưa kết nối thì control socket không tới
+        được, hỏi cũng chỉ tổ đầy log lỗi."""
+
+        keys = self.pool.online_keys()
+        if not keys:
+            return
+        self.pool.ensure_keeper(
+            keys,
+            # Máy sống thì không nói gì; chỉ báo khi thật sự phải bật lại.
+            on_event=lambda k, m: (self.bridge.message.emit(f"[{k}] {m}")
+                                   if "bật lại" in m else None),
+            on_done=lambda d, ok, fails: (self.bridge.bulk_done.emit(d, ok, fails)
+                                          if fails else None))
 
     def _run_quick_action(self, label: str, source: str, needs_name: bool) -> None:
         targets = self.action_targets()

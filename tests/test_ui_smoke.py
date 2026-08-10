@@ -451,6 +451,37 @@ class ScriptDialogTest(unittest.TestCase):
         self.assertEqual(len(called), 1)
         self.assertEqual(len(called[0][0]), 2)
 
+    def test_ensure_keeper_needs_selection(self) -> None:
+        called = []
+        self.window.pool.ensure_keeper = lambda *a, **k: called.append(a)
+        self.window.grid.clear_selection()
+        self.window.detail.set_device(None)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.information"):
+            self.window._ensure_keeper()
+        self.assertFalse(called)
+
+    def test_ensure_keeper_uses_selected_devices(self) -> None:
+        called = []
+        self.window.pool.ensure_keeper = lambda *a, **k: called.append(a)
+        self.window.grid.select_all()
+        self.window._ensure_keeper()
+        self.assertEqual(len(called), 1)
+        self.assertEqual(list(called[0][0]), self.window.action_targets())
+
+    def test_keeper_watch_toggle_controls_the_timer(self) -> None:
+        self.assertFalse(self.window._keeper_timer.isActive())
+        self.window.keeper_watch_act.setChecked(True)
+        self.assertTrue(self.window._keeper_timer.isActive())
+        self.window.keeper_watch_act.setChecked(False)
+        self.assertFalse(self.window._keeper_timer.isActive())
+
+    def test_keeper_watch_tick_skips_devices_that_are_not_connected(self) -> None:
+        # Máy chưa kết nối thì control socket không tới được — hỏi chỉ tổ lỗi.
+        called = []
+        self.window.pool.ensure_keeper = lambda *a, **k: called.append(a)
+        self.window._tick_keeper_watch()
+        self.assertFalse(called)
+
     def test_saved_scripts_round_trip_in_the_dialog(self) -> None:
         from controlios.ui.app import ScriptDialog
 

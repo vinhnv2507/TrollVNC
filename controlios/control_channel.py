@@ -491,6 +491,51 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không đổi được AssistiveTouch: {text.strip()}")
 
+    # ------------------------------------------------------- ControlIOSKeeper
+
+    async def get_keeper_status(self) -> tuple[bool, bool]:
+        """(keeperd đang chạy?, app Keeper đang chạy?) trên máy.
+
+        keeperd là daemon canh ControlIOS: nó bind cổng 46753 ở loopback nên PC
+        không dò trực tiếp được, phải hỏi qua control socket của ControlIOS."""
+
+        text = await self.command("keeper status")
+        parts = text.strip().split()
+        if not parts or parts[0] != "OK":
+            raise ControlError(f"Không đọc được trạng thái Keeper: {text.strip()}")
+        flags = set(parts[1:])
+        return "keeperd" in flags, "app" in flags
+
+    async def start_keeper(self) -> str:
+        """Bật keeperd trên máy nếu nó đang chết. Trả về mô tả việc đã làm.
+
+        Daemon spawn thẳng keeperd từ bundle Keeper (không mở UI app) nên KHÔNG
+        chiếm màn hình đang chạy việc của farm."""
+
+        text = await self.command("keeper start", read_timeout=15)
+        stripped = text.strip()
+        if not stripped.startswith("OK"):
+            raise ControlError(f"Không bật được Keeper: {stripped}")
+        return stripped[len("OK"):].strip() or "đã bật"
+
+    async def ensure_keeper(self) -> tuple[bool, str]:
+        """Kiểm tra Keeper, bật lại nếu chết. Trả về (có phải bật lại?, mô tả)."""
+
+        keeperd, _app = await self.get_keeper_status()
+        if keeperd:
+            return False, "keeperd đang chạy"
+        note = await self.start_keeper()
+
+        # posix_spawn chỉ xác nhận đã tạo process, chưa xác nhận daemon đã
+        # bind được cổng 46753. Chờ ngắn và đọc status lại để không báo thành
+        # công giả khi Keeper thiếu binary, entitlements hoặc không chạy root.
+        for _ in range(10):
+            await asyncio.sleep(0.2)
+            keeperd, _app = await self.get_keeper_status()
+            if keeperd:
+                return True, note
+        raise ControlError("Keeper đã được spawn nhưng keeperd chưa hoạt động")
+
     # --------------------------------------------- auto-click (JS chạy trên máy)
 
     async def push_autoscript(self, script: str) -> None:

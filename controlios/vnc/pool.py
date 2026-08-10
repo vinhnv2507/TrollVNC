@@ -581,6 +581,20 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"AssistiveTouch {state}", action, on_event, on_done)
 
+    def ensure_keeper(self, keys: Iterable[str],
+                      on_event=None, on_done=None) -> None:
+        """Kiểm tra ControlIOSKeeper trên nhiều máy, bật lại máy nào đang chết.
+
+        Đây là vòng canh NGOÀI cùng của farm: keeperd canh ControlIOS, còn PC
+        canh keeperd. Máy nào không trả lời control socket thì báo lỗi bình
+        thường như các tác vụ bulk khác."""
+
+        async def action(channel):
+            started, note = await channel.ensure_keeper()
+            return ("đã bật lại Keeper: " if started else "") + note
+
+        self._bulk_app_action(keys, "Kiểm tra Keeper", action, on_event, on_done)
+
     def push_and_run_autoscript(self, keys: Iterable[str], script: str,
                                 on_event=None, on_done=None) -> None:
         """Đẩy kịch bản auto-click JS xuống nhiều máy RỒI chạy ngay (farm)."""

@@ -43,6 +43,12 @@ class FakeControlServer:
     saved_photos: List[str] = field(default_factory=list)
     respring_count: int = 0
     scale: float = 1.0
+    #: keeperd (daemon canh ControlIOS) và app Keeper có đang chạy không
+    keeperd_running: bool = True
+    keeper_app_running: bool = False
+    #: số lần nhận `keeper start`
+    keeper_starts: int = 0
+    keeper_start_noop: bool = False
     #: bundle id đã bị xoá dữ liệu; (bundle, tên) đã khôi phục
     wiped: List[str] = field(default_factory=list)
     restored: List[Tuple[str, str]] = field(default_factory=list)
@@ -274,6 +280,27 @@ class FakeControlServer:
                 return b"NOT_FOUND\n"
             del self.snapshots[bundle][name]
             return b"OK\n"
+
+        if cmd == "keeper status":
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            flags = ""
+            if self.keeperd_running:
+                flags += " keeperd"
+            if self.keeper_app_running:
+                flags += " app"
+            return f"OK{flags}\n".encode()
+
+        if cmd == "keeper start":
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            self.keeper_starts += 1
+            if self.keeperd_running:
+                return b"OK da chay san\n"
+            if self.keeper_start_noop:
+                return b"OK spawn keeperd\n"
+            self.keeperd_running = True
+            return b"OK spawn keeperd\n"
 
         if cmd.startswith(("setinflight ", "setdefer ", "setorient ")):
             if self.unpatched:

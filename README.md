@@ -486,6 +486,33 @@ button power          # = chuột giữa
 button left 0.5 0.9   # chuột trái tại toạ độ chỉ định
 ```
 
+### Keeper — tự hồi phục khi ControlIOS chết
+
+Farm có ba vòng canh lồng nhau, mỗi vòng vực dậy vòng trong:
+
+1. **App ControlIOS tự canh daemon**: `TVNCServiceCoordinator` bật lại
+   `trollvncmanager` mỗi 3 giây nếu nó chết.
+2. **keeperd canh app ControlIOS**: một daemon root độc lập (cổng 46753 ở
+   loopback), chờ bằng `kqueue NOTE_EXIT` nên phản ứng tức thì và ~0% CPU. App
+   ControlIOS chết hay bị cài đè thì nó gọi SpringBoard mở lại. Nó sống ngoài
+   vòng đời app nên vuốt tắt app Keeper cũng không ảnh hưởng.
+3. **PC canh keeperd**: nút **🛡 Keeper** ở khung điều khiển máy.
+
+Vòng thứ ba cần thiết vì keeperd bind loopback — PC không dò cổng 46753 từ xa
+được, phải hỏi qua control socket của ControlIOS. Menu có 2 mục:
+
+- `Kiểm tra + bật lại nếu chết`: soát các máy đang chọn ngay lập tức.
+- `Tự động canh mọi máy`: cứ 5 phút soát mọi máy **đang kết nối**, chỉ báo khi
+  thật sự phải bật lại nên không làm ngập nhật ký.
+
+Khi keeperd chết, PC nhờ daemon `posix_spawn` thẳng `keeperd` từ bundle Keeper
+với quyền root — **không mở giao diện app Keeper**, nên máy đang chạy việc của
+farm không bị chiếm màn hình.
+
+Còn một khoảng trống không thể bịt từ xa: sau khi **khởi động lại máy**,
+TrollStore không có launchd nên phải mở khoá máy và bật app Keeper một lần bằng
+tay. Sau đó BackgroundTasks giúp iOS tự bật lại khi có cơ hội.
+
 #### Vì sao không có lệnh "liệt kê app đã cài"
 
 VNC **chỉ có màn hình và chuột/phím**. Không có kênh nào để hỏi iOS "máy này
