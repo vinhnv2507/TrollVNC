@@ -73,6 +73,7 @@ jobs:
     runs-on: macos-14
 
     strategy:
+      fail-fast: false
       matrix:
         scheme: ["default", "rootless", "roothide", "bootstrap"]
 
