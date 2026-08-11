@@ -71,6 +71,24 @@ class GridTest(unittest.TestCase):
 
 
 class WindowTest(unittest.TestCase):
+    def test_sort_and_manual_order_are_saved(self) -> None:
+        registry_path = Path(__file__).parent / "_order_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.20", "10.0.0.3", "10.0.0.11"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window._sort_devices("ip")
+            self.assertEqual([d.host for d in Registry.load(registry_path).devices],
+                             ["10.0.0.3", "10.0.0.11", "10.0.0.20"])
+            window.grid.selection = ["10.0.0.11:5901"]
+            window._move_selected_devices(-1)
+            self.assertEqual([d.host for d in Registry.load(registry_path).devices],
+                             ["10.0.0.11", "10.0.0.3", "10.0.0.20"])
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
     def test_window_builds_and_pages(self) -> None:
         registry_path = Path(__file__).parent / "_smoke_devices.json"
         registry = Registry()

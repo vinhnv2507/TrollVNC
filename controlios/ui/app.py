@@ -43,6 +43,7 @@ CAPTURES_DIR = PROJECT_ROOT / "captures"
 # Chu kỳ tự canh Keeper. 5 phút: keeperd chết là chuyện hiếm (chỉ khi cài đè hoặc
 # hết RAM), soát dày hơn chỉ tốn thêm một vòng control socket cho ~250 máy.
 KEEPER_WATCH_INTERVAL_MS = 5 * 60 * 1000
+AUTO_SCAN_INTERVAL_MS = 30 * 1000
 
 SAMPLE_SCRIPT = """\
 # Toạ độ là TỈ LỆ màn hình (0..1), không phải pixel,
@@ -1457,6 +1458,16 @@ class MainWindow(QMainWindow):
         self.keeper_watch_act.setChecked(True)
         QTimer.singleShot(0, self._tick_keeper_watch)
 
+        # Quét nền liên tục để máy mới xuất hiện trong hai subnet mặc định được
+        # thêm vào registry và kết nối mà không cần mở hộp Quét mạng.
+        self._auto_scan_worker: ScanWorker | None = None
+        self._auto_scan_timer = QTimer(self)
+        self._auto_scan_timer.setInterval(AUTO_SCAN_INTERVAL_MS)
+        self._auto_scan_timer.timeout.connect(self._start_auto_scan)
+        if self.registry_path.resolve() == DEFAULT_REGISTRY.resolve():
+            self._auto_scan_timer.start()
+            QTimer.singleShot(5000, self._start_auto_scan)
+
     # ---------------------------------------------------------------- toolbar
 
     def _build_toolbar(self) -> None:
@@ -1474,6 +1485,23 @@ class MainWindow(QMainWindow):
         scan = QAction("Quét mạng", self)
         scan.triggered.connect(self._scan)
         bar.addAction(scan)
+
+        sort_button = QToolButton()
+        sort_button.setText("Sắp xếp")
+        sort_button.setToolTip("Sắp xếp lưới và lưu thứ tự vào danh sách máy")
+        sort_button.setPopupMode(QToolButton.InstantPopup)
+        sort_menu = QMenu(sort_button)
+        sort_menu.addAction("Theo IP tăng dần").triggered.connect(
+            lambda: self._sort_devices("ip"))
+        sort_menu.addAction("Theo tên A → Z").triggered.connect(
+            lambda: self._sort_devices("name"))
+        sort_menu.addSeparator()
+        sort_menu.addAction("Đưa máy chọn lên trước").triggered.connect(
+            lambda: self._move_selected_devices(-1))
+        sort_menu.addAction("Đưa máy chọn xuống sau").triggered.connect(
+            lambda: self._move_selected_devices(1))
+        sort_button.setMenu(sort_menu)
+        bar.addWidget(sort_button)
 
         load = QAction("Nạp file…", self)
         load.setToolTip("Nạp danh sách IP từ file txt (mỗi dòng một IP hoặc ip:port)")
@@ -1770,6 +1798,74 @@ class MainWindow(QMainWindow):
                 f"Tìm thấy {len(dialog.hosts)} máy, thêm mới {added}.",
             )
             self._apply_page()
+
+    def _start_auto_scan(self) -> None:
+        if self._auto_scan_worker and self._auto_scan_worker.isRunning():
+            return
+        targets = [line.strip() for line in DEFAULT_SCAN_RANGE.splitlines()
+                   if line.strip()]
+        worker = ScanWorker(targets, DEFAULT_PORT, use_arp=True,
+                            use_bonjour=True, parent=self)
+        self._auto_scan_worker = worker
+        worker.found.connect(self._auto_scan_found)
+        worker.finished.connect(lambda w=worker: self._auto_scan_finished(w))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _auto_scan_finished(self, worker: ScanWorker) -> None:
+        if self._auto_scan_worker is worker:
+            self._auto_scan_worker = None
+
+    def _auto_scan_found(self, hosts: List[str]) -> None:
+        added = self.registry.merge_hosts(hosts, DEFAULT_PORT)
+        if not added:
+            return
+        self.registry.save(self.registry_path)
+        self._apply_page()
+        self.statusBar().showMessage(
+            f"Quét nền tìm thấy và kết nối thêm {added} máy mới", 6000)
+
+    def _sort_devices(self, mode: str) -> None:
+        import ipaddress
+
+        if mode == "name":
+            self.registry.devices.sort(
+                key=lambda d: ((d.name or d.host).casefold(), d.host, d.port))
+        else:
+            def ip_key(device: DeviceSpec):
+                try:
+                    return (0, int(ipaddress.ip_address(device.host)), device.port)
+                except ValueError:
+                    return (1, device.host.casefold(), device.port)
+            self.registry.devices.sort(key=ip_key)
+        self.registry.save(self.registry_path)
+        self.page = 0
+        self._apply_page()
+        self.statusBar().showMessage("Đã sắp xếp và lưu thứ tự lưới", 4000)
+
+    def _move_selected_devices(self, direction: int) -> None:
+        selected = set(self.grid.selection)
+        if not selected:
+            QMessageBox.information(self, "Chưa chọn máy",
+                                    "Hãy chọn một hoặc nhiều máy trong lưới.")
+            return
+        devices = self.registry.devices
+        if direction < 0:
+            for index in range(1, len(devices)):
+                if devices[index].key in selected and devices[index - 1].key not in selected:
+                    devices[index - 1], devices[index] = devices[index], devices[index - 1]
+        else:
+            for index in range(len(devices) - 2, -1, -1):
+                if devices[index].key in selected and devices[index + 1].key not in selected:
+                    devices[index], devices[index + 1] = devices[index + 1], devices[index]
+        self.registry.save(self.registry_path)
+        self._apply_page()
+        # Giữ lựa chọn để có thể bấm nhiều lần và dịch tiếp.
+        self.grid.selection = [key for key in self.grid.order if key in selected]
+        for key, tile in self.grid.tiles.items():
+            tile.set_selected(key in selected)
+        self.grid.selection_changed.emit(list(self.grid.selection))
+        self.statusBar().showMessage("Đã lưu thứ tự lưới", 3000)
 
     def _load_list(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -2676,6 +2772,10 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._stats_timer.stop()
+        self._auto_scan_timer.stop()
+        if self._auto_scan_worker and self._auto_scan_worker.isRunning():
+            self._auto_scan_worker.requestInterruption()
+            self._auto_scan_worker.wait(3000)
         if self.recording_id:
             self.pool.stop_recording(self.recording_id)
         self.pool.cancel_script()
