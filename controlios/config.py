@@ -13,7 +13,7 @@ from typing import Iterable, List, Optional
 DEFAULT_PORT = 5901
 
 # Dải quét gợi ý sẵn trong hộp thoại Quét mạng.
-DEFAULT_SCAN_RANGE = "172.30.3.0/24"
+DEFAULT_SCAN_RANGE = "172.30.2.0/24\n172.30.3.0/24"
 
 # Nơi để dữ liệu (config, captures...). Khi đóng gói EXE, để CẠNH file exe cho
 # dễ mang đi máy khác; khi chạy từ mã nguồn thì ở gốc project.

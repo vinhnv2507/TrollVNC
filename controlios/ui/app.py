@@ -183,7 +183,8 @@ class ScanDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Dải quét (mỗi dòng một mục): 172.30.3.0/24, 172.30.3.10-90, hoặc IP đơn"
+            "Dải quét (mỗi dòng một mục): 172.30.2.0/24, 172.30.3.0/24, "
+            "172.30.3.10-90, hoặc IP đơn"
         ))
         self.targets = QPlainTextEdit(DEFAULT_SCAN_RANGE)
         layout.addWidget(self.targets)

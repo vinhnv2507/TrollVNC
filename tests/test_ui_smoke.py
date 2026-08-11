@@ -254,10 +254,11 @@ class ScanDefaultsTest(unittest.TestCase):
     def test_scan_dialog_defaults_to_the_right_subnet(self) -> None:
         from controlios.ui.app import DEFAULT_SCAN_RANGE, ScanDialog
 
-        self.assertEqual(DEFAULT_SCAN_RANGE, "172.30.3.0/24")
+        self.assertEqual(DEFAULT_SCAN_RANGE, "172.30.2.0/24\n172.30.3.0/24")
         dialog = ScanDialog(5901)
         try:
-            self.assertEqual(dialog.targets.toPlainText(), "172.30.3.0/24")
+            self.assertEqual(dialog.targets.toPlainText(),
+                             "172.30.2.0/24\n172.30.3.0/24")
             self.assertEqual(dialog.port.text(), "5901")
         finally:
             dialog.close()

@@ -144,7 +144,7 @@ Bonjour hơn hẳn ở hai điểm: thấy được cả máy **chưa từng li�
 (bảng ARP thì không), và lấy **đúng cổng** mà từng máy đang mở thay vì đoán
 5901. Cần gói `zeroconf`; thiếu thì phần Bonjour tự tắt, quét thường vẫn chạy.
 
-Dải mặc định cho chế độ quét là `172.30.3.0/24` (đổi ở `DEFAULT_SCAN_RANGE`
+Dải mặc định cho chế độ quét là `172.30.2.0/24` và `172.30.3.0/24` (đổi ở `DEFAULT_SCAN_RANGE`
 trong [config.py](controlios/config.py)). Trong giao diện, hộp **Quét mạng** có
 sẵn cả ba cách; Bonjour bật mặc định.
 
@@ -715,7 +715,7 @@ bấm tại chỗ ra chạm, không lẫn nhau · ô lưới không bao giờ tr
 mọi bề rộng · ô giãn chia hết chỗ thay vì để trống dải bên phải · số cột cố
 định thắng chế độ tự động và quay lại được · chiều cao ô đi theo tỉ lệ màn hình
 thật · khung một máy rộng đúng một máy, thu nhỏ khi chưa mở máy nào, nới ra khi
-máy xoay ngang · dải quét mặc định là 172.30.3.0/24 · `home` bấm nút cứng chứ
+máy xoay ngang · dải quét mặc định là 172.30.2.0/24 và 172.30.3.0/24 · `home` bấm nút cứng chứ
 không vuốt và tới server đúng nút chuột phải · `switcher` là hai lần Home sát
 nhau · `lock` dùng nút Power · Bonjour lấy đúng cổng máy quảng bá, bỏ qua IPv6,
 lọc theo subnet, và thiếu thư viện `zeroconf` thì không làm sập gì · kênh điều
