@@ -21,7 +21,9 @@
 #import <arpa/inet.h>
 #import <dlfcn.h>
 #import <netinet/in.h>
+#import <string.h>
 #import <sys/socket.h>
+#import <sys/time.h>
 #import <unistd.h>
 
 #ifdef THEBOOTSTRAP
