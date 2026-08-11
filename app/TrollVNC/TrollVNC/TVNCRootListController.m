@@ -298,7 +298,13 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                            image:[UIImage systemImageNamed:@"checkmark.seal"]
                                       identifier:nil
                                          handler:^(__kindof UIAction *a) { [weakSelf showActivation]; }];
-    UIMenu *toolsMenu = [UIMenu menuWithTitle:@"" children:@[ appDataAct, autoAct, actAct ]];
+    UIAction *rebootAct = [UIAction actionWithTitle:@"Reboot Device"
+                                             image:[UIImage systemImageNamed:@"power"]
+                                        identifier:nil
+                                           handler:^(__kindof UIAction *a) { [weakSelf confirmDeviceReboot]; }];
+    rebootAct.attributes = UIMenuElementAttributesDestructive;
+    UIMenu *toolsMenu =
+        [UIMenu menuWithTitle:@"" children:@[ appDataAct, autoAct, actAct, rebootAct ]];
     UIBarButtonItem *toolsItem =
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
                                          style:UIBarButtonItemStylePlain
@@ -391,6 +397,28 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     vc.primaryColor = self.primaryColor;
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
     [self.navigationController presentViewController:navController animated:YES completion:nil];
+}
+
+- (void)confirmDeviceReboot {
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"Reboot Device"
+                                            message:@"Khởi động lại toàn bộ thiết bị? Các ứng dụng đang chạy sẽ bị đóng."
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Reboot"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(__unused UIAlertAction *action) {
+        void *handle = dlopen("/System/Library/PrivateFrameworks/"
+                              "SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
+        void (*sbReboot)(int) = handle ? (void (*)(int))dlsym(handle, "SBReboot") : NULL;
+        if (!sbReboot && handle)
+            sbReboot = (void (*)(int))dlsym(handle, "_SBSReboot");
+        if (sbReboot)
+            sbReboot(0);
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (NSString *)defaultFooterText {

@@ -4204,20 +4204,24 @@ static NSData *tvCtlRespring(void) {
 
 #pragma mark - Reboot
 
-// iOS SDK không cung cấp sys/reboot.h; symbol reboot(2) nằm trong libc.
-extern int reboot(int howto);
-#ifndef RB_AUTOBOOT
-#define RB_AUTOBOOT 0
-#endif
-
 static NSData *tvCtlReboot(void) {
-    errno = 0;
-    int rc = reboot(RB_AUTOBOOT);
-    int saved = errno;
-    if (rc == 0)
-        return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
-    NSString *msg = [NSString stringWithFormat:@"ERR RebootFailed errno=%d\n", saved];
-    return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                          "SpringBoardServices", RTLD_LAZY);
+    if (!handle)
+        return [@"ERR SpringBoardServicesUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    void (*sbReboot)(int) = (void (*)(int))dlsym(handle, "SBReboot");
+    if (!sbReboot)
+        sbReboot = (void (*)(int))dlsym(handle, "_SBSReboot");
+    if (!sbReboot)
+        return [@"ERR RebootAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    // Trả OK cho PC trước khi thiết bị tắt kết nối mạng.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+                       sbReboot(0);
+                   });
+    return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 #pragma mark - Scale
