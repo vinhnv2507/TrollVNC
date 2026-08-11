@@ -497,6 +497,12 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không reboot được: {text.strip()}")
 
+    async def shutdown(self) -> None:
+        """Tắt nguồn toàn bộ thiết bị."""
+        text = await self.command("shutdown", read_timeout=5)
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không tắt máy được: {text.strip()}")
+
     # ------------------------------------------------------- ControlIOSKeeper
 
     async def get_keeper_status(self) -> tuple[bool, bool]:

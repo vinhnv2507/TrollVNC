@@ -50,6 +50,7 @@ class FakeControlServer:
     keeper_starts: int = 0
     keeper_start_noop: bool = False
     reboot_count: int = 0
+    shutdown_count: int = 0
     #: bundle id đã bị xoá dữ liệu; (bundle, tên) đã khôi phục
     wiped: List[str] = field(default_factory=list)
     restored: List[Tuple[str, str]] = field(default_factory=list)
@@ -306,6 +307,10 @@ class FakeControlServer:
         if cmd == "reboot":
             self.reboot_count += 1
             return b"OK rebooting\n"
+
+        if cmd == "shutdown":
+            self.shutdown_count += 1
+            return b"OK shutting down\n"
 
         if cmd.startswith(("setinflight ", "setdefer ", "setorient ")):
             if self.unpatched:

@@ -1648,6 +1648,11 @@ class MainWindow(QMainWindow):
         reboot.triggered.connect(self._reboot_selected)
         bar.addAction(reboot)
 
+        shutdown = QAction("Tắt máy", self)
+        shutdown.setToolTip("Tắt nguồn hoàn toàn các thiết bị đang chọn")
+        shutdown.triggered.connect(self._shutdown_selected)
+        bar.addAction(shutdown)
+
         self.apps_action = self.apps_dock.toggleViewAction()
         self.apps_action.setText("Ứng dụng")
         self.apps_action.setToolTip(
@@ -2091,6 +2096,27 @@ class MainWindow(QMainWindow):
         dialog.show()
         self.pool.reboot(targets, on_event=dialog.on_event, on_done=dialog.on_done)
         self.statusBar().showMessage(f"Đang reboot {len(targets)} thiết bị", 5000)
+
+    def _shutdown_selected(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        if self._needs_control_token(targets) and not self.registry.settings.control_token:
+            QMessageBox.warning(self, "Thiếu control token",
+                                "Máy WiFi cần control_token trong config/devices.json "
+                                "(máy USB thì không cần).")
+            return
+        if QMessageBox.question(
+            self, "Tắt máy",
+            f"Tắt nguồn hoàn toàn {len(targets)} thiết bị?\n"
+            "Sau khi tắt, bạn phải bật lại thiết bị bằng nút nguồn.",
+        ) != QMessageBox.Yes:
+            return
+        dialog = BulkResultDialog("Tắt máy", len(targets), self)
+        dialog.show()
+        self.pool.shutdown(targets, on_event=dialog.on_event, on_done=dialog.on_done)
+        self.statusBar().showMessage(f"Đang tắt {len(targets)} thiết bị", 5000)
 
     def _run_device_gesture(self, gesture: str) -> None:
         """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.

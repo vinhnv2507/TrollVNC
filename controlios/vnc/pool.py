@@ -587,6 +587,12 @@ class DevicePool:
             return "đã gửi lệnh reboot"
         self._bulk_app_action(keys, "Reboot thiết bị", action, on_event, on_done)
 
+    def shutdown(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        async def action(channel):
+            await channel.shutdown()
+            return "đã gửi lệnh tắt máy"
+        self._bulk_app_action(keys, "Tắt máy", action, on_event, on_done)
+
     def ensure_keeper(self, keys: Iterable[str],
                       on_event=None, on_done=None) -> None:
         """Kiểm tra ControlIOSKeeper trên nhiều máy, bật lại máy nào đang chết.
