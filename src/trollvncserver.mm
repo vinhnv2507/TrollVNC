@@ -4204,23 +4204,24 @@ static NSData *tvCtlRespring(void) {
 
 #pragma mark - Reboot
 
-@interface FBSSystemService : NSObject
-+ (instancetype)sharedService;
-- (void)reboot;
-@end
-
 static NSData *tvCtlReboot(void) {
     dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/"
            "FrontBoardServices", RTLD_LAZY);
     Class serviceClass = NSClassFromString(@"FBSSystemService");
-    if (!serviceClass || ![serviceClass respondsToSelector:@selector(sharedService)])
+    SEL sharedSelector = NSSelectorFromString(@"sharedService");
+    SEL rebootSelector = NSSelectorFromString(@"reboot");
+    if (!serviceClass || ![serviceClass respondsToSelector:sharedSelector])
         return [@"ERR RebootAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
 
-    // TrollStore dùng chính [[FBSSystemService sharedService] reboot]. Trả OK
-    // trước khi thiết bị ngắt kết nối để GUI PC không báo lỗi giả.
+    id service = [serviceClass performSelector:sharedSelector];
+    if (!service || ![service respondsToSelector:rebootSelector])
+        return [@"ERR RebootAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    // Gọi runtime để mọi scheme build được dù SDK không export private class.
+    // Trả OK trước khi thiết bị ngắt kết nối để GUI PC không báo lỗi giả.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
                    dispatch_get_main_queue(), ^{
-                       [[FBSSystemService sharedService] reboot];
+                       [service performSelector:rebootSelector];
                    });
     return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }

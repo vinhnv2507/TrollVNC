@@ -39,11 +39,6 @@
 #import "GitHubReleaseUpdater.h"
 #endif
 
-@interface FBSSystemService : NSObject
-+ (instancetype)sharedService;
-- (void)reboot;
-@end
-
 NS_INLINE NSString *GetDefaultRouteInterface(void) {
     static SCDynamicStoreRef (*_SCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, SCDynamicStoreCallBack,
                                                       SCDynamicStoreContext *) = NULL;
@@ -418,8 +413,13 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         dlopen("/System/Library/PrivateFrameworks/"
                "FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY);
         Class serviceClass = NSClassFromString(@"FBSSystemService");
-        if (serviceClass)
-            [[FBSSystemService sharedService] reboot];
+        SEL sharedSelector = NSSelectorFromString(@"sharedService");
+        SEL rebootSelector = NSSelectorFromString(@"reboot");
+        if ([serviceClass respondsToSelector:sharedSelector]) {
+            id service = [serviceClass performSelector:sharedSelector];
+            if ([service respondsToSelector:rebootSelector])
+                [service performSelector:rebootSelector];
+        }
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }
