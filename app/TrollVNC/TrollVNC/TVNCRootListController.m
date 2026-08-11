@@ -39,6 +39,11 @@
 #import "GitHubReleaseUpdater.h"
 #endif
 
+@interface FBSSystemService : NSObject
++ (instancetype)sharedService;
+- (void)reboot;
+@end
+
 NS_INLINE NSString *GetDefaultRouteInterface(void) {
     static SCDynamicStoreRef (*_SCDynamicStoreCreate)(CFAllocatorRef, CFStringRef, SCDynamicStoreCallBack,
                                                       SCDynamicStoreContext *) = NULL;
@@ -410,13 +415,11 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
     [alert addAction:[UIAlertAction actionWithTitle:@"Reboot"
                                               style:UIAlertActionStyleDestructive
                                             handler:^(__unused UIAlertAction *action) {
-        void *handle = dlopen("/System/Library/PrivateFrameworks/"
-                              "SpringBoardServices.framework/SpringBoardServices", RTLD_LAZY);
-        void (*sbReboot)(int) = handle ? (void (*)(int))dlsym(handle, "SBReboot") : NULL;
-        if (!sbReboot && handle)
-            sbReboot = (void (*)(int))dlsym(handle, "_SBSReboot");
-        if (sbReboot)
-            sbReboot(0);
+        dlopen("/System/Library/PrivateFrameworks/"
+               "FrontBoardServices.framework/FrontBoardServices", RTLD_LAZY);
+        Class serviceClass = NSClassFromString(@"FBSSystemService");
+        if (serviceClass)
+            [[FBSSystemService sharedService] reboot];
     }]];
     [self presentViewController:alert animated:YES completion:nil];
 }

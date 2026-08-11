@@ -18,33 +18,59 @@
 #import "AppDelegate.h"
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
+#import <arpa/inet.h>
 #import <dlfcn.h>
+#import <netinet/in.h>
+#import <sys/socket.h>
+#import <unistd.h>
 
 #ifdef THEBOOTSTRAP
 #import "GitHubReleaseUpdater.h"
 #endif
 
-static NSString *const kControlIOSKeeperBundleID = @"com.controlioskeeper";
+static NSString *const kControlIOSKeeperBundleID = @"com.controlios.keeper";
+static const int kControlIOSKeeperPort = 46753;
+
+static BOOL TVControlIOSKeeperdRunning(void) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return NO;
+    struct timeval timeout = {1, 0};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons((uint16_t)kControlIOSKeeperPort);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    BOOL running = connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0;
+    close(fd);
+    return running;
+}
 
 static void TVEnsureControlIOSKeeperRunning(void) {
+    // Commit 150ac2a nhận diện Keeper bằng keeperd giữ cổng 46753. App Keeper
+    // có thể đã đóng nhưng daemon vẫn sống, nên không kiểm tra PID của app.
+    if (TVControlIOSKeeperdRunning())
+        return;
+
     void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
                           "SpringBoardServices", RTLD_LAZY);
     if (!handle)
         return;
 
-    pid_t pid = 0;
-    int (*processID)(CFStringRef, pid_t *) =
-        (int (*)(CFStringRef, pid_t *))dlsym(handle, "SBSProcessIDForDisplayIdentifier");
-    if (processID)
-        processID((__bridge CFStringRef)kControlIOSKeeperBundleID, &pid);
-    if (pid > 0)
-        return;
-
-    int (*launch)(CFStringRef, Boolean) =
-        (int (*)(CFStringRef, Boolean))dlsym(handle,
-                                             "SBSLaunchApplicationWithIdentifier");
-    if (launch)
-        launch((__bridge CFStringRef)kControlIOSKeeperBundleID, false);
+    int result = -1;
+    int (*launchOptions)(CFStringRef, CFDictionaryRef, Boolean) =
+        (int (*)(CFStringRef, CFDictionaryRef, Boolean))dlsym(
+            handle, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
+    if (launchOptions)
+        result = launchOptions((__bridge CFStringRef)kControlIOSKeeperBundleID, NULL, false);
+    if (result != 0) {
+        int (*launch)(CFStringRef, Boolean) =
+            (int (*)(CFStringRef, Boolean))dlsym(handle,
+                                                 "SBSLaunchApplicationWithIdentifier");
+        if (launch)
+            launch((__bridge CFStringRef)kControlIOSKeeperBundleID, false);
+    }
 }
 
 @implementation AppDelegate

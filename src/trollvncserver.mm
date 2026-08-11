@@ -4204,22 +4204,23 @@ static NSData *tvCtlRespring(void) {
 
 #pragma mark - Reboot
 
-static NSData *tvCtlReboot(void) {
-    void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
-                          "SpringBoardServices", RTLD_LAZY);
-    if (!handle)
-        return [@"ERR SpringBoardServicesUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+@interface FBSSystemService : NSObject
++ (instancetype)sharedService;
+- (void)reboot;
+@end
 
-    void (*sbReboot)(int) = (void (*)(int))dlsym(handle, "SBReboot");
-    if (!sbReboot)
-        sbReboot = (void (*)(int))dlsym(handle, "_SBSReboot");
-    if (!sbReboot)
+static NSData *tvCtlReboot(void) {
+    dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/"
+           "FrontBoardServices", RTLD_LAZY);
+    Class serviceClass = NSClassFromString(@"FBSSystemService");
+    if (!serviceClass || ![serviceClass respondsToSelector:@selector(sharedService)])
         return [@"ERR RebootAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
 
-    // Trả OK cho PC trước khi thiết bị tắt kết nối mạng.
+    // TrollStore dùng chính [[FBSSystemService sharedService] reboot]. Trả OK
+    // trước khi thiết bị ngắt kết nối để GUI PC không báo lỗi giả.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
                    dispatch_get_main_queue(), ^{
-                       sbReboot(0);
+                       [[FBSSystemService sharedService] reboot];
                    });
     return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
