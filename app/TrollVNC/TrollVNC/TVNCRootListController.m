@@ -22,6 +22,7 @@
 #import <UIKit/UIKit.h>
 #import <arpa/inet.h>
 #import <dlfcn.h>
+#import <objc/message.h>
 #import <ifaddrs.h>
 #import <net/if.h>
 #import <notify.h>
@@ -416,9 +417,10 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         SEL sharedSelector = NSSelectorFromString(@"sharedService");
         SEL rebootSelector = NSSelectorFromString(@"reboot");
         if ([serviceClass respondsToSelector:sharedSelector]) {
-            id service = [serviceClass performSelector:sharedSelector];
+            id service =
+                ((id (*)(id, SEL))objc_msgSend)((id)serviceClass, sharedSelector);
             if ([service respondsToSelector:rebootSelector])
-                [service performSelector:rebootSelector];
+                ((void (*)(id, SEL))objc_msgSend)(service, rebootSelector);
         }
     }]];
     [self presentViewController:alert animated:YES completion:nil];

@@ -21,6 +21,7 @@
 
 #import <Accelerate/Accelerate.h>
 #import <Foundation/Foundation.h>
+#import <objc/message.h>
 #import <JavaScriptCore/JavaScriptCore.h>   // engine kịch bản auto-click (JS)
 #import <UIKit/UIKit.h>                      // UIImage cho findImage (template matching)
 #import <Vision/Vision.h>                    // OCR (nhận chữ trên màn)
@@ -4213,7 +4214,7 @@ static NSData *tvCtlReboot(void) {
     if (!serviceClass || ![serviceClass respondsToSelector:sharedSelector])
         return [@"ERR RebootAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
 
-    id service = [serviceClass performSelector:sharedSelector];
+    id service = ((id (*)(id, SEL))objc_msgSend)((id)serviceClass, sharedSelector);
     if (!service || ![service respondsToSelector:rebootSelector])
         return [@"ERR RebootAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
 
@@ -4221,7 +4222,7 @@ static NSData *tvCtlReboot(void) {
     // Trả OK trước khi thiết bị ngắt kết nối để GUI PC không báo lỗi giả.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
                    dispatch_get_main_queue(), ^{
-                       [service performSelector:rebootSelector];
+                       ((void (*)(id, SEL))objc_msgSend)(service, rebootSelector);
                    });
     return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
