@@ -4227,6 +4227,26 @@ static NSData *tvCtlReboot(void) {
     return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSData *tvCtlShutdown(void) {
+    dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/"
+           "FrontBoardServices", RTLD_LAZY);
+    Class serviceClass = NSClassFromString(@"FBSSystemService");
+    SEL sharedSelector = NSSelectorFromString(@"sharedService");
+    SEL shutdownSelector = NSSelectorFromString(@"shutdown");
+    if (!serviceClass || ![serviceClass respondsToSelector:sharedSelector])
+        return [@"ERR ShutdownAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    id service = ((id (*)(id, SEL))objc_msgSend)((id)serviceClass, sharedSelector);
+    if (!service || ![service respondsToSelector:shutdownSelector])
+        return [@"ERR ShutdownAPINotFound\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 300 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+                       ((void (*)(id, SEL))objc_msgSend)(service, shutdownSelector);
+                   });
+    return [@"OK shutting down\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - Scale
 
 // `setscale <0..1>` — đổi hệ số scale khung hình LÚC ĐANG CHẠY để giảm tải cho
@@ -5846,6 +5866,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlRespring();
     } else if ([cmd isEqualToString:@"reboot"]) {
         resp = tvCtlReboot();
+    } else if ([cmd isEqualToString:@"shutdown"]) {
+        resp = tvCtlShutdown();
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"setscale "]) {
