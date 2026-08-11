@@ -103,6 +103,10 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ControlError):
             await self.channel.get_keeper_status()
 
+    async def test_reboot_reaches_device(self) -> None:
+        await self.channel.reboot()
+        self.assertEqual(self.server.reboot_count, 1)
+
     async def test_push_prelude_sends_base64(self) -> None:
         import base64
         await self.channel.push_prelude("function foo(){}")

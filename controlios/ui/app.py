@@ -1452,6 +1452,9 @@ class MainWindow(QMainWindow):
         # Vòng canh Keeper: chỉ chạy khi người dùng bật trong menu 🛡 Keeper.
         self._keeper_timer = QTimer(self)
         self._keeper_timer.timeout.connect(self._tick_keeper_watch)
+        # Tự canh mặc định, không phụ thuộc việc người dùng mở menu Keeper.
+        self.keeper_watch_act.setChecked(True)
+        QTimer.singleShot(0, self._tick_keeper_watch)
 
     # ---------------------------------------------------------------- toolbar
 
@@ -1639,6 +1642,11 @@ class MainWindow(QMainWindow):
         )
         respring.triggered.connect(self._respring_selected)
         bar.addAction(respring)
+
+        reboot = QAction("Reboot thiết bị", self)
+        reboot.setToolTip("Khởi động lại toàn bộ thiết bị — có thể mất jailbreak")
+        reboot.triggered.connect(self._reboot_selected)
+        bar.addAction(reboot)
 
         self.apps_action = self.apps_dock.toggleViewAction()
         self.apps_action.setText("Ứng dụng")
@@ -2062,6 +2070,27 @@ class MainWindow(QMainWindow):
         dialog.show()
         self.pool.respring(targets, on_event=dialog.on_event, on_done=dialog.on_done)
         self.statusBar().showMessage(f"Đang respring {len(targets)} máy", 5000)
+
+    def _reboot_selected(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        if self._needs_control_token(targets) and not self.registry.settings.control_token:
+            QMessageBox.warning(self, "Thiếu control token",
+                                "Máy WiFi cần control_token trong config/devices.json "
+                                "(máy USB thì không cần).")
+            return
+        if QMessageBox.question(
+            self, "Reboot thiết bị",
+            f"Khởi động lại toàn bộ {len(targets)} thiết bị?\n"
+            "Các app sẽ bị đóng; một số máy cần jailbreak lại.",
+        ) != QMessageBox.Yes:
+            return
+        dialog = BulkResultDialog("Reboot thiết bị", len(targets), self)
+        dialog.show()
+        self.pool.reboot(targets, on_event=dialog.on_event, on_done=dialog.on_done)
+        self.statusBar().showMessage(f"Đang reboot {len(targets)} thiết bị", 5000)
 
     def _run_device_gesture(self, gesture: str) -> None:
         """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.

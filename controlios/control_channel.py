@@ -491,6 +491,12 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không đổi được AssistiveTouch: {text.strip()}")
 
+    async def reboot(self) -> None:
+        """Khởi động lại toàn bộ thiết bị."""
+        text = await self.command("reboot", read_timeout=5)
+        if not text.strip().startswith("OK"):
+            raise ControlError(f"Không reboot được: {text.strip()}")
+
     # ------------------------------------------------------- ControlIOSKeeper
 
     async def get_keeper_status(self) -> tuple[bool, bool]:

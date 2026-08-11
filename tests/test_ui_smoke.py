@@ -469,7 +469,7 @@ class ScriptDialogTest(unittest.TestCase):
         self.assertEqual(list(called[0][0]), self.window.action_targets())
 
     def test_keeper_watch_toggle_controls_the_timer(self) -> None:
-        self.assertFalse(self.window._keeper_timer.isActive())
+        self.assertTrue(self.window._keeper_timer.isActive())
         self.window.keeper_watch_act.setChecked(True)
         self.assertTrue(self.window._keeper_timer.isActive())
         self.window.keeper_watch_act.setChecked(False)
