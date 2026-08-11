@@ -18,10 +18,34 @@
 #import "AppDelegate.h"
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
+#import <dlfcn.h>
 
 #ifdef THEBOOTSTRAP
 #import "GitHubReleaseUpdater.h"
 #endif
+
+static NSString *const kControlIOSKeeperBundleID = @"com.controlioskeeper";
+
+static void TVEnsureControlIOSKeeperRunning(void) {
+    void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                          "SpringBoardServices", RTLD_LAZY);
+    if (!handle)
+        return;
+
+    pid_t pid = 0;
+    int (*processID)(CFStringRef, pid_t *) =
+        (int (*)(CFStringRef, pid_t *))dlsym(handle, "SBSProcessIDForDisplayIdentifier");
+    if (processID)
+        processID((__bridge CFStringRef)kControlIOSKeeperBundleID, &pid);
+    if (pid > 0)
+        return;
+
+    int (*launch)(CFStringRef, Boolean) =
+        (int (*)(CFStringRef, Boolean))dlsym(handle,
+                                             "SBSLaunchApplicationWithIdentifier");
+    if (launch)
+        launch((__bridge CFStringRef)kControlIOSKeeperBundleID, false);
+}
 
 @implementation AppDelegate
 
@@ -29,6 +53,12 @@
     // Override point for customization after application launch.
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"ControlIOS"];
+    TVEnsureControlIOSKeeperRunning();
+    [NSTimer scheduledTimerWithTimeInterval:10.0
+                                     repeats:YES
+                                       block:^(__unused NSTimer *timer) {
+                                           TVEnsureControlIOSKeeperRunning();
+                                       }];
 
 #ifdef THEBOOTSTRAP
     // Initialize Auto Updater
@@ -45,6 +75,10 @@
 #endif
 
     return YES;
+}
+
+- (void)applicationDidBecomeActive:(UIApplication *)application {
+    TVEnsureControlIOSKeeperRunning();
 }
 
 #pragma mark - UISceneSession lifecycle

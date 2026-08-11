@@ -4202,6 +4202,24 @@ static NSData *tvCtlRespring(void) {
 // SBSRelaunchAction chỉ respring. Với farm Dopamine reboot còn làm mất jailbreak
 // nên cũng không nên dùng. Chỉ giữ `respring` ở trên.
 
+#pragma mark - Reboot
+
+// iOS SDK không cung cấp sys/reboot.h; symbol reboot(2) nằm trong libc.
+extern int reboot(int howto);
+#ifndef RB_AUTOBOOT
+#define RB_AUTOBOOT 0
+#endif
+
+static NSData *tvCtlReboot(void) {
+    errno = 0;
+    int rc = reboot(RB_AUTOBOOT);
+    int saved = errno;
+    if (rc == 0)
+        return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *msg = [NSString stringWithFormat:@"ERR RebootFailed errno=%d\n", saved];
+    return [msg dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - Scale
 
 // `setscale <0..1>` — đổi hệ số scale khung hình LÚC ĐANG CHẠY để giảm tải cho
@@ -5819,6 +5837,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlSavePhoto([cmd substringFromIndex:10]);
     } else if ([cmd isEqualToString:@"respring"]) {
         resp = tvCtlRespring();
+    } else if ([cmd isEqualToString:@"reboot"]) {
+        resp = tvCtlReboot();
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"setscale "]) {
