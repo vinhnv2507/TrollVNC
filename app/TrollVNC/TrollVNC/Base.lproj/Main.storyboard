@@ -11,7 +11,7 @@
         <scene sceneID="fkt-Hu-Nnk">
             <objects>
                 <tableViewController id="qO8-FX-kHT" customClass="TVNCRootListController" sceneMemberID="viewController">
-                    <navigationItem key="navigationItem" title="Root View Controller" id="jhS-qR-avc"/>
+                    <navigationItem key="navigationItem" title="ControlIOS" id="jhS-qR-avc"/>
                 </tableViewController>
                 <placeholder placeholderIdentifier="IBFirstResponder" id="s0t-Ay-8kP" userLabel="First Responder" customClass="UIResponder" sceneMemberID="firstResponder"/>
             </objects>

@@ -32,6 +32,14 @@
 
 static NSString *const kControlIOSKeeperBundleID = @"com.controlios.keeper";
 static const int kControlIOSKeeperPort = 46753;
+static dispatch_queue_t TVKeeperQueue(void) {
+    static dispatch_queue_t queue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        queue = dispatch_queue_create("com.controlios.app.keeper-check", DISPATCH_QUEUE_SERIAL);
+    });
+    return queue;
+}
 
 static BOOL TVControlIOSKeeperdRunning(void) {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -60,19 +68,33 @@ static void TVEnsureControlIOSKeeperRunning(void) {
     if (!handle)
         return;
 
+    static NSDate *lastLaunchAttempt = nil;
+    if (lastLaunchAttempt && [[NSDate date] timeIntervalSinceDate:lastLaunchAttempt] < 60.0)
+        return;
+    lastLaunchAttempt = [NSDate date];
+
     int result = -1;
     int (*launchOptions)(CFStringRef, CFDictionaryRef, Boolean) =
         (int (*)(CFStringRef, CFDictionaryRef, Boolean))dlsym(
             handle, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
     if (launchOptions)
-        result = launchOptions((__bridge CFStringRef)kControlIOSKeeperBundleID, NULL, false);
+        // Launch suspended: Keeper được đánh thức để spawn keeperd nhưng không
+        // chiếm foreground và đẩy ControlIOS ra khỏi màn hình.
+        result = launchOptions((__bridge CFStringRef)kControlIOSKeeperBundleID, NULL, true);
     if (result != 0) {
         int (*launch)(CFStringRef, Boolean) =
             (int (*)(CFStringRef, Boolean))dlsym(handle,
                                                  "SBSLaunchApplicationWithIdentifier");
         if (launch)
-            launch((__bridge CFStringRef)kControlIOSKeeperBundleID, false);
+            launch((__bridge CFStringRef)kControlIOSKeeperBundleID, true);
     }
+}
+
+static void TVScheduleKeeperCheck(NSTimeInterval delay) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay * NSEC_PER_SEC)),
+                   TVKeeperQueue(), ^{
+                       TVEnsureControlIOSKeeperRunning();
+                   });
 }
 
 @implementation AppDelegate
@@ -81,11 +103,12 @@ static void TVEnsureControlIOSKeeperRunning(void) {
     // Override point for customization after application launch.
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"ControlIOS"];
-    TVEnsureControlIOSKeeperRunning();
-    [NSTimer scheduledTimerWithTimeInterval:10.0
+    // Để UIKit dựng xong màn hình trước; socket/SBS tuyệt đối không chặn main thread.
+    TVScheduleKeeperCheck(2.0);
+    [NSTimer scheduledTimerWithTimeInterval:30.0
                                      repeats:YES
                                        block:^(__unused NSTimer *timer) {
-                                           TVEnsureControlIOSKeeperRunning();
+                                           TVScheduleKeeperCheck(0.0);
                                        }];
 
 #ifdef THEBOOTSTRAP
@@ -106,7 +129,7 @@ static void TVEnsureControlIOSKeeperRunning(void) {
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
-    TVEnsureControlIOSKeeperRunning();
+    TVScheduleKeeperCheck(1.0);
 }
 
 #pragma mark - UISceneSession lifecycle
