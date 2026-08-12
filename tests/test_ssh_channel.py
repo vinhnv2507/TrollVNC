@@ -105,6 +105,22 @@ class SshChannelTest(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(SshError):
                 await self.channel.download("/khong/co/file", Path(tmp) / "x")
 
+    async def test_download_directory_recursively(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "DCIM"
+            (source / "100APPLE").mkdir(parents=True)
+            (source / "100APPLE" / "IMG_0001.JPG").write_bytes(b"photo")
+            (source / "100APPLE" / "IMG_0002.MOV").write_bytes(b"video")
+            destination = Path(tmp) / "exported"
+
+            await self.channel.download(
+                str(source).replace("\\", "/"), destination, recursive=True)
+
+            self.assertEqual((destination / "100APPLE" / "IMG_0001.JPG").read_bytes(),
+                             b"photo")
+            self.assertEqual((destination / "100APPLE" / "IMG_0002.MOV").read_bytes(),
+                             b"video")
+
 
 class CommandResultTest(unittest.TestCase):
     def test_ok_is_exit_code_zero(self) -> None:

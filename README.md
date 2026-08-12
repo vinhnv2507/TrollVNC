@@ -487,6 +487,18 @@ button power          # = chuột giữa
 button left 0.5 0.9   # chuột trái tại toạ độ chỉ định
 ```
 
+### Xuất file, ảnh và video từ iOS về PC
+
+Trên toolbar chọn **File… → Xuất file/ảnh/video về PC…**. Có lựa chọn nhanh:
+
+- Thư viện ảnh/video: `/var/mobile/Media/DCIM`
+- Downloads: `/var/mobile/Downloads`
+- Documents: `/var/mobile/Documents`
+- File hoặc thư mục tùy chọn
+
+Có thể chọn nhiều máy; dữ liệu mỗi máy được lưu trong một thư mục riêng. Tính
+năng dùng SSH/SFTP nên máy phải đang jailbreak và mở SSH.
+
 ### Keeper — tự hồi phục khi ControlIOS chết
 
 Farm có ba vòng canh lồng nhau, mỗi vòng vực dậy vòng trong:

@@ -161,12 +161,14 @@ class SshChannel:
             except (OSError, asyncssh.Error) as exc:
                 raise SshError(f"{self.host}: không đẩy được file ({exc})") from None
 
-    async def download(self, remote: str, local: Path | str) -> None:
+    async def download(self, remote: str, local: Path | str,
+                       recursive: bool = False) -> None:
         import asyncssh
 
         async with await self._open() as conn:
             try:
                 async with conn.start_sftp_client() as sftp:
-                    await sftp.get(remote, str(local))
+                    await sftp.get(remote, str(local), recurse=recursive,
+                                   preserve=True)
             except (OSError, asyncssh.Error) as exc:
                 raise SshError(f"{self.host}: không lấy được file ({exc})") from None

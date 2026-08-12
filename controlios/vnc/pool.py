@@ -908,6 +908,40 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def export_path(self, keys: Iterable[str], remote: str, destination: Path | str,
+                    on_event=None, on_done=None) -> None:
+        """Tải file hoặc cả thư mục từ nhiều máy, tách thư mục theo từng máy."""
+
+        key_list = list(keys)
+        destination = Path(destination)
+        failures: List[tuple] = []
+        succeeded: List[str] = []
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                session = self._sessions.get(key)
+                spec = session.spec if session else None
+                label = (spec.name if spec and spec.name else key)
+                device_dir = destination / _slug(label)
+                leaf = Path(remote.rstrip("/")).name or "ios-root"
+                local = device_dir / leaf
+                try:
+                    device_dir.mkdir(parents=True, exist_ok=True)
+                    await self._ssh(key).download(remote, local, recursive=True)
+                    succeeded.append(key)
+                    if on_event:
+                        on_event(key, f"đã xuất {remote} → {local}")
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+            if on_done:
+                on_done(f"Xuất {remote}", len(succeeded), failures)
+
+        self._call_coro(run())
+
     def install_ipa(self, keys: Iterable[str], ipa: Path | str,
                     on_event=None, on_done=None, serve_seconds: float = 300) -> None:
         """Cài .ipa lên nhiều máy: phục vụ file từ PC rồi nhờ TrollStore tải về.

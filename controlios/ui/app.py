@@ -1546,10 +1546,16 @@ class MainWindow(QMainWindow):
         install_ipa.triggered.connect(self._install_ipa)
         bar.addAction(install_ipa)
 
-        push_file = QAction("Đẩy file…", self)
-        push_file.setToolTip("Chép một file từ PC sang các máy đang chọn")
-        push_file.triggered.connect(self._push_file)
-        bar.addAction(push_file)
+        file_button = QToolButton()
+        file_button.setText("File…")
+        file_button.setToolTip("Đẩy file lên iOS hoặc xuất file/ảnh/video về PC")
+        file_button.setPopupMode(QToolButton.InstantPopup)
+        file_menu = QMenu(file_button)
+        file_menu.addAction("Đẩy file lên iOS…").triggered.connect(self._push_file)
+        file_menu.addAction("Xuất file/ảnh/video về PC…").triggered.connect(
+            self._export_from_ios)
+        file_button.setMenu(file_menu)
+        bar.addWidget(file_button)
 
         self.addToolBarBreak()
         actions_bar = QToolBar("Thao tác")
@@ -2138,6 +2144,52 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đang đẩy {Path(path).name} tới {len(targets)} máy", 6000
         )
+
+    def _export_from_ios(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+
+        choices = [
+            "Ảnh + video trong Thư viện (DCIM)",
+            "File trong Downloads",
+            "File trong Documents",
+            "Đường dẫn tùy chọn…",
+        ]
+        choice, ok = QInputDialog.getItem(
+            self, "Xuất từ iOS", "Nguồn cần xuất:", choices, 0, False)
+        if not ok:
+            return
+        presets = {
+            choices[0]: "/var/mobile/Media/DCIM",
+            choices[1]: "/var/mobile/Downloads",
+            choices[2]: "/var/mobile/Documents",
+        }
+        remote = presets.get(choice, "")
+        if not remote:
+            remote, ok = QInputDialog.getText(
+                self, "Đường dẫn trên iOS", "File hoặc thư mục tuyệt đối:",
+                text="/var/mobile/")
+            if not ok:
+                return
+            remote = remote.strip()
+        if not remote.startswith("/"):
+            QMessageBox.warning(self, "Đường dẫn không hợp lệ",
+                                "Đường dẫn iOS phải bắt đầu bằng '/'.")
+            return
+
+        destination = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục lưu trên PC", str(CAPTURES_DIR))
+        if not destination:
+            return
+        dialog = BulkResultDialog(f"Xuất {remote}", len(targets), self)
+        dialog.show()
+        self.pool.export_path(
+            targets, remote, Path(destination),
+            on_event=dialog.on_event, on_done=dialog.on_done)
+        self.statusBar().showMessage(
+            f"Đang xuất dữ liệu từ {len(targets)} máy", 6000)
 
     def _push_photo(self) -> None:
         targets = self.action_targets()
