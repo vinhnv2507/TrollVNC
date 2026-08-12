@@ -1324,7 +1324,7 @@ class MainWindow(QMainWindow):
         self.device_gesture_buttons = {}
         for label, gesture, tip in [
             ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
-            ("⇄ Chuyển app", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
+            ("⇄ App", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
             ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),
         ]:
             btn = QPushButton(label)
@@ -1345,26 +1345,13 @@ class MainWindow(QMainWindow):
             act.triggered.connect(
                 lambda _checked=False, s=state: self._set_assistive_touch(s))
         at_button.setMenu(at_menu)
-        gesture_row.addWidget(at_button)
-
-        # Keeper: keeperd canh ControlIOS trên máy, PC canh keeperd. Nút này để
-        # soát tay; còn vòng tự động chạy theo chu kỳ trong _tick_keeper_watch.
-        keeper_button = QToolButton()
-        keeper_button.setText("🛡 Keeper")
-        keeper_button.setToolTip("Kiểm tra ControlIOSKeeper trên máy, bật lại nếu nó chết")
-        keeper_button.setPopupMode(QToolButton.InstantPopup)
-        keeper_menu = QMenu(keeper_button)
-        keeper_check_act = keeper_menu.addAction("Kiểm tra + bật lại nếu chết")
-        keeper_check_act.triggered.connect(lambda _checked=False: self._ensure_keeper())
-        keeper_menu.addSeparator()
-        self.keeper_watch_act = keeper_menu.addAction("Tự động canh mọi máy")
-        self.keeper_watch_act.setCheckable(True)
-        self.keeper_watch_act.setToolTip(
-            "Định kỳ soát Keeper trên tất cả máy đang kết nối và bật lại máy nào chết")
-        self.keeper_watch_act.toggled.connect(self._set_keeper_watch)
-        keeper_button.setMenu(keeper_menu)
-        gesture_row.addWidget(keeper_button)
         detail_layout.addLayout(gesture_row)
+        detail_layout.addWidget(at_button)
+        quality_button = QPushButton("⚙ Chất lượng màn hình")
+        quality_button.setToolTip(
+            "Chỉnh tốc độ khung hình và độ nét của màn hình lớn/lưới — áp dụng ngay")
+        quality_button.clicked.connect(self._open_quality_dialog)
+        detail_layout.addWidget(quality_button)
 
         self.splitter = QSplitter(Qt.Horizontal)
         self.splitter.addWidget(self.grid)
@@ -1478,30 +1465,15 @@ class MainWindow(QMainWindow):
         navigation_bar.setObjectName("navigation-toolbar")
         navigation_bar.setMovable(False)
         # Nén padding nút cho gọn -> nhiều action vừa một hàng hơn ở màn hẹp.
-        navigation_bar.setStyleSheet("QToolButton { padding: 2px 5px; }")
+        navigation_bar.setStyleSheet(
+            "QToolButton { padding: 1px 3px; font-size: 11px; } "
+            "QComboBox, QCheckBox, QLabel, QPushButton { font-size: 11px; }")
         self.addToolBar(navigation_bar)
         bar = navigation_bar
 
         scan = QAction("Quét mạng", self)
         scan.triggered.connect(self._scan)
         bar.addAction(scan)
-
-        sort_button = QToolButton()
-        sort_button.setText("Sắp xếp")
-        sort_button.setToolTip("Sắp xếp lưới và lưu thứ tự vào danh sách máy")
-        sort_button.setPopupMode(QToolButton.InstantPopup)
-        sort_menu = QMenu(sort_button)
-        sort_menu.addAction("Theo IP tăng dần").triggered.connect(
-            lambda: self._sort_devices("ip"))
-        sort_menu.addAction("Theo tên A → Z").triggered.connect(
-            lambda: self._sort_devices("name"))
-        sort_menu.addSeparator()
-        sort_menu.addAction("Đưa máy chọn lên trước").triggered.connect(
-            lambda: self._move_selected_devices(-1))
-        sort_menu.addAction("Đưa máy chọn xuống sau").triggered.connect(
-            lambda: self._move_selected_devices(1))
-        sort_button.setMenu(sort_menu)
-        bar.addWidget(sort_button)
 
         load = QAction("Nạp file…", self)
         load.setToolTip("Nạp danh sách IP từ file txt (mỗi dòng một IP hoặc ip:port)")
@@ -1582,7 +1554,9 @@ class MainWindow(QMainWindow):
         actions_bar = QToolBar("Thao tác")
         actions_bar.setObjectName("actions-toolbar")
         actions_bar.setMovable(False)
-        actions_bar.setStyleSheet("QToolButton { padding: 2px 5px; }")
+        actions_bar.setStyleSheet(
+            "QToolButton { padding: 1px 3px; font-size: 10px; } "
+            "QCheckBox { font-size: 10px; }")
         self.addToolBar(actions_bar)
         bar = actions_bar
 
@@ -1593,10 +1567,40 @@ class MainWindow(QMainWindow):
         self.broadcast_box.toggled.connect(self._set_broadcast)
         bar.addWidget(self.broadcast_box)
 
-        quality = QAction("Chất lượng", self)
-        quality.setToolTip("Tốc độ khung hình và độ nét — áp dụng ngay")
-        quality.triggered.connect(self._open_quality_dialog)
-        bar.addAction(quality)
+        # Keeper nằm ngoài khung màn hình lớn để nhóm điều khiển máy chỉ còn các
+        # thao tác trực tiếp và nút Chất lượng.
+        keeper_button = QToolButton()
+        keeper_button.setText("🛡 Keeper")
+        keeper_button.setToolTip("Kiểm tra ControlIOSKeeper trên máy, bật lại nếu nó chết")
+        keeper_button.setPopupMode(QToolButton.InstantPopup)
+        keeper_menu = QMenu(keeper_button)
+        keeper_check_act = keeper_menu.addAction("Kiểm tra + bật lại nếu chết")
+        keeper_check_act.triggered.connect(lambda _checked=False: self._ensure_keeper())
+        keeper_menu.addSeparator()
+        self.keeper_watch_act = keeper_menu.addAction("Tự động canh mọi máy")
+        self.keeper_watch_act.setCheckable(True)
+        self.keeper_watch_act.setToolTip(
+            "Định kỳ soát Keeper trên tất cả máy đang kết nối và bật lại máy nào chết")
+        self.keeper_watch_act.toggled.connect(self._set_keeper_watch)
+        keeper_button.setMenu(keeper_menu)
+        bar.addWidget(keeper_button)
+
+        sort_button = QToolButton()
+        sort_button.setText("Xếp")
+        sort_button.setToolTip("Sắp xếp lưới và lưu thứ tự vào danh sách máy")
+        sort_button.setPopupMode(QToolButton.InstantPopup)
+        sort_menu = QMenu(sort_button)
+        sort_menu.addAction("Theo IP tăng dần").triggered.connect(
+            lambda: self._sort_devices("ip"))
+        sort_menu.addAction("Theo tên A → Z").triggered.connect(
+            lambda: self._sort_devices("name"))
+        sort_menu.addSeparator()
+        sort_menu.addAction("Đưa máy chọn lên trước").triggered.connect(
+            lambda: self._move_selected_devices(-1))
+        sort_menu.addAction("Đưa máy chọn xuống sau").triggered.connect(
+            lambda: self._move_selected_devices(1))
+        sort_button.setMenu(sort_menu)
+        bar.addWidget(sort_button)
 
         bar.addSeparator()
         send_text = QAction("Gõ chữ", self)

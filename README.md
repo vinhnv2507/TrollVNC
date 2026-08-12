@@ -27,7 +27,7 @@ khung nhìn mới thực sự tải hình. Cuộn tới đâu, tier đổi tới
 
 ### Chất lượng và tốc độ khung hình
 
-Nút **Chất lượng…** trên thanh công cụ. Đổi là **có hiệu lực ngay**, không phải
+Nút **Chất lượng** nằm ngay dưới màn hình xem máy lớn. Đổi là **có hiệu lực ngay**, không phải
 nối lại máy nào và không phải khởi động lại phần mềm.
 
 | | Tốc độ | Độ nét |
@@ -496,7 +496,7 @@ Farm có ba vòng canh lồng nhau, mỗi vòng vực dậy vòng trong:
    loopback), chờ bằng `kqueue NOTE_EXIT` nên phản ứng tức thì và ~0% CPU. App
    ControlIOS chết hay bị cài đè thì nó gọi SpringBoard mở lại. Nó sống ngoài
    vòng đời app nên vuốt tắt app Keeper cũng không ảnh hưởng.
-3. **PC canh keeperd**: nút **🛡 Keeper** ở khung điều khiển máy.
+3. **PC canh keeperd**: nút **🛡 Keeper** trên thanh công cụ bên ngoài khung điều khiển máy.
 
 Vòng thứ ba cần thiết vì keeperd bind loopback — PC không dò cổng 46753 từ xa
 được, phải hỏi qua control socket của ControlIOS. Menu có 2 mục:
