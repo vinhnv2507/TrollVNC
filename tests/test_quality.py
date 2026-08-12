@@ -264,6 +264,21 @@ class WindowQualityTest(unittest.TestCase):
             self.window._open_quality_dialog()
         self.assertEqual(self.window.registry.settings.live_fps, before)
 
+    def test_dialog_loads_quality_saved_for_open_device(self) -> None:
+        device = self.window.registry.devices[0]
+        device.device_scale = 0.35
+        device.live_fps = 7
+        seen = {}
+
+        def inspect(dialog):
+            seen["scale"] = dialog.scale_value()
+            seen["fps"] = dialog.live_fps.value()
+            return QDialog.Rejected
+
+        with unittest.mock.patch.object(QualityDialog, "exec", inspect):
+            self.window._open_quality_dialog()
+        self.assertEqual(seen, {"scale": 0.35, "fps": 7})
+
     def test_pool_shares_the_same_settings_object(self) -> None:
         """Đổi là ăn ngay, không phải nối lại phiên nào."""
 

@@ -83,6 +83,12 @@ class DeviceSpec:
     ssh_port: Optional[int] = None
     # UDID máy USB (để tự dựng lại relay khi mở app). Rỗng với máy mạng thường.
     udid: str = ""
+    # Chất lượng riêng của màn hình lớn. None = dùng mặc định toàn cục.
+    live_fps: Optional[float] = None
+    live_long_edge: Optional[int] = None
+    device_scale: Optional[float] = None
+    device_low_latency: Optional[bool] = None
+    device_orientation_sync: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if not self.name:

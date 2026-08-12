@@ -30,6 +30,19 @@ class SettingsValidationTest(unittest.TestCase):
 
 
 class RegistryPersistenceTest(unittest.TestCase):
+    def test_device_quality_round_trips(self) -> None:
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "devices.json"
+            registry = Registry(devices=[DeviceSpec(
+                "172.30.2.51", device_scale=0.35, live_fps=8,
+                live_long_edge=640, device_low_latency=False)])
+            registry.save(path)
+            loaded = Registry.load(path).devices[0]
+            self.assertEqual(loaded.device_scale, 0.35)
+            self.assertEqual(loaded.live_fps, 8)
+            self.assertEqual(loaded.live_long_edge, 640)
+            self.assertFalse(loaded.device_low_latency)
+
     def test_round_trip_and_no_temporary_file_left(self) -> None:
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "devices.json"

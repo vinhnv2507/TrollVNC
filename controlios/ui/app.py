@@ -2013,8 +2013,17 @@ class MainWindow(QMainWindow):
                                     "Hãy mở một máy ở màn hình lớn trước.")
             return
 
-        # Dùng bản sao để hộp dưới màn hình lớn không sửa Settings toàn cục.
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        if device is None:
+            return
+
+        # Nạp đúng cấu hình đã lưu của máy đang mở; máy chưa chỉnh mới dùng mặc định.
         local_settings = copy.deepcopy(self.registry.settings)
+        for name in ("live_fps", "live_long_edge", "device_scale",
+                     "device_low_latency", "device_orientation_sync"):
+            value = getattr(device, name)
+            if value is not None:
+                setattr(local_settings, name, value)
         old_scale = local_settings.device_scale
         old_smooth = (local_settings.device_low_latency,
                       local_settings.device_orientation_sync)
@@ -2023,6 +2032,12 @@ class MainWindow(QMainWindow):
             return
         dialog.apply()
         settings = local_settings
+        device.live_fps = settings.live_fps
+        device.live_long_edge = settings.live_long_edge
+        device.device_scale = settings.device_scale
+        device.device_low_latency = settings.device_low_latency
+        device.device_orientation_sync = settings.device_orientation_sync
+        self.registry.save(self.registry_path)
         self.pool.set_live_quality(key, settings.live_fps, settings.live_long_edge)
 
         # Độ mượt (Q/defer/xoay) đi qua control socket — KHÔNG resize nên áp thẳng
