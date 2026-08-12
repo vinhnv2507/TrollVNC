@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import logging
 import os
 import time
@@ -2006,51 +2007,49 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Đã dừng ghi hình", 5000)
 
     def _open_quality_dialog(self) -> None:
-        s0 = self.registry.settings
-        old_scale = s0.device_scale
-        old_smooth = (s0.device_low_latency, s0.device_orientation_sync)
-        dialog = QualityDialog(self.registry.settings, self)
+        key = self.detail.key
+        if not key:
+            QMessageBox.information(self, "Chưa mở máy",
+                                    "Hãy mở một máy ở màn hình lớn trước.")
+            return
+
+        # Dùng bản sao để hộp dưới màn hình lớn không sửa Settings toàn cục.
+        local_settings = copy.deepcopy(self.registry.settings)
+        old_scale = local_settings.device_scale
+        old_smooth = (local_settings.device_low_latency,
+                      local_settings.device_orientation_sync)
+        dialog = QualityDialog(local_settings, self, device_only=True)
         if dialog.exec() != QDialog.Accepted:
             return
         dialog.apply()
-        # Phiên đọc Settings ở mỗi vòng nhịp nên đổi là ăn ngay, khỏi nối lại.
-        self.registry.save(self.registry_path)
-        settings = self.registry.settings
-        self.grid.set_focus_streaming(settings.focus_streaming)
+        settings = local_settings
+        self.pool.set_live_quality(key, settings.live_fps, settings.live_long_edge)
 
         # Độ mượt (Q/defer/xoay) đi qua control socket — KHÔNG resize nên áp thẳng
         # lên máy online, không nối lại. Chỉ phát khi đổi.
         if (settings.device_low_latency, settings.device_orientation_sync) != old_smooth:
-            targets = self.pool.online_keys()
-            if targets:
-                inflight = 1 if settings.device_low_latency else 2
-                defer = 0.008 if settings.device_low_latency else 0.015
-                self.pool.set_smoothness(
-                    targets, inflight, defer, settings.device_orientation_sync,
-                    on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-                    on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
+            inflight = 1 if settings.device_low_latency else 2
+            defer = 0.008 if settings.device_low_latency else 0.015
+            self.pool.set_smoothness(
+                [key], inflight, defer, settings.device_orientation_sync,
+                on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+                on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
         # Scale đi qua control socket của từng máy (không phải Settings phía PC),
         # nên phải phát riêng — và chỉ khi thật sự đổi để tránh nối lại vô cớ.
         if abs(settings.device_scale - old_scale) > 1e-6:
-            # Gửi cho mọi máy đang online: máy USB (loopback) đổi được ngay; máy
-            # WiFi thiếu token sẽ hiện lỗi rõ ngay trong bảng kết quả — không cần
-            # popup cảnh báo riêng, tránh làm phiền mỗi lần đổi scale.
-            targets = self.pool.online_keys()
-            if targets:
-                dlg = BulkResultDialog(
-                    f"Đặt scale {settings.device_scale:.2f}", len(targets), self)
-                dlg.show()
-                self.pool.set_scale(targets, settings.device_scale,
-                                    on_event=dlg.on_event, on_done=dlg.on_done)
-                # Khung lớn giữ pixel cũ khi framebuffer đổi cỡ -> reset hẳn sau khi
-                # phiên nối lại (xoá ảnh cũ, buộc refit) để hết lồng/quá màn.
-                if self.detail.key and self.detail.key in targets:
-                    key = self.detail.key
-                    QTimer.singleShot(4000, lambda k=key: self._reset_detail_view(k))
+            targets = [key]
+            dlg = BulkResultDialog(
+                f"Đặt scale {settings.device_scale:.2f}", 1, self)
+            dlg.show()
+            self.pool.set_scale(targets, settings.device_scale,
+                                on_event=dlg.on_event, on_done=dlg.on_done)
+            # Khung lớn giữ pixel cũ khi framebuffer đổi cỡ -> reset sau khi nối lại.
+            QTimer.singleShot(4000, lambda k=key: self._reset_detail_view(k))
 
         self.statusBar().showMessage(
-            f"Đã áp dụng: {settings.live_fps:g} hình/giây · "
+            f"Đã áp dụng riêng cho {self._device_name(key)}: "
+            f"{settings.live_fps:g} hình/giây · "
             f"{'gốc' if not settings.live_long_edge else str(settings.live_long_edge) + 'px'}"
             f" · scale {settings.device_scale:.2f}",
             6000,

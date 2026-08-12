@@ -27,8 +27,9 @@ khung nhìn mới thực sự tải hình. Cuộn tới đâu, tier đổi tới
 
 ### Chất lượng và tốc độ khung hình
 
-Nút **Chất lượng** nằm ngay dưới màn hình xem máy lớn. Đổi là **có hiệu lực ngay**, không phải
-nối lại máy nào và không phải khởi động lại phần mềm.
+Nút **Chất lượng** nằm ngay dưới màn hình xem máy lớn và chỉ áp dụng cho đúng
+máy đang mở trong khung đó. Đổi là **có hiệu lực ngay**, không làm thay đổi các
+máy khác.
 
 | | Tốc độ | Độ nét |
 |---|---|---|

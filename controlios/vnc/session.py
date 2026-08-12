@@ -125,6 +125,8 @@ class VncSession:
         self.tier = Tier.IDLE
         self.last_frame_at = 0.0
         self.frame_count = 0
+        self.live_fps_override: Optional[float] = None
+        self.live_long_edge_override: Optional[int] = None
 
         self._client: Optional[asyncvnc.Client] = None
         self._capture_waiters: list[asyncio.Future] = []
@@ -185,6 +187,11 @@ class VncSession:
     def reconnect_now(self) -> None:
         """Bỏ qua chờ backoff, thử nối lại ngay (sau khi mở lại app trên máy)."""
         self._wake.set()
+
+    def set_live_quality(self, fps: float, long_edge: int) -> None:
+        """Đặt chất lượng LIVE riêng cho phiên này, không ảnh hưởng máy khác."""
+        self.live_fps_override = float(fps)
+        self.live_long_edge_override = int(long_edge)
 
     def set_tier(self, tier: Tier) -> None:
         if tier == self.tier:
@@ -476,7 +483,8 @@ class VncSession:
             incremental = client.video.data is not None and not self._force_full
             self._force_full = False
             await self._request(client, incremental=incremental, interruptible=True)
-            fps = self.settings.live_fps if tier is Tier.LIVE else self.settings.grid_fps
+            fps = ((self.live_fps_override or self.settings.live_fps)
+                   if tier is Tier.LIVE else self.settings.grid_fps)
             # Nhịp theo thời gian thực: chỉ ngủ phần còn thiếu để chạm fps mục
             # tiêu, không cộng cả chu kỳ lên trên thời gian chờ frame. Nhờ vậy
             # đường nhanh (USB) chạy sát fps thay vì bị hãm còn phân nửa.
@@ -524,8 +532,10 @@ class VncSession:
         video = client.video
         if video.data is None:
             return
-        limit = self.settings.live_long_edge if self.tier is Tier.LIVE \
-            else self.settings.thumb_long_edge
+        limit = ((self.live_long_edge_override
+                  if self.live_long_edge_override is not None
+                  else self.settings.live_long_edge)
+                 if self.tier is Tier.LIVE else self.settings.thumb_long_edge)
         direct = _DIRECT_MODES.get(video.mode)
 
         if self.tier is Tier.LIVE and (not limit or max(video.width, video.height) <= limit) \

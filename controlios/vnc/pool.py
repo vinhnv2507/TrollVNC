@@ -135,6 +135,10 @@ class DevicePool:
         """Bulk update, called on every scroll/selection change."""
         self._call(self._set_tiers, tiers)
 
+    def set_live_quality(self, key: str, fps: float, long_edge: int) -> None:
+        self._call(lambda: self._with(
+            key, lambda session: session.set_live_quality(fps, long_edge)))
+
     def reconnect_now(self, keys: Optional[Iterable[str]] = None) -> None:
         """Thử nối lại NGAY các máy đang rớt (bỏ qua chờ backoff). keys=None ->
         tất cả. Dùng sau khi cài đè + mở lại app trên iOS để khỏi đợi backoff."""

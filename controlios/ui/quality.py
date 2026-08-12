@@ -35,9 +35,10 @@ PRESETS = [
 
 
 class QualityDialog(QDialog):
-    def __init__(self, settings: Settings, parent=None) -> None:
+    def __init__(self, settings: Settings, parent=None, device_only: bool = False) -> None:
         super().__init__(parent)
         self.settings = settings
+        self.device_only = device_only
         self.setWindowTitle("Chất lượng và tốc độ khung hình")
         self.resize(460, 430)
 
@@ -150,6 +151,14 @@ class QualityDialog(QDialog):
             "Tắt: giữ chiều kiểu desktop (ngược với iOS)."
         )
         layout.addWidget(self.natural_scroll)
+
+        if device_only:
+            self.setWindowTitle("Chất lượng máy đang mở")
+            grid_box.hide()
+            self.idle_after.hide()
+            idle_form.labelForField(self.idle_after).hide()
+            self.focus_streaming.hide()
+            self.natural_scroll.hide()
 
         note = QLabel(
             "Tốc độ/độ nét có hiệu lực ngay, không phải nối lại máy.\n"

@@ -77,6 +77,13 @@ class LiveDownscaleTest(unittest.IsolatedAsyncioTestCase):
         frame = await self._first_live_frame()
         self.assertEqual((frame.width, frame.height), (752, 1338))
 
+    async def test_live_override_does_not_change_shared_settings(self) -> None:
+        self.session.set_live_quality(7, 500)
+        self.assertEqual(self.session.live_fps_override, 7)
+        self.assertEqual(self.session.live_long_edge_override, 500)
+        self.assertEqual(self.settings.live_fps, 30.0)
+        self.assertEqual(self.settings.live_long_edge, 900)
+
 
 class ScaledPixmapCacheTest(unittest.TestCase):
     """Thu phóng phải làm một lần cho mỗi khung hình, không phải mỗi lần vẽ."""
@@ -229,22 +236,26 @@ class WindowQualityTest(unittest.TestCase):
         registry.merge_hosts(["10.0.0.1"])
         registry.save(self.path)
         self.window = MainWindow(self.path)
+        self.window.detail.set_device("10.0.0.1:5901")
 
     def tearDown(self) -> None:
         self.window.close()
         self.path.unlink(missing_ok=True)
 
-    def test_accepting_applies_and_saves(self) -> None:
+    def test_accepting_applies_only_to_open_device(self) -> None:
+        before = self.window.registry.settings.live_fps
         with unittest.mock.patch.object(QualityDialog, "exec",
                                         return_value=QDialog.Accepted), \
              unittest.mock.patch.object(QualityDialog, "apply",
-                                        autospec=True) as apply_mock:
+                                        autospec=True) as apply_mock, \
+             unittest.mock.patch.object(
+                 self.window.pool, "set_live_quality") as set_live:
             self.window._open_quality_dialog()
         apply_mock.assert_called_once()
-
-        # Đã ghi lại xuống đĩa để lần mở sau vẫn giữ.
-        saved = Registry.load(self.path)
-        self.assertEqual(saved.settings.live_fps, self.window.registry.settings.live_fps)
+        set_live.assert_called_once_with(
+            "10.0.0.1:5901", before,
+            self.window.registry.settings.live_long_edge)
+        self.assertEqual(Registry.load(self.path).settings.live_fps, before)
 
     def test_cancelling_changes_nothing(self) -> None:
         before = self.window.registry.settings.live_fps
