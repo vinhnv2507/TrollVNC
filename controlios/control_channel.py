@@ -354,6 +354,67 @@ class ControlChannel:
             entries.append((fields[0], int(fields[1] or 0), fields[2] == "1"))
         return entries
 
+    async def get_file(self, remote: str, local: Path | str, progress=None) -> int:
+        """Tải một file snapshot qua control socket, không cần SSH."""
+
+        local = Path(local)
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), timeout=self.timeout)
+        except (OSError, asyncio.TimeoutError) as exc:
+            raise ControlError(f"{self.host}:{self.port} không phản hồi ({exc})") from None
+        try:
+            writer.write(f"{self._auth_prefix()}getfile {remote}\n".encode("utf-8"))
+            await writer.drain()
+            header_raw = await asyncio.wait_for(reader.readline(), timeout=self.timeout)
+            header = header_raw.decode("utf-8", errors="replace").strip()
+            self._raise_for_error(header, "getfile")
+            fields = header.split()
+            if len(fields) != 2 or fields[0] != "OK" or not fields[1].isdigit():
+                raise ControlError(f"Trả lời lạ cho getfile: {header!r}")
+            size = int(fields[1])
+            local.parent.mkdir(parents=True, exist_ok=True)
+            received = 0
+            with local.open("wb") as handle:
+                while received < size:
+                    chunk = await asyncio.wait_for(
+                        reader.read(min(64 * 1024, size - received)),
+                        timeout=max(self.timeout, 60))
+                    if not chunk:
+                        raise ControlError(
+                            f"{self.host}: file bị ngắt giữa chừng ({received}/{size} byte)")
+                    handle.write(chunk)
+                    received += len(chunk)
+                    if progress:
+                        progress(received, size)
+            return received
+        except Exception:
+            local.unlink(missing_ok=True)
+            raise
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    async def download_tree(self, remote: str, local: Path | str) -> int:
+        """Tải đệ quy một thư mục snapshot; trả tổng số byte."""
+
+        local = Path(local)
+        local.mkdir(parents=True, exist_ok=True)
+        total = 0
+        for name, _size, is_dir in await self.list_dir(remote):
+            if not name or name in (".", "..") or "/" in name or "\\" in name:
+                continue
+            child_remote = remote.rstrip("/") + "/" + name
+            child_local = local / name
+            if is_dir:
+                total += await self.download_tree(child_remote, child_local)
+            else:
+                total += await self.get_file(child_remote, child_local)
+        return total
+
     async def install_ssh_key(self, public_key: str, user: str = "root") -> str:
         """Cài khoá công khai để đăng nhập SSH bằng khoá, không cần mật khẩu.
 

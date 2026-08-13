@@ -99,6 +99,8 @@ class FakeControlServer:
                 writer.write(await self._receive(reader, cmd[len("put "):]))
             elif cmd.startswith("clipset "):
                 writer.write(await self._receive_clip(reader, cmd[len("clipset "):]))
+            elif cmd.startswith("getfile "):
+                writer.write(self._get_file(cmd[len("getfile "):].strip()))
             else:
                 writer.write(self._respond(cmd))
             await writer.drain()
@@ -145,6 +147,20 @@ class FakeControlServer:
     def _respond(self, cmd: str) -> bytes:
         if cmd == "count":
             return b"1\n"
+
+        if cmd.startswith("ls "):
+            path = cmd[len("ls "):].rstrip("/")
+            children = {}
+            prefix = path + "/"
+            for full, data in self.received.items():
+                if not full.startswith(prefix):
+                    continue
+                rest = full[len(prefix):]
+                name, slash, _tail = rest.partition("/")
+                children[name] = (0, True) if slash else (len(data), False)
+            return "".join(
+                f"{name}\t{size}\t{1 if is_dir else 0}\n"
+                for name, (size, is_dir) in children.items()).encode()
 
         if cmd == "clipget":
             if self.unpatched:
@@ -356,3 +372,13 @@ class FakeControlServer:
             return b"OK\n"
 
         return b"ERR Unknown\n"
+
+    def _get_file(self, path: str) -> bytes:
+        if self.unpatched:
+            return b"ERR Unknown\n"
+        if not path.startswith("/var/mobile/controlios-snap/"):
+            return b"ERR BadPath\n"
+        data = self.received.get(path)
+        if data is None:
+            return b"ERR CannotRead\n"
+        return f"OK {len(data)}\n".encode() + data

@@ -61,6 +61,19 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.channel.wake_if_locked())
         self.assertEqual(self.server.home_count, 1)
 
+    async def test_download_snapshot_tree_without_ssh(self) -> None:
+        import tempfile
+        root = "/var/mobile/controlios-snap/com.golike.app/backup"
+        self.server.received[root + "/Documents/a.txt"] = b"xin chao"
+        self.server.received[root + "/Library/prefs.plist"] = b"plist"
+        with tempfile.TemporaryDirectory() as folder:
+            total = await self.channel.download_tree(root, Path(folder) / "backup")
+            self.assertEqual(total, 13)
+            self.assertEqual((Path(folder) / "backup/Documents/a.txt").read_bytes(),
+                             b"xin chao")
+            self.assertEqual((Path(folder) / "backup/Library/prefs.plist").read_bytes(),
+                             b"plist")
+
     async def test_get_color_none_when_unpatched(self) -> None:
         self.server.unpatched = True
         self.assertIsNone(await self.channel.get_color(0.5, 0.2))

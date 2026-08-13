@@ -609,9 +609,9 @@ class DevicePool:
             local = destination / _slug(label) / _slug(bundle_id) / _slug(name)
             try:
                 local.parent.mkdir(parents=True, exist_ok=True)
-                await self._ssh(key).download(remote, local, recursive=True)
+                written = await self._channel(key).download_tree(remote, local)
                 if on_event:
-                    on_event(key, f"đã xuất snapshot ra {local}")
+                    on_event(key, f"đã xuất {written} byte snapshot ra {local}")
                 if on_done:
                     on_done(f"Xuất snapshot {bundle_id} ({name})", 1, [])
             except Exception as exc:
