@@ -263,6 +263,10 @@ static CFIndex sDirtyFrameCount = 0;
     // Store/replace handler
     mFrameHandler = [frameHandler copy];
 
+    // Một phiên capture mới luôn phải render ít nhất một frame. Nếu giữ lại
+    // dirty-count của phiên trước, màn hình tĩnh sẽ không phát framebuffer đầu.
+    [self forceNextFrameUpdate];
+
     if (mDisplayLink) {
         // Already running; nothing else to do
         return;
@@ -383,7 +387,9 @@ static CFIndex sDirtyFrameCount = 0;
 }
 
 - (void)forceNextFrameUpdate {
-    sDirtyFrameCount = 0; // Force next frame to be treated as dirty
+    // Dirty count hợp lệ là số không âm. Dùng sentinel âm; đặt 0 không bảo đảm
+    // khác giá trị CARenderServer đang trả về trên một số máy/iOS.
+    sDirtyFrameCount = (CFIndex)-1;
 }
 
 #pragma mark - Private Methods

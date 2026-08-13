@@ -6278,6 +6278,10 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
     gClientCount++;
     TVLog(@"Client connected, active clients=%d", gClientCount);
 
+    // Client mới cần một framebuffer đầy đủ ngay cả khi màn hình đang đứng yên.
+    // Nếu không, kênh input vẫn chạy nhưng ô trên PC có thể đen vô thời hạn.
+    [[ScreenCapturer sharedCapturer] forceNextFrameUpdate];
+
     // Add to global client states
     NSString *clientId = tvGenerateClientId8(cl->sock);
     if (st && clientId.length) {
