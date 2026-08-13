@@ -39,6 +39,7 @@
 #import <mach-o/dyld.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
+#import <notify.h>
 #import <pthread.h>
 #import <rfb/keysym.h>
 #import <rfb/rfb.h>
@@ -4247,6 +4248,27 @@ static NSData *tvCtlShutdown(void) {
     return [@"OK shutting down\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static BOOL tvCtlNotifyState(const char *name) {
+    int token = 0;
+    uint64_t state = 0;
+    if (notify_register_check(name, &token) != NOTIFY_STATUS_OK)
+        return NO;
+    int status = notify_get_state(token, &state);
+    notify_cancel(token);
+    return status == NOTIFY_STATUS_OK && state != 0;
+}
+
+static NSData *tvCtlWakeIfLocked(void) {
+    BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
+    BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
+    if (!locked && !blanked)
+        return [@"OK unlocked\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    [[STHIDEventGenerator sharedGenerator] menuPress];
+    TVLog(@"Control socket: wakeiflocked -> Home (locked=%d blanked=%d)", locked, blanked);
+    return [@"OK home\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - Scale
 
 // `setscale <0..1>` — đổi hệ số scale khung hình LÚC ĐANG CHẠY để giảm tải cho
@@ -5868,6 +5890,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlReboot();
     } else if ([cmd isEqualToString:@"shutdown"]) {
         resp = tvCtlShutdown();
+    } else if ([cmd isEqualToString:@"wakeiflocked"]) {
+        resp = tvCtlWakeIfLocked();
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"setscale "]) {
