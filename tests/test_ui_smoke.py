@@ -587,6 +587,18 @@ class ScriptDialogTest(unittest.TestCase):
             self.assertEqual(sent[0][1], "com.zing.zalo")
             self.assertEqual(sent[0][2], "sach")
             self.assertEqual(len(sent[0][0]), 2)
+
+            exported = []
+            self.window.pool.export_snapshot = (
+                lambda key, bundle, name, folder, **kw:
+                exported.append((key, bundle, name, folder)))
+            with unittest.mock.patch(
+                    "controlios.ui.app.QFileDialog.getExistingDirectory",
+                    return_value="D:/snapshots"):
+                dialog._export_selected()
+            self.assertEqual(exported[0][0], targets[0])
+            self.assertEqual(exported[0][1:3], ("com.zing.zalo", "sach"))
+            self.assertEqual(exported[0][3], "D:/snapshots")
         finally:
             dialog.close()
 

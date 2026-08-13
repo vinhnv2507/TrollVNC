@@ -596,6 +596,33 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def export_snapshot(self, key: str, bundle_id: str, name: str,
+                        destination: Path | str, on_event=None, on_done=None) -> None:
+        """Tải một snapshot từ máy về PC qua SFTP/SSH."""
+
+        destination = Path(destination)
+
+        async def run() -> None:
+            session = self._sessions.get(key)
+            label = session.spec.name if session and session.spec.name else key
+            remote = f"/var/mobile/controlios-snap/{bundle_id}/{name}"
+            local = destination / _slug(label) / _slug(bundle_id) / _slug(name)
+            try:
+                local.parent.mkdir(parents=True, exist_ok=True)
+                await self._ssh(key).download(remote, local, recursive=True)
+                if on_event:
+                    on_event(key, f"đã xuất snapshot ra {local}")
+                if on_done:
+                    on_done(f"Xuất snapshot {bundle_id} ({name})", 1, [])
+            except Exception as exc:
+                if on_event:
+                    on_event(key, f"LỖI {exc}")
+                if on_done:
+                    on_done(f"Xuất snapshot {bundle_id} ({name})", 0,
+                            [(key, str(exc))])
+
+        self._call_coro(run())
+
     def respring(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
         """Khởi động lại SpringBoard trên nhiều máy (không mất jailbreak)."""
 

@@ -408,6 +408,7 @@ class SnapshotDialog(QDialog):
         row = QDialogButtonBox()
         self.new_button = row.addButton("Lưu bản mới…", QDialogButtonBox.ActionRole)
         self.restore_button = row.addButton("Khôi phục", QDialogButtonBox.AcceptRole)
+        self.export_button = row.addButton("Xuất ra PC…", QDialogButtonBox.ActionRole)
         self.delete_button = row.addButton("Xoá bản này", QDialogButtonBox.DestructiveRole)
         self.clear_button = row.addButton("Xoá tất cả", QDialogButtonBox.DestructiveRole)
         row.addButton(QDialogButtonBox.Close)
@@ -415,11 +416,13 @@ class SnapshotDialog(QDialog):
 
         self.new_button.clicked.connect(self._save_new)
         self.restore_button.clicked.connect(self._restore_selected)
+        self.export_button.clicked.connect(self._export_selected)
         self.delete_button.clicked.connect(self._delete_selected)
         self.clear_button.clicked.connect(self._clear_all)
         row.rejected.connect(self.close)
 
         self.restore_button.setEnabled(False)
+        self.export_button.setEnabled(False)
         self.delete_button.setEnabled(False)
         self.list.itemSelectionChanged.connect(self._on_selection)
 
@@ -464,6 +467,7 @@ class SnapshotDialog(QDialog):
     def _on_selection(self) -> None:
         has = self.list.currentItem() is not None
         self.restore_button.setEnabled(has)
+        self.export_button.setEnabled(has)
         self.delete_button.setEnabled(has)
 
     def _selected_name(self) -> Optional[str]:
@@ -504,6 +508,21 @@ class SnapshotDialog(QDialog):
             on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, okc, fails: self.window.bridge.bulk_done.emit(d, okc, fails))
         self.status.setText(f"Đang khôi phục về “{name}”…")
+
+    def _export_selected(self) -> None:
+        name = self._selected_name()
+        if not name:
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục lưu snapshot trên PC", str(Path.home()))
+        if not folder:
+            return
+        self.window.pool.export_snapshot(
+            self.primary_key, self.bundle_id, name, folder,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, okc, fails: self.window.bridge.bulk_done.emit(
+                d, okc, fails))
+        self.status.setText(f"Đang xuất “{name}” ra PC…")
 
     def _delete_selected(self) -> None:
         name = self._selected_name()
