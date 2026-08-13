@@ -1408,6 +1408,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.terminate_requested.connect(self._terminate_app)
         self.apps_panel.wipe_requested.connect(self._wipe_app)
         self.apps_panel.snapshot_requested.connect(self._snapshot_app)
+        self.apps_panel.backup_pc_requested.connect(self._backup_app_to_pc)
         self.apps_panel.restore_requested.connect(self._restore_app)
         # Home / Chuyển app / Khoá đã chuyển xuống dưới khung lớn.
         # Cài .ipa / Độ sáng / Đẩy file đã chuyển ra thanh công cụ chính.
@@ -2493,6 +2494,24 @@ class MainWindow(QMainWindow):
         self.apps_panel.set_busy(f"Đang lưu snapshot {bundle_id} trên {len(targets)} máy…")
         self.pool.snapshot_app(
             targets, bundle_id, name,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
+
+    def _backup_app_to_pc(self, bundle_id: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn các máy ở lưới.")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục sao lưu dữ liệu app", str(Path.home()))
+        if not folder:
+            return
+        name = time.strftime("pc-%Y%m%d-%H%M%S")
+        self.apps_panel.set_busy(
+            f"Đang tạo và tải snapshot {bundle_id} từ {len(targets)} máy…")
+        self.pool.backup_app_to_pc(
+            targets, bundle_id, name, folder,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )

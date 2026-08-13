@@ -623,6 +623,45 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def backup_app_to_pc(self, keys: Iterable[str], bundle_id: str, name: str,
+                         destination: Path | str, on_event=None, on_done=None) -> None:
+        """Tạo snapshot rồi tải về PC cho toàn bộ máy được chọn, không cần SSH."""
+
+        key_list = list(keys)
+        destination = Path(destination)
+        succeeded: List[str] = []
+        failures: List[tuple] = []
+
+        async def run() -> None:
+            transfer_slots = asyncio.Semaphore(4)
+
+            async def one(key: str) -> None:
+                session = self._sessions.get(key)
+                label = session.spec.name if session and session.spec.name else key
+                device_dir = destination / f"{_slug(label)}_{_slug(key)}"
+                local = device_dir / _slug(bundle_id) / _slug(name)
+                try:
+                    async with transfer_slots:
+                        channel = self._channel(key)
+                        await channel.terminate(bundle_id)
+                        saved = await channel.snapshot_app(bundle_id, name)
+                        remote = f"/var/mobile/controlios-snap/{bundle_id}/{saved}"
+                        written = await channel.download_tree(remote, local)
+                    succeeded.append(key)
+                    if on_event:
+                        on_event(key, f"đã sao lưu {written} byte ra {local}")
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(key) for key in key_list), return_exceptions=True)
+            if on_done:
+                on_done(f"Sao lưu {bundle_id} ra PC ({name})",
+                        len(succeeded), failures)
+
+        self._call_coro(run())
+
     def respring(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
         """Khởi động lại SpringBoard trên nhiều máy (không mất jailbreak)."""
 

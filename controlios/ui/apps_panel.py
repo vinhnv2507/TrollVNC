@@ -68,6 +68,7 @@ class AppsPanel(QWidget):
     terminate_requested = Signal(str)
     wipe_requested = Signal(str)         # xoá dữ liệu app (như cài lại)
     snapshot_requested = Signal(str)     # lưu snapshot dữ liệu app
+    backup_pc_requested = Signal(str)    # tạo snapshot hàng loạt rồi tải về PC
     restore_requested = Signal(str)      # khôi phục dữ liệu app từ snapshot
     refresh_requested = Signal()
 
@@ -140,6 +141,13 @@ class AppsPanel(QWidget):
             lambda: self._emit_for_selected(self.wipe_requested))
         data_row.addWidget(self.wipe_button)
         layout.addLayout(data_row)
+
+        self.backup_pc_button = QPushButton("Sao lưu máy đã chọn ra PC…")
+        self.backup_pc_button.setToolTip(
+            "Tạo snapshot app trên tất cả máy đang chọn rồi tải từng bản về một thư mục PC")
+        self.backup_pc_button.clicked.connect(
+            lambda: self._emit_for_selected(self.backup_pc_requested))
+        layout.addWidget(self.backup_pc_button)
 
         self.status = QLabel("Chọn một máy rồi bấm Nạp danh sách.")
         self.status.setWordWrap(True)

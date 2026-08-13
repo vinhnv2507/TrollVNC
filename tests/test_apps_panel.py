@@ -74,6 +74,7 @@ class AppsPanelTest(unittest.TestCase):
     def test_data_buttons_emit_for_the_selected_app(self) -> None:
         got = {}
         self.panel.snapshot_requested.connect(lambda b: got.setdefault("snap", b))
+        self.panel.backup_pc_requested.connect(lambda b: got.setdefault("backup", b))
         self.panel.restore_requested.connect(lambda b: got.setdefault("restore", b))
         self.panel.wipe_requested.connect(lambda b: got.setdefault("wipe", b))
 
@@ -81,9 +82,11 @@ class AppsPanelTest(unittest.TestCase):
         bundle = self.panel.list.item(0).data(Qt.UserRole)
 
         self.panel.snapshot_button.click()
+        self.panel.backup_pc_button.click()
         self.panel.restore_button.click()
         self.panel.wipe_button.click()
-        self.assertEqual(got, {"snap": bundle, "restore": bundle, "wipe": bundle})
+        self.assertEqual(got, {"snap": bundle, "backup": bundle,
+                               "restore": bundle, "wipe": bundle})
 
     def test_data_buttons_without_selection_hint_instead_of_emitting(self) -> None:
         fired = []
