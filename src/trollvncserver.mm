@@ -46,6 +46,7 @@
 #import <signal.h>
 #import <string>
 #import <sys/socket.h>
+#import <sys/stat.h>
 #import <time.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
@@ -4438,6 +4439,42 @@ static NSData *tvCtlListDirectory(NSString *path) {
     return [out dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+/// `getfile <path>` — truyền file nhị phân qua control socket. Chỉ cho phép đọc
+/// trong kho snapshot để không biến cổng điều khiển thành trình đọc file tùy ý.
+static void tvCtlSendSnapshotFile(int cfd, NSString *path) {
+    NSString *root = @"/var/mobile/controlios-snap/";
+    NSString *clean = [path stringByStandardizingPath];
+    if (![clean hasPrefix:root] || [clean containsString:@"/../"]) {
+        const char *err = "ERR BadPath\n";
+        tvCtlWriteAll(cfd, err, strlen(err));
+        return;
+    }
+    int fd = open(clean.fileSystemRepresentation, O_RDONLY);
+    if (fd < 0) {
+        const char *err = "ERR CannotRead\n";
+        tvCtlWriteAll(cfd, err, strlen(err));
+        return;
+    }
+    struct stat st = {};
+    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+        close(fd);
+        const char *err = "ERR NotFile\n";
+        tvCtlWriteAll(cfd, err, strlen(err));
+        return;
+    }
+    NSString *header = [NSString stringWithFormat:@"OK %lld\n", (long long)st.st_size];
+    NSData *headerData = [header dataUsingEncoding:NSUTF8StringEncoding];
+    tvCtlWriteAll(cfd, headerData.bytes, headerData.length);
+    uint8_t chunk[64 * 1024];
+    for (;;) {
+        ssize_t count = read(fd, chunk, sizeof(chunk));
+        if (count <= 0)
+            break;
+        tvCtlWriteAll(cfd, chunk, (size_t)count);
+    }
+    close(fd);
+}
+
 /// `openurlin <bundle id> <url>` — mở URL bằng **đúng app đó**.
 ///
 /// Cần thiết vì `apple-magnifier://` là scheme TrollStore chiếm lại của app
@@ -5875,6 +5912,9 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"ls "]) {
         resp = tvCtlListDirectory([[cmd substringFromIndex:3]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd hasPrefix:@"getfile "]) {
+        tvCtlSendSnapshotFile(cfd, [[cmd substringFromIndex:8]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"put "]) {
         resp = tvCtlReceiveFile(cfd, [cmd substringFromIndex:4], pending, pendingLength);
