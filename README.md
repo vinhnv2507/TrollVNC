@@ -18,11 +18,12 @@ D:\ControlIOS\.venv\Scripts\python.exe main.py
 | Tier   | Ý nghĩa                                   | Chi phí |
 |--------|-------------------------------------------|---------|
 | `IDLE` | Vẫn kết nối, vẫn gửi lệnh được, **không hỏi pixel** | ~0 ở PC, nhưng **máy vẫn chụp** |
-| `GRID` | Ô đang nhìn thấy, refresh `grid_fps` (mặc định 1 fps), ảnh thu nhỏ | thấp |
+| `GRID` | Mọi ô đang nhìn thấy cập nhật liên tục theo `grid_fps`, ảnh thu nhỏ | thấp |
 | `LIVE` | Máy đang mở ở khung bên phải, full độ phân giải, `live_fps` | cao |
 
-Nên bạn **kết nối cả 250 máy cùng lúc**, nhưng chỉ những ô đang lọt trong
-khung nhìn mới thực sự tải hình. Cuộn tới đâu, tier đổi tới đó. Ảnh thu nhỏ
+Bạn có thể giữ danh sách **250 máy**, nhưng chỉ những ô đang lọt trong khung
+nhìn mới giữ kết nối và tải hình. Máy ngoài viewport tạm ngắt; cuộn tới sẽ tự
+kết nối lại và lấy khung hình mới. Ảnh thu nhỏ
 được scale ngay trong luồng mạng nên UI không bao giờ ôm 250 khung hình gốc.
 
 ### Chất lượng và tốc độ khung hình
@@ -37,6 +38,9 @@ máy khác.
 | Ô trong lưới | `grid_fps` | `thumb_long_edge` |
 
 Ba mẫu sẵn: **Mượt** (8 fps / 640px), **Cân bằng** (12 fps / 900px), **Nét**
+
+Scale gửi từ iPhone mặc định là **0.35×** cho mọi kết nối để giảm tải. Máy nào
+cần nét hơn có thể mở màn hình lớn và chỉnh riêng; giá trị riêng được lưu theo máy.
 (20 fps / độ phân giải gốc).
 
 Mặc định `live_long_edge` là **0** — giữ nguyên độ phân giải máy gửi sang. Toạ

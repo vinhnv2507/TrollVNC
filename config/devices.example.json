@@ -1,6 +1,9 @@
 {
   "settings": {
     "grid_fps": 1.0,
+    "device_scale": 0.35,
+    "disconnect_offscreen": true,
+    "focus_streaming": false,
     "live_fps": 12.0,
     "thumb_long_edge": 320,
     "connect_concurrency": 24,

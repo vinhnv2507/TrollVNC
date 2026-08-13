@@ -1280,6 +1280,13 @@ class MainWindow(QMainWindow):
         self.resize(1500, 950)
         self.registry_path = registry_path
         self.registry = Registry.load(registry_path)
+        # Nâng cấu hình cũ sang mặc định tối ưu farm mới. Chất lượng riêng từng
+        # máy vẫn thắng giá trị này và có thể chỉnh lại trong màn hình lớn.
+        if self.registry.settings.device_scale == 1.0:
+            self.registry.settings.device_scale = 0.35
+        self.registry.settings.focus_streaming = False
+        self.registry.settings.disconnect_offscreen = True
+        self.registry.save(self.registry_path)
 
         self.page_size = 100
         self.page = 0
@@ -1287,6 +1294,7 @@ class MainWindow(QMainWindow):
         self.script_dialog: ScriptDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
+        self._scale_initialized: set[str] = set()
 
         self.bridge = Bridge()
         self.pool = DevicePool(
@@ -2823,6 +2831,14 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)
+        if state is State.ONLINE and key not in self._scale_initialized:
+            device = next((d for d in self.registry.devices if d.key == key), None)
+            scale = (device.device_scale if device and device.device_scale is not None
+                     else self.registry.settings.device_scale)
+            self._scale_initialized.add(key)
+            self.pool.set_scale(
+                [key], scale,
+                on_event=lambda k, m: self.bridge.message.emit(f"[{k}] scale {scale:.2f}: {m}"))
         if key == self.detail.key:
             if state in (State.CONNECTING, State.ERROR):
                 # Đang nối lại -> xoá ảnh cũ ở khung lớn để không giữ khung lồng.

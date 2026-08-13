@@ -17,7 +17,7 @@ from .tile import DeviceTile
 
 # Rows of tiles kept warm above and below the viewport, so scrolling does not
 # show empty cells while the first frame arrives.
-PREFETCH_ROWS = 1
+PREFETCH_ROWS = 0
 
 
 class DeviceGrid(QScrollArea):
@@ -52,7 +52,7 @@ class DeviceGrid(QScrollArea):
         self._control_key: Optional[str] = None
         #: chế độ tập trung — khi đang xem/điều khiển 1 máy thì TẮT stream lưới,
         #: dồn băng thông cho máy đó (giảm trễ trên farm WiFi đông máy).
-        self._focus_streaming = True
+        self._focus_streaming = False
         self._columns = 0            # số cột đang dùng
         self._forced_columns = 0     # 0 = tự động
         self._laying_out = False

@@ -159,11 +159,13 @@ class Settings:
     # TrollVNC trên máy dừng chụp hình và trả CPU lại cho app đang chạy.
     # 0 = không bao giờ ngắt (giữ nguyên hành vi cũ).
     idle_disconnect_after: float = 60.0
+    # Ngắt ngay VNC của máy ngoài viewport; cuộn tới sẽ tự nối và lấy full frame mới.
+    disconnect_offscreen: bool = True
 
     # Hệ số scale khung hình TrollVNC gửi về (0<scale<=1). 1.0 = gốc. Nhỏ hơn thì
     # máy nén khung nhẹ hơn -> mượt hơn trên máy đời cũ, đổi lại kém nét. Áp qua
     # control socket (setscale); cần TrollVNC đã vá vòng 5.
-    device_scale: float = 1.0
+    device_scale: float = 0.35
 
     # Độ mượt áp LÊN MÁY qua control socket (không resize -> không nối lại):
     #  - device_low_latency: True -> Q=1 (bỏ khung cũ) + defer nhỏ -> trễ thấp nhất;
@@ -176,7 +178,7 @@ class Settings:
     # Tập trung băng thông: khi đang xem/điều khiển 1 máy thì TẮT stream lưới, dồn
     # băng thông cho máy đó -> giảm trễ mạnh trên farm WiFi đông máy. Tắt nếu muốn
     # lưới vẫn cập nhật lúc điều khiển.
-    focus_streaming: bool = True
+    focus_streaming: bool = False
 
     # Cuộn "thuận iOS": lăn bánh xe lên -> nội dung đi như vuốt trên iPhone. Bật
     # (mặc định) đảo chiều lăn cho khớp cảm giác cuộn của iOS; tắt để giữ chiều

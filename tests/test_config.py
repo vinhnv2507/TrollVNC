@@ -14,7 +14,11 @@ from controlios.config import (
 
 class SettingsValidationTest(unittest.TestCase):
     def test_defaults_are_valid(self) -> None:
-        Settings().validate()
+        settings = Settings()
+        settings.validate()
+        self.assertEqual(settings.device_scale, 0.35)
+        self.assertTrue(settings.disconnect_offscreen)
+        self.assertFalse(settings.focus_streaming)
 
     def test_rejects_zero_fps(self) -> None:
         with self.assertRaisesRegex(ValueError, "grid_fps"):

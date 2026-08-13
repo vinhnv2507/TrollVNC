@@ -41,6 +41,20 @@ class GridTest(unittest.TestCase):
         self.assertLess(len(promoted), 100,
                         "every tile was promoted — virtualisation is not working")
 
+    def test_open_detail_does_not_pause_visible_grid(self) -> None:
+        grid = DeviceGrid(tile_width=150)
+        grid.resize(700, 400)
+        specs = [DeviceSpec(host=f"10.0.0.{i}") for i in range(1, 30)]
+        grid.set_devices(specs)
+        grid.show()
+        app.processEvents()
+        grid.set_focus_key(specs[0].key)
+        published = {}
+        grid.tiers_changed.connect(published.update)
+        grid._publish_tiers()
+        visible_grid = [k for k, tier in published.items() if tier is Tier.GRID]
+        self.assertTrue(visible_grid, "mở màn hình lớn không được làm đứng cả lưới")
+
     def test_frame_and_status_reach_the_tile(self) -> None:
         grid = DeviceGrid()
         spec = DeviceSpec(host="10.0.0.7")
@@ -71,6 +85,24 @@ class GridTest(unittest.TestCase):
 
 
 class WindowTest(unittest.TestCase):
+    def test_first_online_applies_default_scale_once(self) -> None:
+        registry_path = Path(__file__).parent / "_scale_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            calls = []
+            window.pool.set_scale = lambda keys, scale, **kw: calls.append(
+                (list(keys), scale))
+            key = "10.0.0.1:5901"
+            window._on_status(key, State.ONLINE, "")
+            window._on_status(key, State.ONLINE, "")
+            self.assertEqual(calls, [([key], 0.35)])
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
     def test_sort_and_manual_order_are_saved(self) -> None:
         registry_path = Path(__file__).parent / "_order_devices.json"
         registry = Registry()
