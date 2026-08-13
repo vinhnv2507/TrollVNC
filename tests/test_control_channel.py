@@ -54,6 +54,13 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         hexv = await self.channel.get_color(0.5, 0.2)
         self.assertEqual(hexv, "4285F4")
 
+    async def test_wake_if_locked_only_presses_home_when_locked(self) -> None:
+        self.assertFalse(await self.channel.wake_if_locked())
+        self.assertEqual(self.server.home_count, 0)
+        self.server.locked = True
+        self.assertTrue(await self.channel.wake_if_locked())
+        self.assertEqual(self.server.home_count, 1)
+
     async def test_get_color_none_when_unpatched(self) -> None:
         self.server.unpatched = True
         self.assertIsNone(await self.channel.get_color(0.5, 0.2))

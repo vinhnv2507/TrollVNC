@@ -51,6 +51,8 @@ class FakeControlServer:
     keeper_start_noop: bool = False
     reboot_count: int = 0
     shutdown_count: int = 0
+    locked: bool = False
+    home_count: int = 0
     #: bundle id đã bị xoá dữ liệu; (bundle, tên) đã khôi phục
     wiped: List[str] = field(default_factory=list)
     restored: List[Tuple[str, str]] = field(default_factory=list)
@@ -311,6 +313,15 @@ class FakeControlServer:
         if cmd == "shutdown":
             self.shutdown_count += 1
             return b"OK shutting down\n"
+
+        if cmd == "wakeiflocked":
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            if not self.locked:
+                return b"OK unlocked\n"
+            self.home_count += 1
+            self.locked = False
+            return b"OK home\n"
 
         if cmd.startswith(("setinflight ", "setdefer ", "setorient ")):
             if self.unpatched:

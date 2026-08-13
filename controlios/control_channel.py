@@ -161,6 +161,16 @@ class ControlChannel:
         if not text.strip().startswith("OK"):
             raise ControlError(f"Không mở được {bundle_id}: {text.strip()}")
 
+    async def wake_if_locked(self) -> bool:
+        """Bấm Home nếu màn hình iOS đang khóa/tắt."""
+
+        text = (await self.command("wakeiflocked")).strip().lower()
+        if text == "ok home":
+            return True
+        if text == "ok unlocked":
+            return False
+        raise ControlError(f"Phản hồi trạng thái khóa không hợp lệ: {text}")
+
     async def terminate(self, bundle_id: str) -> bool:
         """True nếu đã đóng, False nếu app vốn không chạy."""
 

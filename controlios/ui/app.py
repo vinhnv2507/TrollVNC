@@ -1295,6 +1295,7 @@ class MainWindow(QMainWindow):
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
+        self._lock_checked_online: set[str] = set()
 
         self.bridge = Bridge()
         self.pool = DevicePool(
@@ -2831,6 +2832,12 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)
+        if state is State.ONLINE and key not in self._lock_checked_online:
+            self._lock_checked_online.add(key)
+            self.pool.wake_if_locked(
+                key, on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"))
+        elif state is not State.ONLINE:
+            self._lock_checked_online.discard(key)
         if state is State.ONLINE and key not in self._scale_initialized:
             device = next((d for d in self.registry.devices if d.key == key), None)
             scale = (device.device_scale if device and device.device_scale is not None
