@@ -12,7 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import Qt                           # noqa: E402
-from PySide6.QtWidgets import QApplication              # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox # noqa: E402
 
 from controlios.config import DeviceSpec, Registry      # noqa: E402
 from controlios.vnc.session import Frame, State, Tier   # noqa: E402
@@ -117,6 +117,26 @@ class WindowTest(unittest.TestCase):
             window._move_selected_devices(-1)
             self.assertEqual([d.host for d in Registry.load(registry_path).devices],
                              ["10.0.0.11", "10.0.0.3", "10.0.0.20"])
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_remove_selected_devices_updates_grid_and_saved_registry(self) -> None:
+        registry_path = Path(__file__).parent / "_remove_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window.grid.selection = ["10.0.0.1:5901", "10.0.0.3:5901"]
+            with unittest.mock.patch(
+                    "controlios.ui.app.QMessageBox.warning",
+                    return_value=QMessageBox.Yes):
+                window._remove_selected_devices()
+            self.assertEqual([d.host for d in window.registry.devices], ["10.0.0.2"])
+            self.assertEqual([d.host for d in Registry.load(registry_path).devices],
+                             ["10.0.0.2"])
+            self.assertEqual(list(window.grid.tiles), ["10.0.0.2:5901"])
         finally:
             window.close()
             registry_path.unlink(missing_ok=True)

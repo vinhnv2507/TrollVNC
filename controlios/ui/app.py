@@ -1635,6 +1635,11 @@ class MainWindow(QMainWindow):
             lambda: self._move_selected_devices(-1))
         sort_menu.addAction("Đưa máy chọn xuống sau").triggered.connect(
             lambda: self._move_selected_devices(1))
+        sort_menu.addSeparator()
+        remove_action = sort_menu.addAction("Xoá máy đã chọn…")
+        remove_action.setToolTip(
+            "Xoá các máy đang chọn khỏi lưới và danh sách lưu trên PC")
+        remove_action.triggered.connect(self._remove_selected_devices)
         sort_button.setMenu(sort_menu)
         bar.addWidget(sort_button)
 
@@ -1788,6 +1793,38 @@ class MainWindow(QMainWindow):
             self._apply_page()
 
     # ------------------------------------------------------------------ device
+
+    def _remove_selected_devices(self) -> None:
+        keys = list(self.grid.selection)
+        if not keys:
+            QMessageBox.information(
+                self, "Chưa chọn máy", "Hãy chọn máy cần xoá trên lưới trước.")
+            return
+        labels = []
+        by_key = {device.key: device for device in self.registry.devices}
+        for key in keys[:8]:
+            device = by_key.get(key)
+            labels.append(f"• {(device.name or key) if device else key}")
+        if len(keys) > 8:
+            labels.append(f"• … và {len(keys) - 8} máy khác")
+        answer = QMessageBox.warning(
+            self, "Xoá máy khỏi lưới",
+            f"Xoá <b>{len(keys)} máy</b> khỏi danh sách ControlIOS trên PC?<br><br>"
+            + "<br>".join(labels)
+            + "<br><br>Thao tác này không xoá app hoặc dữ liệu trên iPhone.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+
+        remove_keys = set(keys)
+        self.registry.devices = [
+            device for device in self.registry.devices if device.key not in remove_keys]
+        self.registry.save(self.registry_path)
+        self._scale_initialized.difference_update(remove_keys)
+        self._lock_checked_online.difference_update(remove_keys)
+        self.page = min(self.page, self._pages() - 1)
+        self._apply_page()
+        self.statusBar().showMessage(f"Đã xoá {len(remove_keys)} máy khỏi danh sách", 5000)
 
     def _scan_usb(self) -> None:
         """Tìm iPhone cắm USB, dựng relay và nạp vào lưới (chạy qua cáp)."""
