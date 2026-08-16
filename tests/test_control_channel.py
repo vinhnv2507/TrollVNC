@@ -61,6 +61,19 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.channel.wake_if_locked())
         self.assertEqual(self.server.home_count, 1)
 
+    async def test_measure_app_traffic_parses_process_bytes(self) -> None:
+        bundle = "com.golike.app"
+        self.server.running.add(bundle)
+        result = await self.channel.measure_app_traffic(bundle, 8)
+        self.assertEqual(result.bytes_in, 4096)
+        self.assertEqual(result.bytes_out, 2048)
+        self.assertEqual(result.pid, 1234)
+        self.assertEqual(result.bytes_per_second, 768)
+
+    async def test_measure_app_traffic_requires_running_app(self) -> None:
+        with self.assertRaisesRegex(ControlError, "chưa chạy"):
+            await self.channel.measure_app_traffic("com.example.notrunning", 8)
+
     async def test_download_snapshot_tree_without_ssh(self) -> None:
         import tempfile
         root = "/var/mobile/controlios-snap/com.golike.app/backup"

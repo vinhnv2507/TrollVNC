@@ -528,6 +528,19 @@ class DevicePool:
         self._bulk_app_action(
             keys, f"Khởi động lại {bundle_id}", action, on_event, on_done)
 
+    def measure_app_traffic(self, keys: Iterable[str], bundle_id: str, seconds: int = 8,
+                            on_event=None, on_done=None) -> None:
+        async def action(channel):
+            result = await channel.measure_app_traffic(bundle_id, seconds)
+            total = result.bytes_in + result.bytes_out
+            state = "CÓ lưu lượng" if total >= 1024 else "KHÔNG có lưu lượng đáng kể"
+            return (f"{state}: vào {result.bytes_in / 1024:.1f} KB, "
+                    f"ra {result.bytes_out / 1024:.1f} KB, "
+                    f"{result.bytes_per_second / 1024:.1f} KB/s (PID {result.pid})")
+
+        self._bulk_app_action(keys, f"Đo lưu lượng {bundle_id}", action,
+                              on_event, on_done)
+
     def wipe_app(self, keys: Iterable[str], bundle_id: str,
                  on_event=None, on_done=None) -> None:
         """Xoá dữ liệu app trên nhiều máy như vừa cài lại (giữ container).
