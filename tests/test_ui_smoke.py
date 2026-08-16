@@ -141,6 +141,28 @@ class WindowTest(unittest.TestCase):
             window.close()
             registry_path.unlink(missing_ok=True)
 
+    def test_groups_are_saved_and_filter_the_grid(self) -> None:
+        registry_path = Path(__file__).parent / "_group_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window.grid.selection = ["10.0.0.1:5901", "10.0.0.3:5901"]
+            self.assertTrue(window._set_selected_group("Farm A"))
+            saved = Registry.load(registry_path)
+            self.assertEqual([d.host for d in saved.devices if d.group == "Farm A"],
+                             ["10.0.0.1", "10.0.0.3"])
+
+            window._select_group_filter("Farm A")
+            self.assertEqual(set(window.grid.tiles),
+                             {"10.0.0.1:5901", "10.0.0.3:5901"})
+            window._select_group_filter("")
+            self.assertEqual(len(window.grid.tiles), 3)
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
     def test_window_builds_and_pages(self) -> None:
         registry_path = Path(__file__).parent / "_smoke_devices.json"
         registry = Registry()

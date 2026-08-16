@@ -1309,6 +1309,7 @@ class MainWindow(QMainWindow):
 
         self.page_size = 100
         self.page = 0
+        self.current_group = ""
         self.broadcast = False
         self.script_dialog: ScriptDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
@@ -1623,8 +1624,9 @@ class MainWindow(QMainWindow):
         bar.addWidget(keeper_button)
 
         sort_button = QToolButton()
-        sort_button.setText("Xếp")
-        sort_button.setToolTip("Sắp xếp lưới và lưu thứ tự vào danh sách máy")
+        self.group_sort_button = sort_button
+        sort_button.setText("Xếp/Nhóm")
+        sort_button.setToolTip("Sắp xếp, tạo nhóm và chỉ hiển thị một nhóm máy")
         sort_button.setPopupMode(QToolButton.InstantPopup)
         sort_menu = QMenu(sort_button)
         sort_menu.addAction("Theo IP tăng dần").triggered.connect(
@@ -1636,6 +1638,15 @@ class MainWindow(QMainWindow):
             lambda: self._move_selected_devices(-1))
         sort_menu.addAction("Đưa máy chọn xuống sau").triggered.connect(
             lambda: self._move_selected_devices(1))
+        sort_menu.addSeparator()
+        group_filter_menu = sort_menu.addMenu("Hiển thị nhóm")
+        self.group_filter_menu = group_filter_menu
+        group_filter_menu.aboutToShow.connect(self._rebuild_group_filter_menu)
+        sort_menu.addAction("Tạo nhóm mới…").triggered.connect(self._create_group)
+        sort_menu.addAction("Đưa máy đã chọn vào nhóm…").triggered.connect(
+            self._assign_selected_group)
+        sort_menu.addAction("Bỏ máy đã chọn khỏi nhóm").triggered.connect(
+            lambda: self._set_selected_group(""))
         sort_menu.addSeparator()
         remove_action = sort_menu.addAction("Xoá máy đã chọn…")
         remove_action.setToolTip(
@@ -1762,12 +1773,17 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------ paging
 
     def _pages(self) -> int:
+        count = len(self._filtered_devices())
         if not self.page_size:
             return 1
-        return max(1, (len(self.registry.devices) + self.page_size - 1) // self.page_size)
+        return max(1, (count + self.page_size - 1) // self.page_size)
+
+    def _filtered_devices(self) -> List[DeviceSpec]:
+        return [d for d in self.registry.devices
+                if d.enabled and (not self.current_group or d.group == self.current_group)]
 
     def _page_devices(self) -> List[DeviceSpec]:
-        devices = [d for d in self.registry.devices if d.enabled]
+        devices = self._filtered_devices()
         if not self.page_size:
             return devices
         start = self.page * self.page_size
@@ -1783,6 +1799,66 @@ class MainWindow(QMainWindow):
         self.page_label.setText(f" {self.page + 1}/{self._pages()} ")
         self.prev_button.setEnabled(self.page > 0)
         self.next_button.setEnabled(self.page + 1 < self._pages())
+
+    def _group_names(self) -> List[str]:
+        return sorted({d.group.strip() for d in self.registry.devices if d.group.strip()},
+                      key=str.casefold)
+
+    def _rebuild_group_filter_menu(self) -> None:
+        self.group_filter_menu.clear()
+        all_action = self.group_filter_menu.addAction(
+            f"Tất cả máy ({sum(d.enabled for d in self.registry.devices)})")
+        all_action.setCheckable(True)
+        all_action.setChecked(not self.current_group)
+        all_action.triggered.connect(lambda: self._select_group_filter(""))
+        for group in self._group_names():
+            count = sum(d.enabled and d.group == group for d in self.registry.devices)
+            action = self.group_filter_menu.addAction(f"{group} ({count})")
+            action.setCheckable(True)
+            action.setChecked(self.current_group == group)
+            action.triggered.connect(
+                lambda _checked=False, value=group: self._select_group_filter(value))
+
+    def _select_group_filter(self, group: str) -> None:
+        self.current_group = group
+        self.page = 0
+        self.group_sort_button.setText(f"Nhóm: {group}" if group else "Xếp/Nhóm")
+        self._apply_page()
+        self.statusBar().showMessage(
+            f"Đang hiển thị nhóm {group}" if group else "Đang hiển thị tất cả máy", 4000)
+
+    def _create_group(self) -> None:
+        name, ok = QInputDialog.getText(self, "Tạo nhóm", "Tên nhóm mới:")
+        name = name.strip()
+        if not ok or not name:
+            return
+        if self._set_selected_group(name):
+            self._select_group_filter(name)
+
+    def _assign_selected_group(self) -> None:
+        groups = self._group_names()
+        if not groups:
+            self._create_group()
+            return
+        group, ok = QInputDialog.getItem(
+            self, "Đưa máy vào nhóm", "Chọn nhóm:", groups, 0, False)
+        if ok and group:
+            self._set_selected_group(group)
+
+    def _set_selected_group(self, group: str) -> bool:
+        keys = set(self.grid.selection)
+        if not keys:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn các máy trên lưới trước.")
+            return False
+        for device in self.registry.devices:
+            if device.key in keys:
+                device.group = group
+        self.registry.save(self.registry_path)
+        self._apply_page()
+        message = (f"Đã đưa {len(keys)} máy vào nhóm {group}" if group
+                   else f"Đã bỏ {len(keys)} máy khỏi nhóm")
+        self.statusBar().showMessage(message, 5000)
+        return True
 
     def _on_page_size(self, index: int) -> None:
         self.page_size = self.page_combo.itemData(index)
