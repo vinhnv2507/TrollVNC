@@ -41,12 +41,14 @@
 #import <netinet/tcp.h>
 #import <notify.h>
 #import <pthread.h>
+#import <spawn.h>
 #import <rfb/keysym.h>
 #import <rfb/rfb.h>
 #import <signal.h>
 #import <string>
 #import <sys/socket.h>
 #import <sys/stat.h>
+#import <sys/wait.h>
 #import <time.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
@@ -63,6 +65,8 @@
 #import "PSAssistiveTouchSettingsDetail.h"
 #import "STHIDEventGenerator.h"
 #import "ScreenCapturer.h"
+
+extern char **environ;
 
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
@@ -4229,6 +4233,93 @@ static NSData *tvCtlReboot(void) {
     return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+// Do luong rieng cua tien trinh app bang nettop. Mau dau lam moc, mau thu hai
+// la luong phat sinh trong khoang do (`-d` = delta, khong tinh tu luc boot).
+static NSData *tvCtlAppTraffic(NSString *spec) {
+    NSArray<NSString *> *parts = [spec componentsSeparatedByCharactersInSet:
+        [NSCharacterSet whitespaceCharacterSet]];
+    NSMutableArray<NSString *> *args = [NSMutableArray array];
+    for (NSString *part in parts)
+        if (part.length) [args addObject:part];
+    if (args.count < 1)
+        return [@"ERR Usage traffic <bundle id> [seconds]\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSString *bundleId = args[0];
+    int seconds = args.count > 1 ? [args[1] intValue] : 8;
+    seconds = MAX(2, MIN(seconds, 30));
+    pid_t pid = 0;
+    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                     "SpringBoardServices", RTLD_LAZY);
+    if (h) {
+        int (*sbsPid)(CFStringRef, pid_t *) =
+            (int (*)(CFStringRef, pid_t *))dlsym(h, "SBSProcessIDForDisplayIdentifier");
+        if (sbsPid) sbsPid((__bridge CFStringRef)bundleId, &pid);
+    }
+    if (pid <= 0)
+        return [@"ERR NotRunning\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    const char *tool = access("/usr/bin/nettop", X_OK) == 0 ? "/usr/bin/nettop" :
+                       (access("/var/jb/usr/bin/nettop", X_OK) == 0 ?
+                        "/var/jb/usr/bin/nettop" : NULL);
+    if (!tool)
+        return [@"ERR NetTopUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    int fds[2];
+    if (pipe(fds) != 0)
+        return [@"ERR PipeFailed\n" dataUsingEncoding:NSUTF8StringEncoding];
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_adddup2(&actions, fds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_adddup2(&actions, fds[1], STDERR_FILENO);
+    posix_spawn_file_actions_addclose(&actions, fds[0]);
+    posix_spawn_file_actions_addclose(&actions, fds[1]);
+    char interval[12], pidText[16];
+    snprintf(interval, sizeof(interval), "%d", seconds);
+    snprintf(pidText, sizeof(pidText), "%d", pid);
+    char *argv[] = {(char *)tool, (char *)"-P", (char *)"-L", (char *)"2",
+                    (char *)"-s", interval, (char *)"-d", (char *)"-J",
+                    (char *)"bytes_in,bytes_out", (char *)"-p", pidText, NULL};
+    pid_t child = 0;
+    int spawnError = posix_spawn(&child, tool, &actions, NULL, argv, environ);
+    posix_spawn_file_actions_destroy(&actions);
+    close(fds[1]);
+    if (spawnError != 0) {
+        close(fds[0]);
+        return [[NSString stringWithFormat:@"ERR NetTopStart %d\n", spawnError]
+            dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    NSMutableData *raw = [NSMutableData data];
+    uint8_t buffer[4096];
+    ssize_t count;
+    while ((count = read(fds[0], buffer, sizeof(buffer))) > 0)
+        [raw appendBytes:buffer length:(NSUInteger)count];
+    close(fds[0]);
+    int status = 0;
+    waitpid(child, &status, 0);
+
+    NSString *text = [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] ?: @"";
+    unsigned long long bytesIn = 0, bytesOut = 0;
+    BOOL found = NO;
+    for (NSString *line in [text componentsSeparatedByCharactersInSet:
+                                [NSCharacterSet newlineCharacterSet]]) {
+        NSArray<NSString *> *columns = [line componentsSeparatedByString:@","];
+        if (columns.count < 3) continue;
+        NSScanner *inScan = [NSScanner scannerWithString:columns[columns.count - 2]];
+        NSScanner *outScan = [NSScanner scannerWithString:columns[columns.count - 1]];
+        unsigned long long incoming = 0, outgoing = 0;
+        if ([inScan scanUnsignedLongLong:&incoming] && [outScan scanUnsignedLongLong:&outgoing]) {
+            bytesIn = incoming;
+            bytesOut = outgoing;
+            found = YES;
+        }
+    }
+    if (!found)
+        return [@"ERR NetTopNoData\n" dataUsingEncoding:NSUTF8StringEncoding];
+    return [[NSString stringWithFormat:@"OK %llu %llu %d %d\n",
+                                      bytesIn, bytesOut, seconds, pid]
+        dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 static NSData *tvCtlShutdown(void) {
     dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/"
            "FrontBoardServices", RTLD_LAZY);
@@ -5955,6 +6046,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     } else if ([cmd hasPrefix:@"terminate "]) {
         resp = tvCtlTerminateApp([[cmd substringFromIndex:10]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd hasPrefix:@"traffic "]) {
+        resp = tvCtlAppTraffic([cmd substringFromIndex:8]);
     } else if ([cmd hasPrefix:@"wipeapp "]) {
         resp = tvCtlWipeApp([cmd substringFromIndex:8]);
     } else if ([cmd hasPrefix:@"snapshot "]) {
