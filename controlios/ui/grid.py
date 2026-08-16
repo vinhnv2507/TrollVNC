@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QGridLayout, QScrollArea, QWidget
+from PySide6.QtWidgets import QGridLayout, QMenu, QScrollArea, QWidget
 
 from ..config import DeviceSpec
 from ..vnc.session import Frame, State, Tier
@@ -24,6 +24,7 @@ class DeviceGrid(QScrollArea):
     tiers_changed = Signal(dict)
     selection_changed = Signal(list)
     device_activated = Signal(str)
+    remove_requested = Signal(list)
 
     # Điều khiển thẳng trên ô (toạ độ đã quy về framebuffer của máy)
     tile_pressed = Signal(str, int, int, int)
@@ -101,12 +102,36 @@ class DeviceGrid(QScrollArea):
             tile.moved_at.connect(self.tile_moved)
             tile.released_at.connect(self.tile_released)
             tile.scrolled_at.connect(self._on_tile_scrolled)
+            tile.setContextMenuPolicy(Qt.CustomContextMenu)
+            tile.customContextMenuRequested.connect(
+                lambda pos, k=spec.key, t=tile:
+                self._show_device_menu(k, t.mapToGlobal(pos)))
             self.tiles[spec.key] = tile
             self.order.append(spec.key)
 
         self._columns = 0
         self._relayout()
         self.selection_changed.emit(self.selection)
+
+    def _context_targets(self, key: str) -> List[str]:
+        """Giữ nhóm chọn khi chuột phải trong nhóm; ngoài nhóm thì chỉ chọn máy đó."""
+
+        if key not in self.selection:
+            self.selection = [key]
+            for tile_key, tile in self.tiles.items():
+                tile.set_selected(tile_key == key)
+            self.selection_changed.emit(list(self.selection))
+        return list(self.selection)
+
+    def _show_device_menu(self, key: str, global_pos) -> None:
+        targets = self._context_targets(key)
+        menu = QMenu(self)
+        label = ("Xoá máy này…" if len(targets) == 1
+                 else f"Xoá {len(targets)} máy đã chọn…")
+        action = menu.addAction(label)
+        action.triggered.connect(
+            lambda _checked=False, keys=targets: self.remove_requested.emit(keys))
+        menu.exec(global_pos)
 
     def on_frame(self, frame: Frame) -> None:
         tile = self.tiles.get(frame.key)

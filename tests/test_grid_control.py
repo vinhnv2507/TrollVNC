@@ -66,6 +66,18 @@ class TileControlTest(unittest.TestCase):
         self.assertTrue(selected)
         self.assertFalse(controlled)
 
+    def test_context_menu_targets_one_or_keeps_existing_group(self) -> None:
+        second = self.specs[1].key
+        third = self.specs[2].key
+        self.grid.selection = [self.key, second]
+        self.grid.tiles[self.key].set_selected(True)
+        self.grid.tiles[second].set_selected(True)
+
+        self.assertEqual(self.grid._context_targets(second), [self.key, second])
+        self.assertEqual(self.grid._context_targets(third), [third])
+        self.assertTrue(self.grid.tiles[third].selected)
+        self.assertFalse(self.grid.tiles[self.key].selected)
+
     def test_enabled_sends_input_instead_of_selecting(self) -> None:
         self.grid.set_control_enabled(True)
         selected, controlled = [], []

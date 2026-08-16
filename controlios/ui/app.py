@@ -1436,6 +1436,7 @@ class MainWindow(QMainWindow):
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
+        self.grid.remove_requested.connect(self._remove_selected_devices)
         self.grid.tile_pressed.connect(self._on_tile_pressed)
         self.grid.tile_moved.connect(self._on_tile_moved)
         self.grid.tile_released.connect(self._on_tile_released)
@@ -1639,7 +1640,8 @@ class MainWindow(QMainWindow):
         remove_action = sort_menu.addAction("Xoá máy đã chọn…")
         remove_action.setToolTip(
             "Xoá các máy đang chọn khỏi lưới và danh sách lưu trên PC")
-        remove_action.triggered.connect(self._remove_selected_devices)
+        remove_action.triggered.connect(
+            lambda _checked=False: self._remove_selected_devices())
         sort_button.setMenu(sort_menu)
         bar.addWidget(sort_button)
 
@@ -1794,8 +1796,9 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------ device
 
-    def _remove_selected_devices(self) -> None:
-        keys = list(self.grid.selection)
+    def _remove_selected_devices(self, requested_keys=None) -> None:
+        keys = (list(requested_keys) if requested_keys is not None
+                else list(self.grid.selection))
         if not keys:
             QMessageBox.information(
                 self, "Chưa chọn máy", "Hãy chọn máy cần xoá trên lưới trước.")
