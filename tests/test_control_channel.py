@@ -55,10 +55,10 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hexv, "4285F4")
 
     async def test_wake_if_locked_only_presses_home_when_locked(self) -> None:
-        self.assertFalse(await self.channel.wake_if_locked())
+        self.assertEqual(await self.channel.wake_if_locked(), "unlocked")
         self.assertEqual(self.server.home_count, 0)
         self.server.locked = True
-        self.assertTrue(await self.channel.wake_if_locked())
+        self.assertEqual(await self.channel.wake_if_locked(), "locked")
         self.assertEqual(self.server.home_count, 1)
 
     async def test_download_snapshot_tree_without_ssh(self) -> None:

@@ -224,15 +224,17 @@ class DevicePool:
     def tap(self, key: str, x: int, y: int, button: int = 0) -> None:
         self._call(lambda: self._with(key, lambda s: s.tap(x, y, button)))
 
-    def wake_if_locked(self, key: str, on_event=None) -> None:
+    def wake_if_locked(self, key: str, on_event=None, on_result=None) -> None:
         """Kiểm tra sau khi VNC online và bấm Home nếu iOS đang khóa/tắt."""
 
         async def run() -> None:
             try:
-                pressed = await self._channel(key).wake_if_locked()
+                state = await self._channel(key).wake_if_locked()
                 if on_event:
-                    on_event(key, "đã bấm Home vì màn hình đang khóa" if pressed
-                             else "màn hình không khóa")
+                    on_event(key, "đã bấm Home vì màn hình đang khóa/tắt"
+                             if state != "unlocked" else "màn hình không khóa")
+                if on_result:
+                    on_result(key, state)
             except Exception as exc:
                 if on_event:
                     on_event(key, f"không kiểm tra được khóa màn hình: {exc}")
