@@ -4310,6 +4310,53 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static dispatch_source_t gAutoUnlockTimer = NULL;
+
+static void tvAutoUnlockIfNeeded(void) {
+    BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
+    BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
+    if (!locked && !blanked)
+        return;
+
+    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+    [generator menuPress];
+    // Luôn hạ về nấc tối nhất sau khi đánh thức. Gửi dư nấc là
+    // có chủ ý; iOS tự chặn tại giá trị min.
+    for (int i = 0; i < 16; ++i)
+        [generator displayBrightnessDecrementPress];
+
+    if (locked) {
+        // Chờ animation thức màn hình xong rồi vuốt lên. Máy không có
+        // passcode sẽ vào Home; máy có passcode dừng ở màn hình nhập mã.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 900 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            CGSize size = [UIScreen mainScreen].nativeBounds.size;
+            CGPoint start = CGPointMake(size.width * 0.5, size.height * 0.82);
+            CGPoint end = CGPointMake(size.width * 0.5, size.height * 0.20);
+            [[STHIDEventGenerator sharedGenerator]
+                dragLinearWithStartPoint:start endPoint:end duration:0.30];
+        });
+    }
+    TVLog(@"Auto-unlock watchdog: Home%s, brightness min", locked ? " + swipe" : "");
+}
+
+static void tvStartAutoUnlockWatchdog(void) {
+    if (gAutoUnlockTimer)
+        return;
+    dispatch_queue_t queue = dispatch_get_main_queue();
+    gAutoUnlockTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    dispatch_source_set_timer(
+        gAutoUnlockTimer,
+        dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+        30 * NSEC_PER_SEC,
+        1 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(gAutoUnlockTimer, ^{
+        tvAutoUnlockIfNeeded();
+    });
+    dispatch_resume(gAutoUnlockTimer);
+    TVLog(@"Auto-unlock watchdog started (30s)");
+}
+
 #pragma mark - Scale
 
 // `setscale <0..1>` — đổi hệ số scale khung hình LÚC ĐANG CHẠY để giảm tải cho
@@ -7355,6 +7402,7 @@ int main(int argc, const char *argv[]) {
         installTerminationHandlers();
 
         tvStartControlSocketIfNeeded();
+        tvStartAutoUnlockWatchdog();
     }
 
     CFRunLoopRun();
