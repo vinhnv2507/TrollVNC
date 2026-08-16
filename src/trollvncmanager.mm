@@ -27,8 +27,10 @@
 #import <notify.h>
 #import <spawn.h>
 #import <stdlib.h>
+#import <string.h>
 #import <sys/proc_info.h>
 #import <sys/socket.h>
+#import <sys/time.h>
 #import <unistd.h>
 
 #import "Control.h"
@@ -42,6 +44,79 @@ BOOL tvncLoggingEnabled = YES;
 BOOL tvncVerboseLoggingEnabled = NO;
 
 static TRWatchDog *gWatchDog = nil;
+static dispatch_source_t gHealthTimer = nil;
+
+// Kết nối loopback và chờ banner RFB. Chỉ connect TCP là chưa đủ: daemon treo
+// vẫn có thể còn listen socket trong kernel. Banner chứng minh event loop VNC
+// đã accept và xử lý kết nối.
+static BOOL probeVNCService(uint16_t port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return NO;
+    struct timeval timeout;
+    timeout.tv_sec = 3;
+    timeout.tv_usec = 0;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    BOOL healthy = NO;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
+        char banner[12] = {};
+        ssize_t count = recv(fd, banner, sizeof(banner), MSG_WAITALL);
+        healthy = count == sizeof(banner) && memcmp(banner, "RFB ", 4) == 0;
+    }
+    close(fd);
+    return healthy;
+}
+
+static void startServerHealthMonitor(void) {
+    if (gHealthTimer)
+        return;
+    NSUserDefaults *prefs = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.trollvnc"];
+    id enabled = [prefs objectForKey:@"Enabled"];
+    if ([enabled isKindOfClass:[NSNumber class]] && ![enabled boolValue])
+        return;
+    NSString *reverseMode = [prefs objectForKey:@"ReverseMode"];
+    NSString *reverseSocket = [prefs objectForKey:@"ReverseSocket"];
+    if ([reverseMode isKindOfClass:[NSString class]] && reverseMode.length > 0 &&
+        [reverseSocket isKindOfClass:[NSString class]] && reverseSocket.length > 0)
+        return; // reverse/repeater mode intentionally has no local VNC listener
+    int port = [[prefs objectForKey:@"Port"] intValue];
+    if (port < 1024 || port > 65535)
+        port = 5901;
+
+    dispatch_queue_t queue = dispatch_queue_create(
+        "com.controlios.trollvnc.health", DISPATCH_QUEUE_SERIAL);
+    gHealthTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    // Cho server 30 giây khởi động; sau đó kiểm tra mỗi 30 giây.
+    dispatch_source_set_timer(gHealthTimer,
+                              dispatch_time(DISPATCH_TIME_NOW, 30ull * NSEC_PER_SEC),
+                              30ull * NSEC_PER_SEC, 2ull * NSEC_PER_SEC);
+    __block unsigned failures = 0;
+    dispatch_source_set_event_handler(gHealthTimer, ^{
+        if (probeVNCService((uint16_t)port)) {
+            failures = 0;
+            return;
+        }
+        failures++;
+        fprintf(stderr, "[health] VNC port %d failed %u/3\n", port, failures);
+        if (failures < 3)
+            return;
+        failures = 0;
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (gWatchDog && [gWatchDog isRunning]) {
+                fprintf(stderr, "[health] VNC unresponsive; restarting trollvncserver\n");
+                [gWatchDog restart];
+            }
+        });
+    });
+    dispatch_resume(gHealthTimer);
+}
 
 static void mSignalAction(int signal, struct __siginfo *info, void *context) {
     if (signal == SIGCHLD) {
@@ -291,6 +366,7 @@ int main(int argc, const char *argv[]) {
             fprintf(stderr, "Failed to start watchdog\n");
             return EXIT_FAILURE;
         }
+        startServerHealthMonitor();
     }
 
     {
@@ -325,6 +401,10 @@ int main(int argc, const char *argv[]) {
 
     CFRunLoopRun();
     @autoreleasepool {
+        if (gHealthTimer) {
+            dispatch_source_cancel(gHealthTimer);
+            gHealthTimer = nil;
+        }
         pid_t child = [gWatchDog processIdentifier];
         [gWatchDog stop];
         gWatchDog = nil;
