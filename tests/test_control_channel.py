@@ -74,6 +74,20 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((Path(folder) / "backup/Library/prefs.plist").read_bytes(),
                              b"plist")
 
+    async def test_download_snapshot_encodes_ios_names_invalid_on_windows(self) -> None:
+        import tempfile
+        root = "/var/mobile/controlios-snap/com.golike.app/badnames"
+        self.server.received[root + "/Library/cache:one?.db"] = b"data"
+        self.server.received[root + "/Documents/CON"] = b"reserved"
+        self.server.received[root + "/Documents/trailing."] = b"dot"
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "backup"
+            total = await self.channel.download_tree(root, target)
+            self.assertEqual(total, 15)
+            self.assertEqual((target / "Library/cache%3Aone%3F.db").read_bytes(), b"data")
+            self.assertEqual((target / "Documents/%43ON").read_bytes(), b"reserved")
+            self.assertEqual((target / "Documents/trailing%2E").read_bytes(), b"dot")
+
     async def test_get_color_none_when_unpatched(self) -> None:
         self.server.unpatched = True
         self.assertIsNone(await self.channel.get_color(0.5, 0.2))

@@ -25,6 +25,32 @@ DEFAULT_CONTROL_PORT = 46752
 
 log = logging.getLogger(__name__)
 
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{i}" for i in range(1, 10)),
+    *(f"LPT{i}" for i in range(1, 10)),
+}
+
+
+def _safe_pc_component(name: str) -> str:
+    """Mã hoá một tên iOS thành tên file hợp lệ, không va chạm trên Windows."""
+
+    encoded = []
+    last = len(name) - 1
+    for index, char in enumerate(name):
+        invalid = (ord(char) < 32 or char in '<>:"/\\|?*%' or
+                   (index == last and char in ". "))
+        if invalid:
+            encoded.extend(f"%{byte:02X}" for byte in char.encode("utf-8"))
+        else:
+            encoded.append(char)
+    result = "".join(encoded) or "%00"
+    stem = result.partition(".")[0].upper()
+    if stem in _WINDOWS_RESERVED_NAMES:
+        first = result[0].encode("utf-8")
+        result = "".join(f"%{byte:02X}" for byte in first) + result[1:]
+    return result
+
 
 class ControlError(RuntimeError):
     """Máy trả về lỗi, hoặc không nói chuyện được."""
@@ -389,7 +415,10 @@ class ControlChannel:
                         progress(received, size)
             return received
         except Exception:
-            local.unlink(missing_ok=True)
+            try:
+                local.unlink(missing_ok=True)
+            except OSError:
+                pass
             raise
         finally:
             writer.close()
@@ -408,7 +437,7 @@ class ControlChannel:
             if not name or name in (".", "..") or "/" in name or "\\" in name:
                 continue
             child_remote = remote.rstrip("/") + "/" + name
-            child_local = local / name
+            child_local = local / _safe_pc_component(name)
             if is_dir:
                 total += await self.download_tree(child_remote, child_local)
             else:
