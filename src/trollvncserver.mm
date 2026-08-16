@@ -88,6 +88,45 @@ static BOOL gLicenseValid = NO;
 static NSString *gLicenseToken = nil;  // "khoá có ích": token control lấy từ license
 static long long gLicenseExpiry = 0;   // epoch giây, 0 = vĩnh viễn
 
+// Giữ các assertion sống suốt vòng đời daemon. Chúng chỉ chặn idle
+// timeout; thao tác khóa thủ công bằng nút Power vẫn có hiệu lực.
+static uint32_t gDisplayIdleAssertion = 0;
+static uint32_t gSystemIdleAssertion = 0;
+
+static void tvPreventAutomaticLock(void) {
+    // Lớp UIKit là đường chuẩn trên iOS. Bọc try để daemon vẫn
+    // chạy trên bootstrap không tạo UIApplication.
+    @try {
+        [UIApplication sharedApplication].idleTimerDisabled = YES;
+    } @catch (NSException *exception) {
+        TVLog(@"Prevent auto-lock: UIKit idle timer unavailable: %@", exception.reason);
+    }
+
+    // Assertion IOKit giữ hiệu lực kể cả khi UI app không ở foreground.
+    typedef int (*CreateAssertionFn)(CFStringRef, uint32_t, CFStringRef, uint32_t *);
+    CreateAssertionFn createAssertion = (CreateAssertionFn)dlsym(
+        RTLD_DEFAULT, "IOPMAssertionCreateWithName");
+    if (!createAssertion) {
+        void *iokit = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_LAZY);
+        if (iokit)
+            createAssertion = (CreateAssertionFn)dlsym(iokit, "IOPMAssertionCreateWithName");
+    }
+    if (!createAssertion) {
+        TVLog(@"Prevent auto-lock: IOPMAssertionCreateWithName unavailable");
+        return;
+    }
+
+    const uint32_t on = 255; // kIOPMAssertionLevelOn
+    int displayResult = createAssertion(CFSTR("PreventUserIdleDisplaySleep"), on,
+                                        CFSTR("ControlIOS keep display awake"),
+                                        &gDisplayIdleAssertion);
+    int systemResult = createAssertion(CFSTR("PreventUserIdleSystemSleep"), on,
+                                       CFSTR("ControlIOS prevent automatic lock"),
+                                       &gSystemIdleAssertion);
+    TVLog(@"Prevent auto-lock enabled: display=%d(id=%u), system=%d(id=%u)",
+          displayResult, gDisplayIdleAssertion, systemResult, gSystemIdleAssertion);
+}
+
 // SPI để liệt kê/mở app. Dùng NSClassFromString khi gọi nên không phải link
 // thêm framework nào, và cũng không phải sửa Makefile.
 @interface LSApplicationProxy : NSObject
@@ -7296,6 +7335,7 @@ int main(int argc, const char *argv[]) {
         setupOrientationObserver();
 
         setupRfbLogging();
+        tvPreventAutomaticLock();
         setupRfbScreen(argc, argv);
         setupRfbEventHandlers();
         setupRfbClassicAuthentication();
