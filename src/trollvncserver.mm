@@ -4267,7 +4267,8 @@ static NSData *tvCtlWakeIfLocked(void) {
 
     [[STHIDEventGenerator sharedGenerator] menuPress];
     TVLog(@"Control socket: wakeiflocked -> Home (locked=%d blanked=%d)", locked, blanked);
-    return [@"OK home\n" dataUsingEncoding:NSUTF8StringEncoding];
+    return [(locked ? @"OK home locked\n" : @"OK home blanked\n")
+        dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 #pragma mark - Scale
