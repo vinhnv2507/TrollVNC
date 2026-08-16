@@ -129,7 +129,6 @@ class Bridge(QObject):
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
-    lock_checked = Signal(str, str)          # key, locked/blanked/unlocked
 
 
 class ScanWorker(QThread):
@@ -1316,7 +1315,6 @@ class MainWindow(QMainWindow):
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
-        self._online_keys: set[str] = set()
 
         self.bridge = Bridge()
         self.pool = DevicePool(
@@ -1434,7 +1432,6 @@ class MainWindow(QMainWindow):
         self.bridge.script_done.connect(self._on_script_done)
         self.bridge.apps_loaded.connect(self._apply_apps)
         self.bridge.bulk_done.connect(self._on_bulk_done)
-        self.bridge.lock_checked.connect(self._on_lock_checked)
         self.bridge.ssh_result.connect(self._on_ssh_result)
         self.bridge.ssh_done.connect(self._on_ssh_done)
         self.grid.tiers_changed.connect(self.pool.set_tiers)
@@ -1472,12 +1469,6 @@ class MainWindow(QMainWindow):
         self._stats_timer = QTimer(self)
         self._stats_timer.timeout.connect(self._refresh_stats)
         self._stats_timer.start(1000)
-
-        # Kiểm tra khóa màn hình định kỳ, không chỉ lúc vừa kết nối.
-        self._lock_timer = QTimer(self)
-        self._lock_timer.setInterval(30_000)
-        self._lock_timer.timeout.connect(self._tick_lock_watch)
-        self._lock_timer.start()
 
         # Vòng canh Keeper: chỉ chạy khi người dùng bật trong menu 🛡 Keeper.
         self._keeper_timer = QTimer(self)
@@ -1910,7 +1901,6 @@ class MainWindow(QMainWindow):
             device for device in self.registry.devices if device.key not in remove_keys]
         self.registry.save(self.registry_path)
         self._scale_initialized.difference_update(remove_keys)
-        self._online_keys.difference_update(remove_keys)
         self.page = min(self.page, self._pages() - 1)
         self._apply_page()
         self.statusBar().showMessage(f"Đã xoá {len(remove_keys)} máy khỏi danh sách", 5000)
@@ -3015,11 +3005,6 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)
-        if state is State.ONLINE and key not in self._online_keys:
-            self._online_keys.add(key)
-            self._check_lock(key)
-        elif state is not State.ONLINE:
-            self._online_keys.discard(key)
         if state is State.ONLINE and key not in self._scale_initialized:
             device = next((d for d in self.registry.devices if d.key == key), None)
             scale = (device.device_scale if device and device.device_scale is not None
@@ -3037,31 +3022,6 @@ class MainWindow(QMainWindow):
                 # không phải bấm đúp lại.
                 self._detail_aspect = -1.0
 
-    def _tick_lock_watch(self) -> None:
-        for key in tuple(self._online_keys):
-            self._check_lock(key)
-
-    def _check_lock(self, key: str) -> None:
-        self.pool.wake_if_locked(
-            key,
-            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-            on_result=lambda k, state: self.bridge.lock_checked.emit(k, state),
-        )
-
-    def _on_lock_checked(self, key: str, state: str) -> None:
-        if state == "unlocked":
-            return
-        # Home đã đánh thức màn hình. Hạ xuống hết nấc mỗi lần
-        # phát hiện khóa, phòng khi người dùng đã tăng sáng trước đó.
-        self.pool.media_key([key], "brightness_down", BRIGHTNESS_STEPS)
-        if state == "locked":
-            # Máy không đặt mật mã sẽ vào Home sau cử chỉ này. Nếu có
-            # mật mã, iOS vẫn dừng ở màn hình nhập mã (không thể vượt).
-            QTimer.singleShot(
-                900,
-                lambda k=key: self.pool.broadcast_swipe([k], (0.5, 0.82), (0.5, 0.20)),
-            )
-
     def _refresh_stats(self) -> None:
         stats = self.pool.stats()
         self.stats_label.setText(
@@ -3072,7 +3032,6 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._stats_timer.stop()
-        self._lock_timer.stop()
         self._auto_scan_timer.stop()
         if self._auto_scan_worker and self._auto_scan_worker.isRunning():
             self._auto_scan_worker.requestInterruption()
