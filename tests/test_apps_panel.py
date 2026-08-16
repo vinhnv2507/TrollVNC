@@ -169,6 +169,15 @@ class WindowIntegrationTest(unittest.TestCase):
     def test_panel_is_hidden_until_asked_for(self) -> None:
         self.assertFalse(self.window.apps_dock.isVisible())
 
+    def test_opening_apps_panel_automatically_loads_apps(self) -> None:
+        self.window.registry.settings.control_token = "token"
+        self.window.grid.selection = ["10.0.0.1:5901"]
+        called = []
+        self.window.pool.list_apps = lambda key, on_done: called.append(key)
+        self.window._on_apps_panel_toggled(True)
+        self.assertEqual(called, ["10.0.0.1:5901"])
+        self.assertTrue(self.window.apps_panel.user_only.isChecked())
+
     def test_reload_without_token_explains_instead_of_hanging(self) -> None:
         self.window.registry.settings.control_token = ""
         self.window.grid.select_all()

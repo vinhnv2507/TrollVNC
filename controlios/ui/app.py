@@ -1747,6 +1747,7 @@ class MainWindow(QMainWindow):
             "Danh sách app đã cài và các thao tác trên máy — cần TrollVNC đã vá "
             "và control_token trong cấu hình"
         )
+        self.apps_action.toggled.connect(self._on_apps_panel_toggled)
         bar.addAction(self.apps_action)
 
         ssh_action = QAction("SSH…", self)
@@ -2520,6 +2521,12 @@ class MainWindow(QMainWindow):
         self.start_script(steps, targets)
 
     # ------------------------------------------------------- bảng ứng dụng
+
+    def _on_apps_panel_toggled(self, visible: bool) -> None:
+        if visible:
+            # Checkbox "Chỉ app tự cài" bật mặc định, nên kết quả vừa tải sẽ
+            # hiển thị ngay đúng danh sách người dùng cần mà không bấm Nạp.
+            self._reload_apps()
 
     def _reload_apps(self) -> None:
         key = self.detail.key or (self.grid.selection[0] if self.grid.selection else None)
