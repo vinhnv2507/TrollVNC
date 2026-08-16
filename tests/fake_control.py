@@ -213,12 +213,6 @@ class FakeControlServer:
             self.running.add(bundle)
             return b"OK\n"
 
-        if cmd.startswith("traffic "):
-            bundle = cmd.split()[1]
-            if bundle not in self.running:
-                return b"ERR NotRunning\n"
-            return b"OK 4096 2048 8 1234\n"
-
         if cmd.startswith("container "):
             bundle = cmd[len("container "):].strip()
             if bundle not in self.apps:

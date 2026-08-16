@@ -1408,7 +1408,6 @@ class MainWindow(QMainWindow):
         self.apps_panel.launch_requested.connect(self._launch_app)
         self.apps_panel.terminate_requested.connect(self._terminate_app)
         self.apps_panel.restart_requested.connect(self._restart_app)
-        self.apps_panel.traffic_requested.connect(self._measure_app_traffic)
         self.apps_panel.wipe_requested.connect(self._wipe_app)
         self.apps_panel.snapshot_requested.connect(self._snapshot_app)
         self.apps_panel.backup_pc_requested.connect(self._backup_app_to_pc)
@@ -2591,19 +2590,6 @@ class MainWindow(QMainWindow):
             f"Đang đóng {bundle_id}, chờ 5 giây rồi mở lại trên {len(targets)} máy…")
         self.pool.restart_app(
             targets, bundle_id, delay=5.0,
-            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
-        )
-
-    def _measure_app_traffic(self, bundle_id: str) -> None:
-        targets = self.action_targets()
-        if not targets:
-            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
-            return
-        self.apps_panel.set_busy(
-            f"Đang đo lưu lượng {bundle_id} trong 8 giây trên {len(targets)} máy…")
-        self.pool.measure_app_traffic(
-            targets, bundle_id, seconds=8,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )

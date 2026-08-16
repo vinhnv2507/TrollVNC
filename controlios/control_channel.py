@@ -81,18 +81,6 @@ class AppInfo:
 
 
 @dataclass(frozen=True)
-class AppTraffic:
-    bytes_in: int
-    bytes_out: int
-    seconds: int
-    pid: int
-
-    @property
-    def bytes_per_second(self) -> float:
-        return (self.bytes_in + self.bytes_out) / max(1, self.seconds)
-
-
-@dataclass(frozen=True)
 class Snapshot:
     """Một bản snapshot dữ liệu app trên máy."""
 
@@ -219,29 +207,6 @@ class ControlChannel:
         if head.startswith("NOT_RUNNING"):
             return False
         raise ControlError(f"Không đóng được {bundle_id}: {head}")
-
-    async def measure_app_traffic(self, bundle_id: str, seconds: int = 8) -> AppTraffic:
-        """Do byte vao/ra rieng cua tien trinh app trong mot khoang ngan."""
-
-        seconds = max(2, min(int(seconds), 30))
-        try:
-            text = (await self.command(
-                f"traffic {bundle_id} {seconds}", read_timeout=seconds + 10)).strip()
-        except ControlError as exc:
-            text = str(exc)
-        if text.startswith("ERR NotRunning"):
-            raise ControlError(f"{bundle_id} chưa chạy")
-        if text.startswith("ERR NetTopUnavailable"):
-            raise ControlError("iOS này không có nettop để đo riêng theo app")
-        if text.startswith("ERR NetTopNoData"):
-            raise ControlError("nettop không trả dữ liệu cho tiến trình app")
-        fields = text.split()
-        if len(fields) != 5 or fields[0] != "OK":
-            raise ControlError(f"Không đo được lưu lượng: {text}")
-        try:
-            return AppTraffic(*(int(value) for value in fields[1:]))
-        except ValueError as exc:
-            raise ControlError(f"Phản hồi lưu lượng không hợp lệ: {text}") from exc
 
     async def wipe_app(self, bundle_id: str) -> None:
         """Xoá dữ liệu app (Documents/Library/tmp/SystemData) như vừa cài lại.
