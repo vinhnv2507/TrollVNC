@@ -97,6 +97,13 @@ class AppsPanelTest(unittest.TestCase):
         self.assertFalse(fired)
         self.assertIn("chọn một app", self.panel.status.text().lower())
 
+    def test_restart_signal_carries_selected_bundle(self) -> None:
+        fired = []
+        self.panel.restart_requested.connect(fired.append)
+        bundle = self.panel.list.item(0).data(Qt.UserRole)
+        self.panel.restart_requested.emit(bundle)
+        self.assertEqual(fired, [bundle])
+
     def test_each_item_carries_its_bundle_id_and_tooltip(self) -> None:
         item = self.panel.list.item(0)
         self.assertIn(".", item.data(Qt.UserRole))
@@ -215,6 +222,16 @@ class WindowIntegrationTest(unittest.TestCase):
         self.window.grid.select_all()
         self.window._terminate_app("com.golike.app")
         self.assertEqual(sent, ["com.golike.app"])
+
+    def test_restart_goes_to_selected_devices_with_five_second_delay(self) -> None:
+        sent = []
+        self.window.pool.restart_app = (
+            lambda keys, bundle, delay, **kw:
+            sent.append((list(keys), bundle, delay)))
+        self.window.grid.select_all()
+        self.window._restart_app("com.brd.earnapp")
+        self.assertEqual(len(sent[0][0]), 2)
+        self.assertEqual(sent[0][1:], ("com.brd.earnapp", 5.0))
 
     def test_launch_without_selection_is_refused(self) -> None:
         sent = []

@@ -66,6 +66,7 @@ def letter_icon(app: AppInfo) -> QIcon:
 class AppsPanel(QWidget):
     launch_requested = Signal(str)       # bundle id
     terminate_requested = Signal(str)
+    restart_requested = Signal(str)
     wipe_requested = Signal(str)         # xoá dữ liệu app (như cài lại)
     snapshot_requested = Signal(str)     # lưu snapshot dữ liệu app
     backup_pc_requested = Signal(str)    # tạo snapshot hàng loạt rồi tải về PC
@@ -263,6 +264,10 @@ class AppsPanel(QWidget):
         close_action = QAction(f"Đóng {item.text()}", menu)
         close_action.triggered.connect(lambda: self.terminate_requested.emit(bundle))
         menu.addAction(close_action)
+
+        restart_action = QAction(f"Khởi động lại {item.text()} (chờ 5 giây)", menu)
+        restart_action.triggered.connect(lambda: self.restart_requested.emit(bundle))
+        menu.addAction(restart_action)
 
         menu.addSeparator()
         # Reset dữ liệu app (chỉ đụng /var — chạy cả trên máy chỉ có TrollStore).

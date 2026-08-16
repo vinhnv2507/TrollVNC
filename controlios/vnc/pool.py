@@ -515,6 +515,19 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
+    def restart_app(self, keys: Iterable[str], bundle_id: str, delay: float = 5.0,
+                    on_event=None, on_done=None) -> None:
+        """Đóng app, chờ ``delay`` giây rồi mở lại trên từng máy."""
+
+        async def action(channel):
+            await channel.terminate(bundle_id)
+            await asyncio.sleep(max(0.0, delay))
+            await channel.launch(bundle_id)
+            return f"đã khởi động lại {bundle_id} sau {delay:g} giây"
+
+        self._bulk_app_action(
+            keys, f"Khởi động lại {bundle_id}", action, on_event, on_done)
+
     def wipe_app(self, keys: Iterable[str], bundle_id: str,
                  on_event=None, on_done=None) -> None:
         """Xoá dữ liệu app trên nhiều máy như vừa cài lại (giữ container).
