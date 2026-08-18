@@ -4310,6 +4310,101 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+#pragma mark - ControlIOSKeeper watchdog
+
+static const int kTvKeeperdPort = 46753;
+static NSString *const kTvKeeperBundleID = @"com.controlios.keeper";
+static dispatch_source_t gKeeperWatchTimer = NULL;
+static CFAbsoluteTime gKeeperLastLaunchAttempt = 0;
+
+static BOOL tvKeeperdRunning(void) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return NO;
+    struct timeval timeout = {1, 0};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+    struct sockaddr_in address;
+    memset(&address, 0, sizeof(address));
+    address.sin_family = AF_INET;
+    address.sin_port = htons((uint16_t)kTvKeeperdPort);
+    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    BOOL running = connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0;
+    close(fd);
+    return running;
+}
+
+static BOOL tvLaunchKeeperApp(void) {
+    if (tvKeeperdRunning())
+        return YES;
+    @synchronized(kTvKeeperBundleID) {
+        CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+        if (gKeeperLastLaunchAttempt > 0 && now - gKeeperLastLaunchAttempt < 60.0)
+            return YES; // một lần đánh thức đang chờ Keeper spawn daemon
+        gKeeperLastLaunchAttempt = now;
+
+        void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                              "SpringBoardServices", RTLD_LAZY);
+        if (!handle) {
+            TVLog(@"Keeper watchdog: SpringBoardServices unavailable");
+            return NO;
+        }
+        int result = -1;
+        int (*launchOptions)(CFStringRef, CFDictionaryRef, Boolean) =
+            (int (*)(CFStringRef, CFDictionaryRef, Boolean))dlsym(
+                handle, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
+        if (launchOptions)
+            result = launchOptions((__bridge CFStringRef)kTvKeeperBundleID, NULL, true);
+        if (result != 0) {
+            int (*launch)(CFStringRef, Boolean) =
+                (int (*)(CFStringRef, Boolean))dlsym(
+                    handle, "SBSLaunchApplicationWithIdentifier");
+            if (launch)
+                result = launch((__bridge CFStringRef)kTvKeeperBundleID, true);
+        }
+        TVLog(@"Keeper watchdog: keeperd missing, launch Keeper result=%d", result);
+        return result == 0;
+    }
+    return NO;
+}
+
+static NSData *tvCtlKeeper(NSString *argument) {
+    NSString *arg = [[argument stringByTrimmingCharactersInSet:
+        [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([arg isEqualToString:@"status"])
+        return [(tvKeeperdRunning() ? @"OK keeperd\n" : @"OK\n")
+            dataUsingEncoding:NSUTF8StringEncoding];
+    if ([arg isEqualToString:@"start"]) {
+        if (tvKeeperdRunning())
+            return [@"OK keeperd da chay san\n" dataUsingEncoding:NSUTF8StringEncoding];
+        BOOL launched = tvLaunchKeeperApp();
+        return [(launched ? @"OK launched Keeper\n" : @"ERR KeeperLaunchFailed\n")
+            dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    return [@"ERR Usage keeper status|start\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+static void tvStartKeeperWatchdog(void) {
+    if (gKeeperWatchTimer)
+        return;
+    dispatch_queue_t queue = dispatch_queue_create(
+        "com.controlios.server.keeper-watch", DISPATCH_QUEUE_SERIAL);
+    gKeeperWatchTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    dispatch_source_set_timer(
+        gKeeperWatchTimer,
+        dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
+        30 * NSEC_PER_SEC,
+        1 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(gKeeperWatchTimer, ^{
+        @autoreleasepool {
+            if (!tvKeeperdRunning())
+                (void)tvLaunchKeeperApp();
+        }
+    });
+    dispatch_resume(gKeeperWatchTimer);
+    TVLog(@"Keeper watchdog started (30s, port %d)", kTvKeeperdPort);
+}
+
 static dispatch_source_t gAutoUnlockTimer = NULL;
 
 static void tvAutoUnlockIfNeeded(void) {
@@ -6021,6 +6116,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlWakeIfLocked();
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
+    } else if ([cmd hasPrefix:@"keeper "]) {
+        resp = tvCtlKeeper([cmd substringFromIndex:7]);
     } else if ([cmd hasPrefix:@"setscale "]) {
         resp = tvCtlSetScale([cmd substringFromIndex:9]);
     } else if ([cmd hasPrefix:@"openurlin "]) {
@@ -7402,6 +7499,7 @@ int main(int argc, const char *argv[]) {
         installTerminationHandlers();
 
         tvStartControlSocketIfNeeded();
+        tvStartKeeperWatchdog();
         tvStartAutoUnlockWatchdog();
     }
 
