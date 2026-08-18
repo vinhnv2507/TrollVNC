@@ -61,6 +61,13 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.channel.wake_if_locked(), "locked")
         self.assertEqual(self.server.home_count, 1)
 
+    async def test_wifi_status_and_reset(self) -> None:
+        status = await self.channel.wifi_status()
+        self.assertIn("power=on", status)
+        self.assertIn("ip=172.30.2.51", status)
+        await self.channel.reset_wifi()
+        self.assertEqual(self.server.wifi_reset_count, 1)
+
     async def test_download_snapshot_tree_without_ssh(self) -> None:
         import tempfile
         root = "/var/mobile/controlios-snap/com.golike.app/backup"

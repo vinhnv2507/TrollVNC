@@ -552,6 +552,14 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def reset_wifi(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        async def action(channel):
+            status = await channel.wifi_status()
+            await channel.reset_wifi()
+            return f"đã gửi reset Wi-Fi 3 giây ({status})"
+
+        self._bulk_app_action(keys, "Reset Wi-Fi", action, on_event, on_done)
+
     def wipe_app(self, keys: Iterable[str], bundle_id: str,
                  on_event=None, on_done=None) -> None:
         """Xoá dữ liệu app trên nhiều máy như vừa cài lại (giữ container).
