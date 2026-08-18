@@ -4314,7 +4314,6 @@ static NSData *tvCtlWakeIfLocked(void) {
 
 static const int kTvKeeperdPort = 46753;
 static NSString *const kTvKeeperBundleID = @"com.controlios.keeper";
-static dispatch_source_t gKeeperWatchTimer = NULL;
 static CFAbsoluteTime gKeeperLastLaunchAttempt = 0;
 
 static BOOL tvKeeperdRunning(void) {
@@ -4384,25 +4383,16 @@ static NSData *tvCtlKeeper(NSString *argument) {
     return [@"ERR Usage keeper status|start\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-static void tvStartKeeperWatchdog(void) {
-    if (gKeeperWatchTimer)
-        return;
+static void tvEnsureKeeperAtStartup(void) {
     dispatch_queue_t queue = dispatch_queue_create(
-        "com.controlios.server.keeper-watch", DISPATCH_QUEUE_SERIAL);
-    gKeeperWatchTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    dispatch_source_set_timer(
-        gKeeperWatchTimer,
-        dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
-        30 * NSEC_PER_SEC,
-        1 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(gKeeperWatchTimer, ^{
+        "com.controlios.server.keeper-startup-check", DISPATCH_QUEUE_SERIAL);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), queue, ^{
         @autoreleasepool {
             if (!tvKeeperdRunning())
                 (void)tvLaunchKeeperApp();
         }
     });
-    dispatch_resume(gKeeperWatchTimer);
-    TVLog(@"Keeper watchdog started (30s, port %d)", kTvKeeperdPort);
+    TVLog(@"Keeper startup check scheduled (port %d)", kTvKeeperdPort);
 }
 
 static dispatch_source_t gAutoUnlockTimer = NULL;
@@ -7499,7 +7489,7 @@ int main(int argc, const char *argv[]) {
         installTerminationHandlers();
 
         tvStartControlSocketIfNeeded();
-        tvStartKeeperWatchdog();
+        tvEnsureKeeperAtStartup();
         tvStartAutoUnlockWatchdog();
     }
 

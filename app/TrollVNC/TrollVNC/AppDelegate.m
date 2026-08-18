@@ -105,11 +105,6 @@ static void TVScheduleKeeperCheck(NSTimeInterval delay) {
     [[TVNCHotspotManager sharedManager] registerWithName:@"ControlIOS"];
     // Để UIKit dựng xong màn hình trước; socket/SBS tuyệt đối không chặn main thread.
     TVScheduleKeeperCheck(2.0);
-    [NSTimer scheduledTimerWithTimeInterval:30.0
-                                     repeats:YES
-                                       block:^(__unused NSTimer *timer) {
-                                           TVScheduleKeeperCheck(0.0);
-                                       }];
 
 #ifdef THEBOOTSTRAP
     // Initialize Auto Updater
@@ -126,10 +121,6 @@ static void TVScheduleKeeperCheck(NSTimeInterval delay) {
 #endif
 
     return YES;
-}
-
-- (void)applicationDidBecomeActive:(UIApplication *)application {
-    TVScheduleKeeperCheck(1.0);
 }
 
 #pragma mark - UISceneSession lifecycle
