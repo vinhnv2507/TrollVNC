@@ -36,6 +36,7 @@
 #import <dlfcn.h>
 #import <errno.h>
 #import <fcntl.h>
+#import <ifaddrs.h>
 #import <mach-o/dyld.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
@@ -4310,6 +4311,85 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+#pragma mark - Wi-Fi private API (best effort)
+
+typedef const void *TVWiFiManagerRef;
+typedef TVWiFiManagerRef (*TVWiFiCreateFn)(CFAllocatorRef, int);
+typedef void (*TVWiFiSetPowerFn)(TVWiFiManagerRef, Boolean);
+typedef Boolean (*TVWiFiGetPowerFn)(TVWiFiManagerRef);
+
+static void *gMobileWiFiHandle = NULL;
+static TVWiFiManagerRef gWiFiManager = NULL;
+static TVWiFiSetPowerFn gWiFiSetPower = NULL;
+static TVWiFiGetPowerFn gWiFiGetPower = NULL;
+
+static BOOL tvLoadWiFiAPI(void) {
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        gMobileWiFiHandle = dlopen(
+            "/System/Library/PrivateFrameworks/MobileWiFi.framework/MobileWiFi",
+            RTLD_LAZY);
+        if (!gMobileWiFiHandle)
+            return;
+        TVWiFiCreateFn create = (TVWiFiCreateFn)dlsym(
+            gMobileWiFiHandle, "WiFiManagerClientCreate");
+        gWiFiSetPower = (TVWiFiSetPowerFn)dlsym(
+            gMobileWiFiHandle, "WiFiManagerClientSetPower");
+        gWiFiGetPower = (TVWiFiGetPowerFn)dlsym(
+            gMobileWiFiHandle, "WiFiManagerClientGetPower");
+        if (create && gWiFiSetPower)
+            gWiFiManager = create(kCFAllocatorDefault, 0);
+    });
+    return gWiFiManager != NULL && gWiFiSetPower != NULL;
+}
+
+static NSString *tvWiFiIPv4Address(void) {
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0)
+        return @"";
+    NSString *result = @"";
+    for (struct ifaddrs *item = interfaces; item; item = item->ifa_next) {
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_INET ||
+            strcmp(item->ifa_name, "en0") != 0)
+            continue;
+        char address[INET_ADDRSTRLEN] = {0};
+        struct sockaddr_in *sin = (struct sockaddr_in *)item->ifa_addr;
+        if (inet_ntop(AF_INET, &sin->sin_addr, address, sizeof(address)))
+            result = [NSString stringWithUTF8String:address] ?: @"";
+        break;
+    }
+    freeifaddrs(interfaces);
+    return result;
+}
+
+static NSData *tvCtlWiFi(NSString *argument) {
+    NSString *arg = [[argument stringByTrimmingCharactersInSet:
+        [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([arg isEqualToString:@"status"]) {
+        BOOL api = tvLoadWiFiAPI();
+        NSString *power = (api && gWiFiGetPower)
+            ? (gWiFiGetPower(gWiFiManager) ? @"on" : @"off") : @"unknown";
+        NSString *ip = tvWiFiIPv4Address();
+        return [[NSString stringWithFormat:@"OK power=%@ ip=%@ api=%@\n",
+                                          power, ip.length ? ip : @"none",
+                                          api ? @"yes" : @"no"]
+            dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    if ([arg isEqualToString:@"reset"]) {
+        if (!tvLoadWiFiAPI())
+            return [@"ERR WiFiAPIUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+        gWiFiSetPower(gWiFiManager, false);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            gWiFiSetPower(gWiFiManager, true);
+            TVLog(@"Wi-Fi private API: power restored ON");
+        });
+        TVLog(@"Wi-Fi private API: reset requested (OFF, ON after 3s)");
+        return [@"OK resetting wifi for 3s\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    return [@"ERR Usage wifi status|reset\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - ControlIOSKeeper watchdog
 
 static const int kTvKeeperdPort = 46753;
@@ -6108,6 +6188,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"keeper "]) {
         resp = tvCtlKeeper([cmd substringFromIndex:7]);
+    } else if ([cmd hasPrefix:@"wifi "]) {
+        resp = tvCtlWiFi([cmd substringFromIndex:5]);
     } else if ([cmd hasPrefix:@"setscale "]) {
         resp = tvCtlSetScale([cmd substringFromIndex:9]);
     } else if ([cmd hasPrefix:@"openurlin "]) {
