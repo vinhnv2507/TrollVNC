@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 import re
 import threading
 import time
@@ -517,18 +518,39 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
-    def restart_app(self, keys: Iterable[str], bundle_id: str, delay: float = 5.0,
+    def restart_app(self, keys: Iterable[str], bundle_id: str,
+                    min_delay: float = 3.0, max_delay: float = 5.0,
                     on_event=None, on_done=None) -> None:
-        """Đóng app, chờ ``delay`` giây rồi mở lại trên từng máy."""
+        """Đóng/chờ ngẫu nhiên/mở app tuần tự, tránh mở đồng loạt."""
 
-        async def action(channel):
-            await channel.terminate(bundle_id)
-            await asyncio.sleep(max(0.0, delay))
-            await channel.launch(bundle_id)
-            return f"đã khởi động lại {bundle_id} sau {delay:g} giây"
+        key_list = list(keys)
+        low, high = sorted((max(0.0, min_delay), max(0.0, max_delay)))
+        failures: List[tuple] = []
+        succeeded: List[str] = []
 
-        self._bulk_app_action(
-            keys, f"Khởi động lại {bundle_id}", action, on_event, on_done)
+        async def run() -> None:
+            for index, key in enumerate(key_list, 1):
+                delay = random.uniform(low, high)
+                try:
+                    channel = self._channel(key)
+                    await channel.terminate(bundle_id)
+                    if on_event:
+                        on_event(key, f"đã đóng {bundle_id}; chờ {delay:.1f} giây "
+                                      f"({index}/{len(key_list)})")
+                    await asyncio.sleep(delay)
+                    await channel.launch(bundle_id)
+                    succeeded.append(key)
+                    if on_event:
+                        on_event(key, f"đã khởi động lại {bundle_id} sau "
+                                      f"{delay:.1f} giây")
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+            if on_done:
+                on_done(f"Khởi động lại {bundle_id}", len(succeeded), failures)
+
+        self._call_coro(run())
 
     def wipe_app(self, keys: Iterable[str], bundle_id: str,
                  on_event=None, on_done=None) -> None:

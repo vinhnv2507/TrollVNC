@@ -2585,9 +2585,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
         self.apps_panel.set_busy(
-            f"Đang đóng {bundle_id}, chờ 5 giây rồi mở lại trên {len(targets)} máy…")
+            f"Đang khởi động lại {bundle_id} tuần tự trên {len(targets)} máy "
+            "(mỗi máy chờ ngẫu nhiên 3–5 giây)…")
         self.pool.restart_app(
-            targets, bundle_id, delay=5.0,
+            targets, bundle_id, min_delay=3.0, max_delay=5.0,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )

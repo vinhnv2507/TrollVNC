@@ -232,15 +232,15 @@ class WindowIntegrationTest(unittest.TestCase):
         self.window._terminate_app("com.golike.app")
         self.assertEqual(sent, ["com.golike.app"])
 
-    def test_restart_goes_to_selected_devices_with_five_second_delay(self) -> None:
+    def test_restart_goes_to_selected_devices_with_random_delay_range(self) -> None:
         sent = []
         self.window.pool.restart_app = (
-            lambda keys, bundle, delay, **kw:
-            sent.append((list(keys), bundle, delay)))
+            lambda keys, bundle, min_delay, max_delay, **kw:
+            sent.append((list(keys), bundle, min_delay, max_delay)))
         self.window.grid.select_all()
         self.window._restart_app("com.brd.earnapp")
         self.assertEqual(len(sent[0][0]), 2)
-        self.assertEqual(sent[0][1:], ("com.brd.earnapp", 5.0))
+        self.assertEqual(sent[0][1:], ("com.brd.earnapp", 3.0, 5.0))
 
     def test_launch_without_selection_is_refused(self) -> None:
         sent = []

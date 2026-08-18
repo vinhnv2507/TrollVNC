@@ -265,7 +265,8 @@ class AppsPanel(QWidget):
         close_action.triggered.connect(lambda: self.terminate_requested.emit(bundle))
         menu.addAction(close_action)
 
-        restart_action = QAction(f"Khởi động lại {item.text()} (chờ 5 giây)", menu)
+        restart_action = QAction(
+            f"Khởi động lại {item.text()} (ngẫu nhiên 3–5 giây)", menu)
         restart_action.triggered.connect(lambda: self.restart_requested.emit(bundle))
         menu.addAction(restart_action)
 
