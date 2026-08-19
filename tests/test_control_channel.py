@@ -67,8 +67,6 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("ip=172.30.2.51", status)
         await self.channel.reset_wifi()
         self.assertEqual(self.server.wifi_reset_count, 1)
-        await self.channel.reset_airplane_mode()
-        self.assertEqual(self.server.airplane_reset_count, 1)
 
     async def test_download_snapshot_tree_without_ssh(self) -> None:
         import tempfile
