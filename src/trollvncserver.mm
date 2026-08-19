@@ -5311,6 +5311,29 @@ static BOOL tvFindText(NSString *needle, double rx1, double ry1, double rx2, dou
     return found;
 }
 
+static NSData *tvCtlFindText(NSString *encoded) {
+    NSData *raw = [[NSData alloc] initWithBase64EncodedString:encoded options:0];
+    NSString *needle = raw ? [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] : nil;
+    if (needle.length == 0)
+        return [@"ERR BadText\n" dataUsingEncoding:NSUTF8StringEncoding];
+    double x = 0, y = 0;
+    BOOL found = tvFindText(needle, 0, 0, 1, 1, &x, &y);
+    NSString *reply = found ? [NSString stringWithFormat:@"OK found %.4f %.4f\n", x, y]
+                            : @"OK notfound\n";
+    return [reply dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+static NSData *tvCtlTypeText(NSString *encoded) {
+    NSData *raw = [[NSData alloc] initWithBase64EncodedString:encoded options:0];
+    NSString *value = raw ? [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] : nil;
+    if (!value)
+        return [@"ERR BadText\n" dataUsingEncoding:NSUTF8StringEncoding];
+    STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
+    for (NSUInteger i = 0; i < value.length; i++)
+        [gen keyPress:[value substringWithRange:NSMakeRange(i, 1)]];
+    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 // ---- Biến BỀN qua các lần chạy (lưu JSON /var/mobile/Library/controlios) ----
 static NSMutableDictionary *gVars = nil;
 static NSString *tvVarsPath(void) { return @"/var/mobile/Library/controlios/vars.json"; }
@@ -6187,6 +6210,10 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlKeeper([cmd substringFromIndex:7]);
     } else if ([cmd hasPrefix:@"setscale "]) {
         resp = tvCtlSetScale([cmd substringFromIndex:9]);
+    } else if ([cmd hasPrefix:@"findtext64 "]) {
+        resp = tvCtlFindText([cmd substringFromIndex:11]);
+    } else if ([cmd hasPrefix:@"typetext64 "]) {
+        resp = tvCtlTypeText([cmd substringFromIndex:11]);
     } else if ([cmd hasPrefix:@"openurlin "]) {
         NSString *rest = [cmd substringFromIndex:10];
         NSRange space = [rest rangeOfString:@" "];
