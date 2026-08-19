@@ -4387,6 +4387,32 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+// Mở Control Center bằng cử chỉ bắt đầu NGOÀI mép vật lý. Kịch bản swipe thông
+// thường bị clamp vào pixel cuối nên SpringBoard chỉ coi là vuốt trong app.
+static NSData *tvCtlControlCenter(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        CGSize size = [UIScreen mainScreen].nativeBounds.size;
+        CGFloat width = size.width, height = size.height;
+        if (width <= 0 || height <= 0)
+            return;
+        BOOL faceIDLayout = MAX(width, height) / MIN(width, height) >= 2.0;
+        CGPoint start, end;
+        if (faceIDLayout) {
+            // iPhone Face ID: kéo từ ngoài góc trên-phải xuống.
+            start = CGPointMake(width * 0.94, -MAX(8.0, height * 0.012));
+            end = CGPointMake(width * 0.94, height * 0.42);
+        } else {
+            // iPhone 6s/7/8/SE: kéo từ ngoài mép dưới lên.
+            start = CGPointMake(width * 0.50, height + MAX(8.0, height * 0.012));
+            end = CGPointMake(width * 0.50, height * 0.42);
+        }
+        [[STHIDEventGenerator sharedGenerator]
+            dragLinearWithStartPoint:start endPoint:end duration:0.45];
+    });
+    TVLog(@"Control socket: controlcenter -> edge HID gesture");
+    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - ControlIOSKeeper watchdog
 
 static const int kTvKeeperdPort = 46753;
@@ -6204,6 +6230,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlShutdown();
     } else if ([cmd isEqualToString:@"wakeiflocked"]) {
         resp = tvCtlWakeIfLocked();
+    } else if ([cmd isEqualToString:@"controlcenter"]) {
+        resp = tvCtlControlCenter();
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"keeper "]) {
