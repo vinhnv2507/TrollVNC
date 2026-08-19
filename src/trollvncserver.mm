@@ -4387,10 +4387,8 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-// Mở Control Center bằng sender HID hệ thống, bắt đầu tại pixel sát mép và giữ
-// ngắn trước khi kéo để SpringBoard có thời gian nhận edge gesture.
-// Prefer the Accessibility/SpringBoard route used by AssistiveTouch. It is not
-// dependent on an edge gesture being accepted from the synthetic HID stream.
+// Open Control Center through the Accessibility/SpringBoard route used by
+// AssistiveTouch. This is independent of synthetic edge gestures.
 static BOOL tvOpenControlCenterThroughAccessibility(void) {
     void *handle = dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities",
                           RTLD_LAZY | RTLD_LOCAL);
@@ -4406,48 +4404,28 @@ static BOOL tvOpenControlCenterThroughAccessibility(void) {
     if (!server)
         return NO;
 
-    NSArray<NSString *> *selectors = @[
-        @"showControlCenter",
-        @"openControlCenter",
-        @"presentControlCenter",
-        @"toggleControlCenter"
-    ];
-    for (NSString *name in selectors) {
-        SEL selector = NSSelectorFromString(name);
-        if ([server respondsToSelector:selector]) {
-            ((void (*)(id, SEL))objc_msgSend)(server, selector);
-            TVLog(@"Control socket: controlcenter -> AXSpringBoardServer %@", name);
-            return YES;
-        }
-    }
-    return NO;
+    SEL showSelector = NSSelectorFromString(@"showControlCenter:");
+    if (![server respondsToSelector:showSelector])
+        return NO;
+
+    BOOL opened = ((BOOL (*)(id, SEL, BOOL))objc_msgSend)(server, showSelector, YES);
+    TVLog(@"Control socket: controlcenter -> AXSpringBoardServer showControlCenter:YES (%d)",
+          opened);
+    return opened;
 }
 
 static NSData *tvCtlControlCenter(void) {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        if (tvOpenControlCenterThroughAccessibility())
-            return;
+    __block BOOL opened = NO;
+    void (^action)(void) = ^{
+        opened = tvOpenControlCenterThroughAccessibility();
+    };
+    if ([NSThread isMainThread])
+        action();
+    else
+        dispatch_sync(dispatch_get_main_queue(), action);
 
-        CGSize size = [UIScreen mainScreen].nativeBounds.size;
-        CGFloat width = size.width, height = size.height;
-        if (width <= 0 || height <= 0)
-            return;
-        BOOL faceIDLayout = MAX(width, height) / MIN(width, height) >= 2.0;
-        CGPoint start, end;
-        if (faceIDLayout) {
-            // iPhone Face ID: kéo từ pixel đầu ở góc trên-phải xuống.
-            start = CGPointMake(width * 0.94, 1.0);
-            end = CGPointMake(width * 0.94, height * 0.42);
-        } else {
-            // iPhone 6s/7/8/SE: kéo từ pixel cuối ở mép dưới lên.
-            start = CGPointMake(width * 0.50, height - 1.0);
-            end = CGPointMake(width * 0.50, height * 0.42);
-        }
-        [[STHIDEventGenerator sharedGenerator]
-            dragLinearWithStartPoint:start endPoint:end duration:0.45 edgeDelay:0.08];
-        TVLog(@"Control socket: controlcenter -> edge HID fallback");
-    });
-    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+    return [(opened ? @"OK\n" : @"ERR ControlCenterUnavailable\n")
+        dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 #pragma mark - ControlIOSKeeper watchdog
