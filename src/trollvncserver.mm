@@ -36,6 +36,7 @@
 #import <dlfcn.h>
 #import <errno.h>
 #import <fcntl.h>
+#import <ifaddrs.h>
 #import <mach-o/dyld.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
@@ -4268,6 +4269,82 @@ static NSData *tvCtlReboot(void) {
     return [@"OK rebooting\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+#pragma mark - Wi-Fi IP loss watchdog
+
+static dispatch_source_t gWiFiIPWatchTimer = NULL;
+static BOOL gWiFiHadIPv4 = NO;
+static BOOL gWiFiRebootRequested = NO;
+static int gWiFiMissingChecks = 0;
+
+static NSString *tvCurrentWiFiIPv4(void) {
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0)
+        return @"";
+    NSString *result = @"";
+    for (struct ifaddrs *item = interfaces; item; item = item->ifa_next) {
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_INET ||
+            strcmp(item->ifa_name, "en0") != 0)
+            continue;
+        struct sockaddr_in *sin = (struct sockaddr_in *)item->ifa_addr;
+        uint32_t hostAddress = ntohl(sin->sin_addr.s_addr);
+        // Không coi loopback, 0.0.0.0 hay link-local 169.254/16 là IP Wi-Fi đã sẵn sàng.
+        if (hostAddress == 0 || (hostAddress >> 24) == 127 ||
+            (hostAddress & 0xFFFF0000U) == 0xA9FE0000U)
+            continue;
+        char address[INET_ADDRSTRLEN] = {0};
+        if (inet_ntop(AF_INET, &sin->sin_addr, address, sizeof(address)))
+            result = [NSString stringWithUTF8String:address] ?: @"";
+        break;
+    }
+    freeifaddrs(interfaces);
+    return result;
+}
+
+static void tvCheckWiFiIP(void) {
+    NSString *ip = tvCurrentWiFiIPv4();
+    if (ip.length > 0) {
+        if (!gWiFiHadIPv4)
+            TVLog(@"Wi-Fi IP watchdog armed after receiving %@", ip);
+        else if (gWiFiMissingChecks > 0)
+            TVLog(@"Wi-Fi IP restored: %@", ip);
+        gWiFiHadIPv4 = YES;
+        gWiFiMissingChecks = 0;
+        return;
+    }
+
+    // Quan trọng: trước khi máy từng có IP, không reboot dù chờ bao lâu.
+    if (!gWiFiHadIPv4 || gWiFiRebootRequested)
+        return;
+    ++gWiFiMissingChecks;
+    TVLog(@"Wi-Fi IP missing after previously online (%d/3)", gWiFiMissingChecks);
+    if (gWiFiMissingChecks < 3)
+        return;
+
+    gWiFiRebootRequested = YES;
+    NSData *response = tvCtlReboot();
+    NSString *message = [[NSString alloc] initWithData:response
+                                              encoding:NSUTF8StringEncoding] ?: @"";
+    TVLog(@"Wi-Fi IP missing for 30s -> reboot: %@", message);
+}
+
+static void tvStartWiFiIPWatchdog(void) {
+    if (gWiFiIPWatchTimer)
+        return;
+    dispatch_queue_t queue = dispatch_queue_create(
+        "com.controlios.server.wifi-ip-watch", DISPATCH_QUEUE_SERIAL);
+    gWiFiIPWatchTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    dispatch_source_set_timer(
+        gWiFiIPWatchTimer,
+        dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+        10 * NSEC_PER_SEC,
+        1 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(gWiFiIPWatchTimer, ^{
+        @autoreleasepool { tvCheckWiFiIP(); }
+    });
+    dispatch_resume(gWiFiIPWatchTimer);
+    TVLog(@"Wi-Fi IP watchdog started (reboot only after IP was acquired, 30s loss)");
+}
+
 static NSData *tvCtlShutdown(void) {
     dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/"
            "FrontBoardServices", RTLD_LAZY);
@@ -7491,6 +7568,7 @@ int main(int argc, const char *argv[]) {
         tvStartControlSocketIfNeeded();
         tvEnsureKeeperAtStartup();
         tvStartAutoUnlockWatchdog();
+        tvStartWiFiIPWatchdog();
     }
 
     CFRunLoopRun();
