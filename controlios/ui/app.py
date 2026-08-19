@@ -986,8 +986,9 @@ class ScreenTextMonitorDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            'ControlIOS OCR trực tiếp framebuffer của mọi máy. Nếu thấy chữ '
-            '"Not connected" thì đóng, chờ 3–5 giây và mở lại com.brd.earnapp.'
+            'ControlIOS OCR trực tiếp framebuffer. Nếu thấy "Not connected" hoặc '
+            '"Connecting", hệ thống chờ 10 giây và kiểm tra lại; chỉ khi trạng thái '
+            'vẫn còn mới khởi động lại com.brd.earnapp.'
         ))
         row = QHBoxLayout()
         row.addWidget(QLabel("Phạm vi:"))
@@ -1084,7 +1085,8 @@ class ScreenTextMonitorDialog(QDialog):
         self.log.appendPlainText(f"[{stamp}] Bắt đầu kiểm tra {len(keys)} máy")
 
         self.window.pool.monitor_text_and_restart(
-            keys, "Not connected", "com.brd.earnapp", self.concurrency.value(),
+            keys, ("Not connected", "Connecting"), "com.brd.earnapp",
+            self.concurrency.value(),
             on_event=self.window.bridge.monitor_event.emit,
             on_done=self.window.bridge.monitor_done.emit)
 
@@ -1899,7 +1901,7 @@ class MainWindow(QMainWindow):
         script_menu.addSeparator()
         monitor = script_menu.addAction("Canh EarnApp…")
         monitor.setToolTip(
-            'OCR mọi máy theo chu kỳ; thấy "Not connected" thì mở lại EarnApp')
+            'OCR hai lần; nếu vẫn "Not connected"/"Connecting" thì mở lại EarnApp')
         monitor.triggered.connect(self._open_screen_monitor)
         script_button.setMenu(script_menu)
         bar.addWidget(script_button)

@@ -568,11 +568,12 @@ class DevicePool:
         self._bulk_app_action(keys, f"Xoá dữ liệu {bundle_id}", action,
                               on_event, on_done)
 
-    def monitor_text_and_restart(self, keys: Iterable[str], needle: str, bundle_id: str,
+    def monitor_text_and_restart(self, keys: Iterable[str], needles: Sequence[str], bundle_id: str,
                                  concurrency: int = 5, on_event=None,
                                  on_done=None) -> None:
-        """OCR một lượt theo lô; chỉ restart app trên máy thấy ``needle``."""
+        """OCR hai lần cách 10 giây; chỉ restart khi trạng thái lỗi còn tồn tại."""
         key_list = list(keys)
+        watched_texts = tuple(needles)
 
         async def run() -> None:
             semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -590,11 +591,28 @@ class DevicePool:
                         # máy đang nằm ngoài viewport và đã tạm ngắt stream.
                         await session.request_capture()
                         channel = self._channel(key)
-                        if not await channel.find_text(needle):
+
+                        async def detect_state() -> Optional[str]:
+                            for text in watched_texts:
+                                if await channel.find_text(text):
+                                    return text
+                            return None
+
+                        first_state = await detect_state()
+                        if first_state is None:
+                            return
+                        if on_event:
+                            on_event(key, f'thấy "{first_state}"; chờ 10 giây để xác nhận lại')
+                        await asyncio.sleep(10.0)
+                        await session.request_capture()
+                        second_state = await detect_state()
+                        if second_state is None:
+                            if on_event:
+                                on_event(key, "đã kết nối lại; không khởi động lại EarnApp")
                             return
                         found += 1
                         if on_event:
-                            on_event(key, f'thấy "{needle}"; đang khởi động lại {bundle_id}')
+                            on_event(key, f'vẫn thấy "{second_state}"; đang khởi động lại {bundle_id}')
                         await channel.terminate(bundle_id)
                         await asyncio.sleep(random.uniform(3.0, 5.0))
                         await channel.launch(bundle_id)
