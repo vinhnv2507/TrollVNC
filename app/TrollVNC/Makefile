@@ -1,7 +1,7 @@
 ARCHS := arm64
 TARGET := iphone:clang:latest:14.0
 
-INSTALL_TARGET_PROCESSES += TrollVNC
+INSTALL_TARGET_PROCESSES += ControlIOS
 
 include $(THEOS)/makefiles/common.mk
 

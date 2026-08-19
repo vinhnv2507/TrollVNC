@@ -738,7 +738,7 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
 
     if (self.apps.count == 0) {
         cell.textLabel.text = @"Không lấy được danh sách app";
-        cell.detailTextLabel.text = @"Kéo xuống để thử lại — cần TrollVNC đã vá";
+        cell.detailTextLabel.text = @"Kéo xuống để thử lại — cần ControlIOS bản mới";
         cell.textLabel.textColor = [UIColor secondaryLabelColor];
         cell.selectionStyle = UITableViewCellSelectionStyleNone;
         cell.accessoryType = UITableViewCellAccessoryNone;

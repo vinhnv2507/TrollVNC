@@ -54,12 +54,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		61535F572E6590A100643E64 /* TrollVNC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TrollVNC.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		61535F572E6590A100643E64 /* ControlIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ControlIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		615360A82E65BEFD00643E64 /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		615360AC2E65BF0000643E64 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Main.strings; sourceTree = "<group>"; };
 		615360AE2E65BF0000643E64 /* zh-Hans */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "zh-Hans"; path = "zh-Hans.lproj/Main.strings"; sourceTree = "<group>"; };
 		615401AC2EB117FC009FDD6F /* Preferences.Sim.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; path = Preferences.Sim.tbd; sourceTree = "<group>"; };
-		615401CA2EB1180C009FDD6F /* TrollVNC.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TrollVNC.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		615401CA2EB1180C009FDD6F /* ControlIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ControlIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		615EFE9E2F1602D700187EAF /* CoreServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreServices.framework; path = System/Library/Frameworks/CoreServices.framework; sourceTree = SDKROOT; };
 		61B0DD062EB13BEF004CC42B /* TVNCSliderCell.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TVNCSliderCell.h; sourceTree = "<group>"; };
 		61B0DD072EB13BEF004CC42B /* TVNCSliderCell.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TVNCSliderCell.m; sourceTree = "<group>"; };
@@ -139,8 +139,8 @@
 		61535F582E6590A100643E64 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				61535F572E6590A100643E64 /* TrollVNC.app */,
-				615401CA2EB1180C009FDD6F /* TrollVNC.app */,
+				61535F572E6590A100643E64 /* ControlIOS.app */,
+				615401CA2EB1180C009FDD6F /* ControlIOS.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -235,8 +235,8 @@
 			name = TrollVNC;
 			packageProductDependencies = (
 			);
-			productName = TrollVNC;
-			productReference = 61535F572E6590A100643E64 /* TrollVNC.app */;
+			productName = ControlIOS;
+			productReference = 61535F572E6590A100643E64 /* ControlIOS.app */;
 			productType = "com.apple.product-type.application";
 		};
 		615401AE2EB1180C009FDD6F /* TrollVNC.Sim */ = {
@@ -255,8 +255,8 @@
 			name = TrollVNC.Sim;
 			packageProductDependencies = (
 			);
-			productName = TrollVNC;
-			productReference = 615401CA2EB1180C009FDD6F /* TrollVNC.app */;
+			productName = ControlIOS;
+			productReference = 615401CA2EB1180C009FDD6F /* ControlIOS.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -354,7 +354,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/zsh;
-			shellScript = "PATH=\"/opt/homebrew/bin:$THEOS/bin:$PATH\"\nPROJECT_BASE=\"$PROJECT_DIR/../..\"\nPACKAGE_VERSION=$(grep 'PACKAGE_VERSION' \"$PROJECT_BASE/Makefile\" | cut -d' ' -f4)\nTHEOS_STAGING_DIR=\"$PROJECT_BASE/.theos/_\"\nPRODUCT_DIR=\"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME\"\n\n# Set version information\nGIT_COMMIT_COUNT=$(git rev-list --count HEAD)\n/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $GIT_COMMIT_COUNT\" \"$PRODUCT_DIR/Info.plist\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $PACKAGE_VERSION\" \"$PRODUCT_DIR/Info.plist\"\n\n# Collect executables\n# cp -rp \"$THEOS_STAGING_DIR/usr/bin/trollvncserver\" \"$PRODUCT_DIR\"\n# cp -rp \"$THEOS_STAGING_DIR/usr/bin/trollvncmanager\" \"$PRODUCT_DIR\"\n\n# Collect bundle resources\ncp -rp \"$THEOS_STAGING_DIR/Applications/TrollVNC.app/TrollVNCPrefs.bundle\" \"$PRODUCT_DIR\"\nrm -f \"$PRODUCT_DIR/TrollVNCPrefs.bundle/TrollVNCPrefs\"\ncp -rp \"$THEOS_STAGING_DIR/Applications/TrollVNC.app/webclients\" \"$PRODUCT_DIR\"\n";
+			shellScript = "PATH=\"/opt/homebrew/bin:$THEOS/bin:$PATH\"\nPROJECT_BASE=\"$PROJECT_DIR/../..\"\nPACKAGE_VERSION=$(grep 'PACKAGE_VERSION' \"$PROJECT_BASE/Makefile\" | cut -d' ' -f4)\nTHEOS_STAGING_DIR=\"$PROJECT_BASE/.theos/_\"\nPRODUCT_DIR=\"$BUILT_PRODUCTS_DIR/$FULL_PRODUCT_NAME\"\n\n# Set version information\nGIT_COMMIT_COUNT=$(git rev-list --count HEAD)\n/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $GIT_COMMIT_COUNT\" \"$PRODUCT_DIR/Info.plist\"\n/usr/libexec/PlistBuddy -c \"Set :CFBundleShortVersionString $PACKAGE_VERSION\" \"$PRODUCT_DIR/Info.plist\"\n\n# Collect executables\n# cp -rp \"$THEOS_STAGING_DIR/usr/bin/trollvncserver\" \"$PRODUCT_DIR\"\n# cp -rp \"$THEOS_STAGING_DIR/usr/bin/trollvncmanager\" \"$PRODUCT_DIR\"\n\n# Collect bundle resources\ncp -rp \"$THEOS_STAGING_DIR/Applications/ControlIOS.app/TrollVNCPrefs.bundle\" \"$PRODUCT_DIR\"\nrm -f \"$PRODUCT_DIR/TrollVNCPrefs.bundle/TrollVNCPrefs\"\ncp -rp \"$THEOS_STAGING_DIR/Applications/ControlIOS.app/webclients\" \"$PRODUCT_DIR\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -469,7 +469,8 @@
 				);
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
-				PRODUCT_NAME = TrollVNC;
+				PRODUCT_MODULE_NAME = TrollVNC;
+				PRODUCT_NAME = ControlIOS;
 				SUPPORTED_PLATFORMS = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -522,7 +523,8 @@
 				);
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
-				PRODUCT_NAME = TrollVNC;
+				PRODUCT_MODULE_NAME = TrollVNC;
+				PRODUCT_NAME = ControlIOS;
 				SUPPORTED_PLATFORMS = iphoneos;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -697,7 +699,8 @@
 				);
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
-				PRODUCT_NAME = TrollVNC;
+				PRODUCT_MODULE_NAME = TrollVNC;
+				PRODUCT_NAME = ControlIOS;
 				SUPPORTED_PLATFORMS = iphonesimulator;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
@@ -750,7 +753,8 @@
 				);
 				MARKETING_VERSION = 1.1;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
-				PRODUCT_NAME = TrollVNC;
+				PRODUCT_MODULE_NAME = TrollVNC;
+				PRODUCT_NAME = ControlIOS;
 				SUPPORTED_PLATFORMS = iphonesimulator;
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;

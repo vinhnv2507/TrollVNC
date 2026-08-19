@@ -1,4 +1,4 @@
-name: Build TrollVNC
+name: Build ControlIOS
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
         type: string
         description: Desktop name shown to clients
         required: false
-        default: TrollVNC
+        default: ControlIOS
       port:
         type: string
         description: VNC TCP port (1024–65535; default 5901)

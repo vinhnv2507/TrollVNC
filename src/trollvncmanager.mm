@@ -296,7 +296,7 @@ int main(int argc, const char *argv[]) {
 
         gWatchDog = [[TRWatchDog alloc] init];
 
-        [gWatchDog setLabel:@"TrollVNC-Server"];
+        [gWatchDog setLabel:@"ControlIOS-Server"];
         [gWatchDog setProgramArguments:@[
             executablePath,
             @"-daemon",
