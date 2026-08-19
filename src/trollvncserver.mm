@@ -4428,6 +4428,49 @@ static NSData *tvCtlControlCenter(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSData *tvCtlRotationLock(NSString *requestedState) {
+    NSString *state = [[requestedState
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]
+        lowercaseString];
+    if (![state isEqualToString:@"on"] && ![state isEqualToString:@"off"] &&
+        ![state isEqualToString:@"toggle"] && ![state isEqualToString:@"status"])
+        return [@"ERR Usage rotationlock on|off|toggle|status\n"
+            dataUsingEncoding:NSUTF8StringEncoding];
+
+    void *handle = dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities",
+                          RTLD_LAZY | RTLD_LOCAL);
+    Class serverClass = handle ? NSClassFromString(@"AXSpringBoardServer") : Nil;
+    SEL serverSelector = NSSelectorFromString(@"server");
+    if (!serverClass || ![serverClass respondsToSelector:serverSelector])
+        return [@"ERR RotationLockUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    id server = ((id (*)(id, SEL))objc_msgSend)((id)serverClass, serverSelector);
+    SEL getSelector = NSSelectorFromString(@"isOrientationLocked");
+    SEL setSelector = NSSelectorFromString(@"setOrientationLocked:");
+    if (!server || ![server respondsToSelector:getSelector] ||
+        ![server respondsToSelector:setSelector])
+        return [@"ERR RotationLockUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    __block BOOL locked = NO;
+    void (^action)(void) = ^{
+        locked = ((BOOL (*)(id, SEL))objc_msgSend)(server, getSelector);
+        if (![state isEqualToString:@"status"]) {
+            BOOL desired = [state isEqualToString:@"toggle"] ? !locked :
+                           [state isEqualToString:@"on"];
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(server, setSelector, desired);
+            locked = desired;
+        }
+    };
+    if ([NSThread isMainThread])
+        action();
+    else
+        dispatch_sync(dispatch_get_main_queue(), action);
+
+    TVLog(@"Control socket: rotationlock %@ -> %@", state, locked ? @"on" : @"off");
+    return [[NSString stringWithFormat:@"OK %@\n", locked ? @"on" : @"off"]
+        dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - ControlIOSKeeper watchdog
 
 static const int kTvKeeperdPort = 46753;
@@ -6247,6 +6290,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlWakeIfLocked();
     } else if ([cmd isEqualToString:@"controlcenter"]) {
         resp = tvCtlControlCenter();
+    } else if ([cmd hasPrefix:@"rotationlock "]) {
+        resp = tvCtlRotationLock([cmd substringFromIndex:13]);
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"keeper "]) {
