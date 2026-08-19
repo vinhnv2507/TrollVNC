@@ -4387,7 +4387,26 @@ static NSData *tvCtlWiFi(NSString *argument) {
         TVLog(@"Wi-Fi private API: reset requested (OFF, ON after 3s)");
         return [@"OK resetting wifi for 3s\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
-    return [@"ERR Usage wifi status|reset\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if ([arg isEqualToString:@"airplane-reset"]) {
+        dlopen("/System/Library/PrivateFrameworks/AppSupport.framework/AppSupport",
+               RTLD_LAZY);
+        Class radiosClass = NSClassFromString(@"RadiosPreferences");
+        SEL setter = NSSelectorFromString(@"setAirplaneMode:");
+        id radios = radiosClass ? [[radiosClass alloc] init] : nil;
+        if (!radios || ![radios respondsToSelector:setter])
+            return [@"ERR AirplaneAPIUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+        ((void (*)(id, SEL, BOOL))objc_msgSend)(radios, setter, YES);
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
+                       dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            ((void (*)(id, SEL, BOOL))objc_msgSend)(radios, setter, NO);
+            TVLog(@"Airplane private API: restored OFF");
+        });
+        TVLog(@"Airplane private API: reset requested (ON, OFF after 3s)");
+        return [@"OK resetting airplane mode for 3s\n"
+            dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    return [@"ERR Usage wifi status|reset|airplane-reset\n"
+        dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 #pragma mark - ControlIOSKeeper watchdog
