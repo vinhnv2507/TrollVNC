@@ -4471,6 +4471,51 @@ static NSData *tvCtlRotationLock(NSString *requestedState) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSData *tvCtlFrontmostApp(void) {
+    void *handle = dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities",
+                          RTLD_LAZY | RTLD_LOCAL);
+    Class serverClass = handle ? NSClassFromString(@"AXSpringBoardServer") : Nil;
+    SEL serverSelector = NSSelectorFromString(@"server");
+    if (!serverClass || ![serverClass respondsToSelector:serverSelector])
+        return [@"ERR FrontmostUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    id server = ((id (*)(id, SEL))objc_msgSend)((id)serverClass, serverSelector);
+    SEL focusedSelector = NSSelectorFromString(@"focusedApps");
+    if (!server || ![server respondsToSelector:focusedSelector])
+        return [@"ERR FrontmostUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    __block NSString *bundleID = nil;
+    void (^action)(void) = ^{
+        id apps = ((id (*)(id, SEL))objc_msgSend)(server, focusedSelector);
+        if (![apps isKindOfClass:[NSArray class]])
+            return;
+        SEL bundleSelector = NSSelectorFromString(@"bundleIdentifier");
+        SEL primarySelector = NSSelectorFromString(@"isLayoutPrimary");
+        for (id app in (NSArray *)apps) {
+            if (![app respondsToSelector:bundleSelector])
+                continue;
+            BOOL primary = ![app respondsToSelector:primarySelector] ||
+                ((BOOL (*)(id, SEL))objc_msgSend)(app, primarySelector);
+            NSString *candidate = ((id (*)(id, SEL))objc_msgSend)(app, bundleSelector);
+            if (candidate.length && (primary || !bundleID)) {
+                bundleID = [candidate copy];
+                if (primary)
+                    break;
+            }
+        }
+    };
+    if ([NSThread isMainThread])
+        action();
+    else
+        dispatch_sync(dispatch_get_main_queue(), action);
+
+    if (!bundleID.length)
+        return [@"OK none\n" dataUsingEncoding:NSUTF8StringEncoding];
+    TVLog(@"Control socket: frontmost -> %@", bundleID);
+    return [[NSString stringWithFormat:@"OK %@\n", bundleID]
+        dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - ControlIOSKeeper watchdog
 
 static const int kTvKeeperdPort = 46753;
@@ -6292,6 +6337,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlControlCenter();
     } else if ([cmd hasPrefix:@"rotationlock "]) {
         resp = tvCtlRotationLock([cmd substringFromIndex:13]);
+    } else if ([cmd isEqualToString:@"frontmost"]) {
+        resp = tvCtlFrontmostApp();
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"keeper "]) {
