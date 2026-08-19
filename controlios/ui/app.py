@@ -1722,12 +1722,6 @@ class MainWindow(QMainWindow):
         media_button.setMenu(media_menu)
         bar.addWidget(media_button)
 
-        wifi_reset = QAction("Reset Wi-Fi", self)
-        wifi_reset.setToolTip(
-            "Thử API private trên iOS: tắt Wi-Fi 3 giây rồi tự bật lại")
-        wifi_reset.triggered.connect(self._reset_wifi_selected)
-        bar.addAction(wifi_reset)
-
         respring = QAction("Respring", self)
         respring.setToolTip(
             "Khởi động lại SpringBoard trên các máy đang chọn — gỡ giao diện treo, "
@@ -2372,29 +2366,6 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"Đang nạp {Path(path).name} vào Thư viện của {len(targets)} máy", 6000
         )
-
-    def _reset_wifi_selected(self) -> None:
-        targets = self.action_targets()
-        if not targets:
-            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
-            return
-        if self._needs_control_token(targets) and not self.registry.settings.control_token:
-            QMessageBox.warning(
-                self, "Thiếu control token",
-                "Máy WiFi cần control_token trong config/devices.json.")
-            return
-        if QMessageBox.question(
-            self, "Thử reset Wi-Fi",
-            f"Tắt Wi-Fi 3 giây rồi bật lại trên {len(targets)} máy?\n"
-            "Kết nối VNC sẽ mất tạm thời và tự nối lại nếu API hoạt động.",
-        ) != QMessageBox.Yes:
-            return
-        dialog = BulkResultDialog("Reset Wi-Fi", len(targets), self)
-        dialog.show()
-        self.pool.reset_wifi(
-            targets, on_event=dialog.on_event, on_done=dialog.on_done)
-        self.statusBar().showMessage(
-            f"Đã gửi lệnh reset Wi-Fi tới {len(targets)} máy", 5000)
 
     def _respring_selected(self) -> None:
         targets = self.action_targets()

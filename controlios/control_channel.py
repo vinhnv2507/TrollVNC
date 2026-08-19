@@ -199,18 +199,6 @@ class ControlChannel:
             return "unlocked"
         raise ControlError(f"Phản hồi trạng thái khóa không hợp lệ: {text}")
 
-    async def wifi_status(self) -> str:
-        """Trạng thái power/IP do MobileWiFi private API trên iOS trả về."""
-
-        return (await self.command("wifi status")).strip()
-
-    async def reset_wifi(self) -> None:
-        """Tắt Wi-Fi 3 giây rồi bật lại ngay trên iOS."""
-
-        text = (await self.command("wifi reset")).strip()
-        if not text.startswith("OK"):
-            raise ControlError(f"Không reset được Wi-Fi: {text}")
-
     async def terminate(self, bundle_id: str) -> bool:
         """True nếu đã đóng, False nếu app vốn không chạy."""
 
