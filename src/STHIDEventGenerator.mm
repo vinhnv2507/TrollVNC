@@ -555,7 +555,13 @@ static void _sendHIDEvent(IOHIDEventRef eventRef, dispatch_queue_t queue) {
             // 0x000000010000052E: iOS 14.x works
             // 0x8000000817319371: iOS 9+
             // 0x8000000817319372: iOS 14.8 to 26 works
-            IOHIDEventSetSenderID(strongEvent, 0x8000000817319371);
+            // Sender mới là phần quan trọng để SpringBoard nhận các cử chỉ hệ
+            // thống (Control Center/Home indicator) trên iOS 14.8 trở lên.
+            NSOperatingSystemVersion v = [NSProcessInfo processInfo].operatingSystemVersion;
+            BOOL modernSender = v.majorVersion > 14 ||
+                (v.majorVersion == 14 && v.minorVersion >= 8);
+            IOHIDEventSetSenderID(strongEvent, modernSender
+                ? 0x8000000817319372 : 0x8000000817319371);
             IOHIDEventSystemClientDispatchEvent(_ioSystemClient, strongEvent);
 
             CFRelease(strongEvent);
