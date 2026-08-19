@@ -225,6 +225,15 @@ class ControlChannel:
             return False
         raise ControlError(f"Không đổi được khóa xoay: {reply}")
 
+    async def frontmost_app(self) -> Optional[str]:
+        """Bundle ID đang hiển thị; ``None`` khi ở màn hình hệ thống/không xác định."""
+        reply = (await self.command("frontmost")).strip()
+        if reply == "OK none":
+            return None
+        if reply.startswith("OK "):
+            return reply[3:].strip() or None
+        raise ControlError(f"Không đọc được ứng dụng đang mở: {reply}")
+
     async def type_text(self, value: str) -> None:
         """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua VNC keysym."""
         encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")

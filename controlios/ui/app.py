@@ -987,7 +987,8 @@ class ScreenTextMonitorDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            'ControlIOS OCR trực tiếp framebuffer. Nếu thấy "Not connected" hoặc '
+            'ControlIOS kiểm tra app foreground và tự mở EarnApp nếu cần, sau đó '
+            'OCR trực tiếp framebuffer. Nếu thấy "Not connected" hoặc '
             '"Connecting", hệ thống chờ 10 giây và kiểm tra lại; chỉ khi trạng thái '
             'vẫn còn mới khởi động lại com.brd.earnapp.'
         ))

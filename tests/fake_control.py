@@ -29,6 +29,7 @@ class FakeControlServer:
         }
     )
     running: Set[str] = field(default_factory=lambda: {"com.golike.app"})
+    frontmost: str | None = "com.golike.app"
 
     launched: List[str] = field(default_factory=list)
     terminated: List[str] = field(default_factory=list)
@@ -211,7 +212,11 @@ class FakeControlServer:
                 return b"ERR LaunchFailed\n"
             self.launched.append(bundle)
             self.running.add(bundle)
+            self.frontmost = bundle
             return b"OK\n"
+
+        if cmd == "frontmost":
+            return f"OK {self.frontmost or 'none'}\n".encode()
 
         if cmd.startswith("container "):
             bundle = cmd[len("container "):].strip()

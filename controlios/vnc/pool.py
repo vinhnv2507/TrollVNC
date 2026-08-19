@@ -608,6 +608,15 @@ class DevicePool:
                         await session.request_capture()
                         channel = self._channel(key)
 
+                        foreground = await channel.frontmost_app()
+                        if foreground != bundle_id:
+                            if on_event:
+                                on_event(key, f"app đang mở là {foreground or 'màn hình hệ thống'}; "
+                                              f"đang mở {bundle_id}")
+                            await channel.launch(bundle_id)
+                            await asyncio.sleep(2.0)
+                            await session.request_capture()
+
                         async def detect_state() -> Optional[str]:
                             for text in watched_texts:
                                 if await channel.find_text(text):

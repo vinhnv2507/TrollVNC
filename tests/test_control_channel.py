@@ -156,6 +156,13 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.server.launched, ["com.honeygain.app"])
         self.assertIn("com.honeygain.app", self.server.running)
 
+    async def test_frontmost_app_tracks_launched_app(self) -> None:
+        self.assertEqual(await self.channel.frontmost_app(), "com.golike.app")
+        await self.channel.launch("com.honeygain.app")
+        self.assertEqual(await self.channel.frontmost_app(), "com.honeygain.app")
+        self.server.frontmost = None
+        self.assertIsNone(await self.channel.frontmost_app())
+
     async def test_launch_unknown_bundle_raises(self) -> None:
         with self.assertRaises(ControlError):
             await self.channel.launch("com.khong.ton.tai")
