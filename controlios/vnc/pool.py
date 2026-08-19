@@ -518,6 +518,14 @@ class DevicePool:
         self._bulk_app_action(keys, "Mở Trung tâm điều khiển", action,
                               on_event, on_done)
 
+    def rotation_lock(self, keys: Iterable[str], state: str,
+                      on_event=None, on_done=None) -> None:
+        async def action(channel):
+            locked = await channel.set_rotation_lock(state)
+            return f"khóa xoay: {'bật' if locked else 'tắt'}"
+
+        self._bulk_app_action(keys, "Đổi khóa xoay", action, on_event, on_done)
+
     def terminate_app(self, keys: Iterable[str], bundle_id: str,
                       on_event=None, on_done=None) -> None:
         async def action(channel):

@@ -214,6 +214,17 @@ class ControlChannel:
         if not reply.startswith("OK"):
             raise ControlError(f"Không mở được Trung tâm điều khiển: {reply}")
 
+    async def set_rotation_lock(self, state: str) -> bool:
+        """Bật/tắt/đảo khóa xoay; trả về trạng thái khóa sau thao tác."""
+        if state not in {"on", "off", "toggle", "status"}:
+            raise ValueError("state phải là on, off, toggle hoặc status")
+        reply = (await self.command(f"rotationlock {state}")).strip().lower()
+        if reply == "ok on":
+            return True
+        if reply == "ok off":
+            return False
+        raise ControlError(f"Không đổi được khóa xoay: {reply}")
+
     async def type_text(self, value: str) -> None:
         """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua VNC keysym."""
         encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
