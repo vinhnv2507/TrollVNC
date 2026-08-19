@@ -428,9 +428,9 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 
 - (NSString *)defaultFooterText {
     if (!_defaultFooterText) {
-        // Đổi thương hiệu: hiển thị gọn "ControlIOS v1.1" thay cho
+        // Đổi thương hiệu: hiển thị phiên bản hiện tại của ControlIOS thay cho
         // "TrollVNC (bootstrap) v3.2-272".
-        _defaultFooterText = @"ControlIOS v1.1";
+        _defaultFooterText = [NSString stringWithFormat:@"ControlIOS v%s", PACKAGE_VERSION];
     }
     return _defaultFooterText;
 }
