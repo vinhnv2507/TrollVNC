@@ -990,6 +990,22 @@ class ScreenTextMonitorDialog(QDialog):
             '"Not connected" thì đóng, chờ 3–5 giây và mở lại com.brd.earnapp.'
         ))
         row = QHBoxLayout()
+        row.addWidget(QLabel("Phạm vi:"))
+        self.scope = QComboBox()
+        self.scope.addItem("Máy đang chọn", "selected")
+        self.scope.addItem("Máy đang mở (khung lớn)", "opened")
+        self.scope.addItem("Máy đang online", "online")
+        self.scope.addItem("Tất cả máy", "all")
+        saved_scope = str(self.settings.value("scope", "all"))
+        saved_index = self.scope.findData(saved_scope)
+        self.scope.setCurrentIndex(saved_index if saved_index >= 0 else 3)
+        self.scope.currentIndexChanged.connect(self.refresh_target_count)
+        row.addWidget(self.scope)
+        layout.addLayout(row)
+        self.target_count = QLabel()
+        layout.addWidget(self.target_count)
+
+        row = QHBoxLayout()
         row.addWidget(QLabel("Mỗi:"))
         self.minutes = QSpinBox()
         self.minutes.setRange(1, 1440)
@@ -1021,10 +1037,26 @@ class ScreenTextMonitorDialog(QDialog):
         buttons.addWidget(once)
         buttons.addStretch(1)
         layout.addLayout(buttons)
+        self.refresh_target_count()
+
+    def target_keys(self) -> List[str]:
+        scope = self.scope.currentData()
+        if scope == "selected":
+            return list(self.window.grid.selection)
+        if scope == "opened":
+            return [self.window.detail.key] if self.window.detail.key else []
+        if scope == "online":
+            return self.window.pool.online_keys()
+        return [device.key for device in self.window.registry.devices if device.enabled]
+
+    def refresh_target_count(self, *_args) -> None:
+        count = len(self.target_keys())
+        self.target_count.setText(f"Sẽ kiểm tra {count} máy trong phạm vi này.")
 
     def start_monitor(self) -> None:
         self.settings.setValue("minutes", self.minutes.value())
         self.settings.setValue("concurrency", self.concurrency.value())
+        self.settings.setValue("scope", self.scope.currentData())
         self.timer.start(self.minutes.value() * 60 * 1000)
         self.start_button.setEnabled(False)
         self.status.setText("Đang canh liên tục khi phần mềm PC còn mở")
@@ -1038,9 +1070,13 @@ class ScreenTextMonitorDialog(QDialog):
     def run_once(self) -> None:
         if self.running:
             return
-        keys = [device.key for device in self.window.registry.devices if device.enabled]
+        self.settings.setValue("scope", self.scope.currentData())
+        self.settings.setValue("minutes", self.minutes.value())
+        self.settings.setValue("concurrency", self.concurrency.value())
+        keys = self.target_keys()
         if not keys:
-            self.log.appendPlainText("Không có máy để kiểm tra.")
+            self.refresh_target_count()
+            self.log.appendPlainText("Phạm vi đã chọn hiện không có máy để kiểm tra.")
             return
         self.running = True
         self.status.setText(f"Đang OCR {len(keys)} máy…")
@@ -2823,6 +2859,7 @@ class MainWindow(QMainWindow):
     def _open_screen_monitor(self) -> None:
         if self.screen_monitor_dialog is None:
             self.screen_monitor_dialog = ScreenTextMonitorDialog(self)
+        self.screen_monitor_dialog.refresh_target_count()
         self.screen_monitor_dialog.show()
         self.screen_monitor_dialog.raise_()
 
