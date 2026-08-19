@@ -10,13 +10,13 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, QObject, QThread, QTimer, Signal
+from PySide6.QtCore import Qt, QObject, QSettings, QThread, QTimer, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QSplitter, QStatusBar, QToolBar, QToolButton, QVBoxLayout,
+    QPushButton, QSpinBox, QSplitter, QStatusBar, QToolBar, QToolButton, QVBoxLayout,
     QWidget,
 )
 
@@ -129,6 +129,8 @@ class Bridge(QObject):
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
+    monitor_event = Signal(str, str)
+    monitor_done = Signal(int, int, object)
 
 
 class ScanWorker(QThread):
@@ -967,6 +969,100 @@ class JsAutoClickDialog(QDialog):
         self.status.setText("Đang dừng…")
 
 
+class ScreenTextMonitorDialog(QDialog):
+    """Canh OCR mọi máy theo chu kỳ, giới hạn số máy chạy đồng thời."""
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Canh trạng thái EarnApp")
+        self.resize(620, 430)
+        self.settings = QSettings("ControlIOS", "ScreenTextMonitor")
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.run_once)
+        self.running = False
+        window.bridge.monitor_event.connect(self._on_event)
+        window.bridge.monitor_done.connect(self._on_done)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            'ControlIOS OCR trực tiếp framebuffer của mọi máy. Nếu thấy chữ '
+            '"Not connected" thì đóng, chờ 3–5 giây và mở lại com.brd.earnapp.'
+        ))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Mỗi:"))
+        self.minutes = QSpinBox()
+        self.minutes.setRange(1, 1440)
+        self.minutes.setValue(int(self.settings.value("minutes", 5)))
+        self.minutes.setSuffix(" phút")
+        row.addWidget(self.minutes)
+        row.addWidget(QLabel("Song song:"))
+        self.concurrency = QSpinBox()
+        self.concurrency.setRange(1, 100)
+        self.concurrency.setValue(int(self.settings.value("concurrency", 5)))
+        self.concurrency.setSuffix(" máy")
+        row.addWidget(self.concurrency)
+        row.addStretch(1)
+        layout.addLayout(row)
+        self.status = QLabel("Đang tắt")
+        layout.addWidget(self.status)
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        layout.addWidget(self.log, 1)
+        buttons = QHBoxLayout()
+        self.start_button = QPushButton("Bật canh 24/7")
+        self.start_button.clicked.connect(self.start_monitor)
+        buttons.addWidget(self.start_button)
+        stop = QPushButton("Tắt")
+        stop.clicked.connect(self.stop_monitor)
+        buttons.addWidget(stop)
+        once = QPushButton("Kiểm tra ngay")
+        once.clicked.connect(self.run_once)
+        buttons.addWidget(once)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+
+    def start_monitor(self) -> None:
+        self.settings.setValue("minutes", self.minutes.value())
+        self.settings.setValue("concurrency", self.concurrency.value())
+        self.timer.start(self.minutes.value() * 60 * 1000)
+        self.start_button.setEnabled(False)
+        self.status.setText("Đang canh liên tục khi phần mềm PC còn mở")
+        self.run_once()
+
+    def stop_monitor(self) -> None:
+        self.timer.stop()
+        self.start_button.setEnabled(True)
+        self.status.setText("Đang tắt")
+
+    def run_once(self) -> None:
+        if self.running:
+            return
+        keys = [device.key for device in self.window.registry.devices if device.enabled]
+        if not keys:
+            self.log.appendPlainText("Không có máy để kiểm tra.")
+            return
+        self.running = True
+        self.status.setText(f"Đang OCR {len(keys)} máy…")
+        stamp = time.strftime("%H:%M:%S")
+        self.log.appendPlainText(f"[{stamp}] Bắt đầu kiểm tra {len(keys)} máy")
+
+        self.window.pool.monitor_text_and_restart(
+            keys, "Not connected", "com.brd.earnapp", self.concurrency.value(),
+            on_event=self.window.bridge.monitor_event.emit,
+            on_done=self.window.bridge.monitor_done.emit)
+
+    def _on_event(self, key: str, message: str) -> None:
+        self.window.bridge.message.emit(f"[{key}] {message}")
+        self.log.appendPlainText(f"{key}: {message}")
+
+    def _on_done(self, total: int, found: int, failures: list) -> None:
+        self.running = False
+        self.status.setText(
+            f"Xong: {total} máy, thấy lỗi {found}, lỗi kiểm tra {len(failures)}")
+        self.log.appendPlainText(self.status.text())
+
+
 class ScriptDialog(QDialog):
     """Soạn và chạy kịch bản trên các máy đang chọn."""
 
@@ -1312,6 +1408,7 @@ class MainWindow(QMainWindow):
         self.current_group = ""
         self.broadcast = False
         self.script_dialog: ScriptDialog | None = None
+        self.screen_monitor_dialog: ScreenTextMonitorDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
@@ -1623,6 +1720,12 @@ class MainWindow(QMainWindow):
         keeper_button.setMenu(keeper_menu)
         bar.addWidget(keeper_button)
 
+        monitor = QAction("Canh EarnApp", self)
+        monitor.setToolTip(
+            'OCR mọi máy theo chu kỳ; thấy "Not connected" thì mở lại EarnApp')
+        monitor.triggered.connect(self._open_screen_monitor)
+        bar.addAction(monitor)
+
         sort_button = QToolButton()
         self.group_sort_button = sort_button
         sort_button.setText("Xếp/Nhóm")
@@ -1759,7 +1862,7 @@ class MainWindow(QMainWindow):
         script_button.setToolTip("Kịch bản tự động")
         script_button.setPopupMode(QToolButton.InstantPopup)
         script_menu = QMenu(script_button)
-        act_pc = script_menu.addAction("Kịch bản (PC gõ qua VNC)…")
+        act_pc = script_menu.addAction("Kịch bản (gõ qua ControlIOS)…")
         act_pc.triggered.connect(self._open_script_dialog)
         act_js = script_menu.addAction("Auto-click JS (chạy trên máy)…")
         act_js.triggered.connect(self._open_js_autoclick)
@@ -2717,6 +2820,12 @@ class MainWindow(QMainWindow):
         self.script_dialog.refresh_targets()
         self.script_dialog.show()
         self.script_dialog.raise_()
+
+    def _open_screen_monitor(self) -> None:
+        if self.screen_monitor_dialog is None:
+            self.screen_monitor_dialog = ScreenTextMonitorDialog(self)
+        self.screen_monitor_dialog.show()
+        self.screen_monitor_dialog.raise_()
 
     def _open_js_autoclick(self) -> None:
         if getattr(self, "js_autoclick_dialog", None) is None:

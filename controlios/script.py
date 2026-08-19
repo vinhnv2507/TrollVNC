@@ -546,7 +546,11 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 else:
                     await control.restore_app(bundle, step.args[1])
             elif step.op == "text":
-                session.type_text(step.args[0])
+                if control is not None:
+                    await control.type_text(step.args[0])
+                else:
+                    # Tương thích máy ControlIOS cũ/chưa cấu hình control token.
+                    session.type_text(step.args[0])
                 await asyncio.sleep(0.05)
             elif step.op == "key":
                 session.press_keys(*step.args)

@@ -199,6 +199,23 @@ class ControlChannel:
             return "unlocked"
         raise ControlError(f"Phản hồi trạng thái khóa không hợp lệ: {text}")
 
+    async def find_text(self, needle: str) -> bool:
+        """OCR framebuffer trên ControlIOS và tìm chuỗi, không phân biệt hoa/thường."""
+        encoded = base64.b64encode(needle.encode("utf-8")).decode("ascii")
+        reply = (await self.command(f"findtext64 {encoded}", read_timeout=20)).strip()
+        if reply.startswith("OK found"):
+            return True
+        if reply == "OK notfound":
+            return False
+        raise ControlError(f"Phản hồi OCR không hợp lệ: {reply}")
+
+    async def type_text(self, value: str) -> None:
+        """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua VNC keysym."""
+        encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
+        reply = (await self.command(f"typetext64 {encoded}")).strip()
+        if not reply.startswith("OK"):
+            raise ControlError(f"Không gõ được chữ qua ControlIOS: {reply}")
+
     async def terminate(self, bundle_id: str) -> bool:
         """True nếu đã đóng, False nếu app vốn không chạy."""
 

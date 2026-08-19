@@ -568,6 +568,49 @@ class DevicePool:
         self._bulk_app_action(keys, f"Xoá dữ liệu {bundle_id}", action,
                               on_event, on_done)
 
+    def monitor_text_and_restart(self, keys: Iterable[str], needle: str, bundle_id: str,
+                                 concurrency: int = 5, on_event=None,
+                                 on_done=None) -> None:
+        """OCR một lượt theo lô; chỉ restart app trên máy thấy ``needle``."""
+        key_list = list(keys)
+
+        async def run() -> None:
+            semaphore = asyncio.Semaphore(max(1, concurrency))
+            found = 0
+            failures: List[tuple] = []
+
+            async def one(key: str) -> None:
+                nonlocal found
+                async with semaphore:
+                    try:
+                        session = await self._ensure_awake(key)
+                        if session is None or session.state is not State.ONLINE:
+                            raise ConnectionError("VNC chưa kết nối")
+                        # Ép nhận một khung mới trước khi OCR, tránh đọc ảnh cũ của
+                        # máy đang nằm ngoài viewport và đã tạm ngắt stream.
+                        await session.request_capture()
+                        channel = self._channel(key)
+                        if not await channel.find_text(needle):
+                            return
+                        found += 1
+                        if on_event:
+                            on_event(key, f'thấy "{needle}"; đang khởi động lại {bundle_id}')
+                        await channel.terminate(bundle_id)
+                        await asyncio.sleep(random.uniform(3.0, 5.0))
+                        await channel.launch(bundle_id)
+                        if on_event:
+                            on_event(key, f"đã khởi động lại {bundle_id}")
+                    except Exception as exc:
+                        failures.append((key, str(exc)))
+                        if on_event:
+                            on_event(key, f"LỖI kiểm tra màn hình: {exc}")
+
+            await asyncio.gather(*(one(key) for key in key_list))
+            if on_done:
+                on_done(len(key_list), found, failures)
+
+        self._call_coro(run())
+
     def snapshot_app(self, keys: Iterable[str], bundle_id: str, name: str = "",
                      on_event=None, on_done=None) -> None:
         """Lưu một bản snapshot dữ liệu app (ngay trên mỗi máy).
