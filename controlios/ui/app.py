@@ -1720,12 +1720,6 @@ class MainWindow(QMainWindow):
         keeper_button.setMenu(keeper_menu)
         bar.addWidget(keeper_button)
 
-        monitor = QAction("Canh EarnApp", self)
-        monitor.setToolTip(
-            'OCR mọi máy theo chu kỳ; thấy "Not connected" thì mở lại EarnApp')
-        monitor.triggered.connect(self._open_screen_monitor)
-        bar.addAction(monitor)
-
         sort_button = QToolButton()
         self.group_sort_button = sort_button
         sort_button.setText("Xếp/Nhóm")
@@ -1866,6 +1860,11 @@ class MainWindow(QMainWindow):
         act_pc.triggered.connect(self._open_script_dialog)
         act_js = script_menu.addAction("Auto-click JS (chạy trên máy)…")
         act_js.triggered.connect(self._open_js_autoclick)
+        script_menu.addSeparator()
+        monitor = script_menu.addAction("Canh EarnApp…")
+        monitor.setToolTip(
+            'OCR mọi máy theo chu kỳ; thấy "Not connected" thì mở lại EarnApp')
+        monitor.triggered.connect(self._open_screen_monitor)
         script_button.setMenu(script_menu)
         bar.addWidget(script_button)
 
