@@ -4389,8 +4389,45 @@ static NSData *tvCtlWakeIfLocked(void) {
 
 // Mở Control Center bằng sender HID hệ thống, bắt đầu tại pixel sát mép và giữ
 // ngắn trước khi kéo để SpringBoard có thời gian nhận edge gesture.
+// Prefer the Accessibility/SpringBoard route used by AssistiveTouch. It is not
+// dependent on an edge gesture being accepted from the synthetic HID stream.
+static BOOL tvOpenControlCenterThroughAccessibility(void) {
+    void *handle = dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities",
+                          RTLD_LAZY | RTLD_LOCAL);
+    if (!handle)
+        return NO;
+
+    Class serverClass = NSClassFromString(@"AXSpringBoardServer");
+    SEL serverSelector = NSSelectorFromString(@"server");
+    if (!serverClass || ![serverClass respondsToSelector:serverSelector])
+        return NO;
+
+    id server = ((id (*)(id, SEL))objc_msgSend)((id)serverClass, serverSelector);
+    if (!server)
+        return NO;
+
+    NSArray<NSString *> *selectors = @[
+        @"showControlCenter",
+        @"openControlCenter",
+        @"presentControlCenter",
+        @"toggleControlCenter"
+    ];
+    for (NSString *name in selectors) {
+        SEL selector = NSSelectorFromString(name);
+        if ([server respondsToSelector:selector]) {
+            ((void (*)(id, SEL))objc_msgSend)(server, selector);
+            TVLog(@"Control socket: controlcenter -> AXSpringBoardServer %@", name);
+            return YES;
+        }
+    }
+    return NO;
+}
+
 static NSData *tvCtlControlCenter(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
+        if (tvOpenControlCenterThroughAccessibility())
+            return;
+
         CGSize size = [UIScreen mainScreen].nativeBounds.size;
         CGFloat width = size.width, height = size.height;
         if (width <= 0 || height <= 0)
@@ -4408,8 +4445,8 @@ static NSData *tvCtlControlCenter(void) {
         }
         [[STHIDEventGenerator sharedGenerator]
             dragLinearWithStartPoint:start endPoint:end duration:0.45 edgeDelay:0.08];
+        TVLog(@"Control socket: controlcenter -> edge HID fallback");
     });
-    TVLog(@"Control socket: controlcenter -> edge HID gesture");
     return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
