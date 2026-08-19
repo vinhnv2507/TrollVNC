@@ -54,6 +54,7 @@ class FakeControlServer:
     locked: bool = False
     home_count: int = 0
     wifi_reset_count: int = 0
+    airplane_reset_count: int = 0
     #: bundle id đã bị xoá dữ liệu; (bundle, tên) đã khôi phục
     wiped: List[str] = field(default_factory=list)
     restored: List[Tuple[str, str]] = field(default_factory=list)
@@ -346,6 +347,10 @@ class FakeControlServer:
         if cmd == "wifi reset":
             self.wifi_reset_count += 1
             return b"OK resetting wifi for 3s\n"
+
+        if cmd == "wifi airplane-reset":
+            self.airplane_reset_count += 1
+            return b"OK resetting airplane mode for 3s\n"
 
         if cmd.startswith(("setinflight ", "setdefer ", "setorient ")):
             if self.unpatched:

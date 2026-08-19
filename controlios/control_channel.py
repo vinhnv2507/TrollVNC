@@ -211,6 +211,13 @@ class ControlChannel:
         if not text.startswith("OK"):
             raise ControlError(f"Không reset được Wi-Fi: {text}")
 
+    async def reset_airplane_mode(self) -> None:
+        """Bật chế độ máy bay 3 giây rồi tự tắt trên iOS."""
+
+        text = (await self.command("wifi airplane-reset")).strip()
+        if not text.startswith("OK"):
+            raise ControlError(f"Không reset được chế độ máy bay: {text}")
+
     async def terminate(self, bundle_id: str) -> bool:
         """True nếu đã đóng, False nếu app vốn không chạy."""
 

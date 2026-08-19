@@ -1728,6 +1728,12 @@ class MainWindow(QMainWindow):
         wifi_reset.triggered.connect(self._reset_wifi_selected)
         bar.addAction(wifi_reset)
 
+        airplane_reset = QAction("Reset máy bay", self)
+        airplane_reset.setToolTip(
+            "Thử API private: bật chế độ máy bay 3 giây rồi tự tắt")
+        airplane_reset.triggered.connect(self._reset_airplane_selected)
+        bar.addAction(airplane_reset)
+
         respring = QAction("Respring", self)
         respring.setToolTip(
             "Khởi động lại SpringBoard trên các máy đang chọn — gỡ giao diện treo, "
@@ -2395,6 +2401,29 @@ class MainWindow(QMainWindow):
             targets, on_event=dialog.on_event, on_done=dialog.on_done)
         self.statusBar().showMessage(
             f"Đã gửi lệnh reset Wi-Fi tới {len(targets)} máy", 5000)
+
+    def _reset_airplane_selected(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        if self._needs_control_token(targets) and not self.registry.settings.control_token:
+            QMessageBox.warning(
+                self, "Thiếu control token",
+                "Máy WiFi cần control_token trong config/devices.json.")
+            return
+        if QMessageBox.question(
+            self, "Thử reset chế độ máy bay",
+            f"Bật chế độ máy bay 3 giây rồi tự tắt trên "
+            f"{len(targets)} máy?\nKết nối VNC sẽ mất tạm thời.",
+        ) != QMessageBox.Yes:
+            return
+        dialog = BulkResultDialog("Reset chế độ máy bay", len(targets), self)
+        dialog.show()
+        self.pool.reset_airplane_mode(
+            targets, on_event=dialog.on_event, on_done=dialog.on_done)
+        self.statusBar().showMessage(
+            f"Đã gửi reset chế độ máy bay tới {len(targets)} máy", 5000)
 
     def _respring_selected(self) -> None:
         targets = self.action_targets()
