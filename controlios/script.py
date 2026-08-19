@@ -144,6 +144,11 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
         hold = _seconds(args[5], line_no) if len(args) == 6 else 0.0
         return Step(op, coords + (duration, hold), line_no=line_no), index
 
+    if op == "controlcenter":
+        if args:
+            raise ScriptError(line_no, "cú pháp: controlcenter")
+        return Step(op, line_no=line_no), index
+
     if op == "button":
         if not args or args[0].lower() not in BUTTON_NAMES:
             raise ScriptError(
@@ -256,7 +261,7 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
         delay = _seconds(args[1], line_no) if len(args) == 2 else 1.0
         return Step(op, (int(args[0]), delay), line_no=line_no), index
 
-    known = ", ".join(["tap", "button", "swipe", "text", "key", "wait", "shot",
+    known = ", ".join(["tap", "button", "swipe", "controlcenter", "text", "key", "wait", "shot",
                        "repeat", "retry", "brightness", "volume", "launchapp",
                        "killapp", "restartapp", "openurl", "openurlin",
                        "clipboard", "savephoto", "wipeapp", "snapshot",
@@ -398,6 +403,8 @@ def describe(steps: Sequence[Step]) -> List[str]:
                     f"{indent}vuốt ({x1:.0%},{y1:.0%}) → ({x2:.0%},{y2:.0%}) "
                     f"trong {duration}s{held}"
                 )
+            elif step.op == "controlcenter":
+                out.append(f"{indent}mở Trung tâm điều khiển")
             elif step.op == "launchapp":
                 out.append(f"{indent}mở app {step.args[0]} (qua kênh điều khiển)")
             elif step.op == "killapp":
@@ -496,6 +503,10 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 await session.swipe(int(x1 * width), int(y1 * height),
                                     int(x2 * width), int(y2 * height), duration,
                                     hold=hold)
+            elif step.op == "controlcenter":
+                if control is None:
+                    raise ConnectionError("lệnh controlcenter cần kênh điều khiển ControlIOS")
+                await control.control_center()
             elif step.op in ("launchapp", "killapp"):
                 if control is None:
                     raise ConnectionError(

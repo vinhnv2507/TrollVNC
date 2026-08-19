@@ -66,6 +66,7 @@ SCRIPT_COMMANDS = [
     ("tap 0.5 0.85", "chạm tại toạ độ tỉ lệ (x y, 0..1)"),
     ("swipe 0.5 0.8 0.5 0.2 0.4", "vuốt từ (x1 y1) tới (x2 y2) trong <giây>"),
     ("swipe 0.5 0.99 0.5 0.45 0.35 0.7", "vuốt rồi GIỮ 0.7s trước khi nhả (mở switcher)"),
+    ("controlcenter", "mở Trung tâm điều khiển bằng cử chỉ mép hệ thống"),
     ("text {nội dung}", "gõ chữ, đủ dấu tiếng Việt"),
     ("key {tên phím}", "nhấn phím theo tên keysym (Return · BackSpace · Escape · Tab · Up…)"),
     ("wait 1.5", "chờ 1.5 giây"),
@@ -1498,6 +1499,13 @@ class MainWindow(QMainWindow):
             gesture_row.addWidget(btn)
             self.device_gesture_buttons[gesture] = btn
 
+        control_center_button = QPushButton("◫ Control Center")
+        control_center_button.setToolTip(
+            "Mở Trung tâm điều khiển bằng lệnh riêng của ControlIOS")
+        control_center_button.clicked.connect(self._open_control_center_selected)
+        gesture_row.addWidget(control_center_button)
+        self.device_gesture_buttons["controlcenter"] = control_center_button
+
         # AssistiveTouch iOS (nút tròn nổi) — bật/tắt cho máy đang xem/chọn.
         at_button = QToolButton()
         at_button.setText("⊙ AssistiveTouch")
@@ -2580,6 +2588,16 @@ class MainWindow(QMainWindow):
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
                   "lock": "Khoá máy"}
         self._run_quick_action(labels.get(gesture, gesture), gesture, False)
+
+    def _open_control_center_selected(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        self.pool.control_center(
+            targets,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
     def _set_assistive_touch(self, state: str) -> None:
         targets = self.action_targets()

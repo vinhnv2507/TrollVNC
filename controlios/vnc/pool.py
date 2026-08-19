@@ -510,6 +510,14 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Mở {bundle_id}", action, on_event, on_done)
 
+    def control_center(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        async def action(channel):
+            await channel.control_center()
+            return "đã gửi lệnh mở Trung tâm điều khiển"
+
+        self._bulk_app_action(keys, "Mở Trung tâm điều khiển", action,
+                              on_event, on_done)
+
     def terminate_app(self, keys: Iterable[str], bundle_id: str,
                       on_event=None, on_done=None) -> None:
         async def action(channel):

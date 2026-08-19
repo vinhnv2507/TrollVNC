@@ -209,6 +209,11 @@ class ControlChannel:
             return False
         raise ControlError(f"Phản hồi OCR không hợp lệ: {reply}")
 
+    async def control_center(self) -> None:
+        reply = (await self.command("controlcenter")).strip()
+        if not reply.startswith("OK"):
+            raise ControlError(f"Không mở được Trung tâm điều khiển: {reply}")
+
     async def type_text(self, value: str) -> None:
         """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua VNC keysym."""
         encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
