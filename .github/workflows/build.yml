@@ -110,13 +110,13 @@ jobs:
           xcode-version: "16.2"
 
       - name: Generate Managed.plist (managed build)
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.is_managed == true }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.is_managed == true) }}
         env:
           # Inputs (kept up to 10)
-          TVNC_DESKTOP_NAME: ${{ inputs.desktop_name }}
-          TVNC_PORT: ${{ inputs.port }}
+          TVNC_DESKTOP_NAME: ${{ inputs.desktop_name || 'ControlIOS' }}
+          TVNC_PORT: ${{ inputs.port || '5901' }}
           TVNC_VIEW_ONLY: ${{ inputs.view_only }}
-          TVNC_SCALE: ${{ inputs.scale }}
+          TVNC_SCALE: ${{ inputs.scale || '0.35' }}
           TVNC_FRAME_RATE_SPEC: ${{ inputs.frame_rate_spec }}
           TVNC_MODIFIER_MAP: ${{ inputs.modifier_map }}
           TVNC_REVERSE_MODE: ${{ inputs.reverse_mode }}
