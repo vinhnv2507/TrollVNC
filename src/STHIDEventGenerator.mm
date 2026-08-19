@@ -915,6 +915,24 @@ static void _sendHIDEvent(IOHIDEventRef eventRef, dispatch_queue_t queue) {
     [self sendMarkerHIDEvent];
 }
 
+- (void)dragLinearWithStartPoint:(CGPoint)startLocation
+                        endPoint:(CGPoint)endLocation
+                        duration:(NSTimeInterval)seconds
+                      edgeDelay:(NSTimeInterval)edgeDelay {
+    NSParameterAssert(seconds > 0.0);
+    [self _touchDown:startLocation touchCount:1];
+    if (edgeDelay > 0.0) {
+        struct timespec delay = {
+            (time_t)edgeDelay,
+            (long)((edgeDelay - floor(edgeDelay)) * nanosecondsPerSecond)
+        };
+        nanosleep(&delay, NULL);
+    }
+    [self _moveLinearToPoints:&endLocation touchCount:1 duration:seconds];
+    [self _liftUp:endLocation touchCount:1];
+    [self sendMarkerHIDEvent];
+}
+
 - (void)dragCurveWithStartPoint:(CGPoint)startLocation endPoint:(CGPoint)endLocation duration:(NSTimeInterval)seconds {
     NSParameterAssert(seconds > 0.0);
 

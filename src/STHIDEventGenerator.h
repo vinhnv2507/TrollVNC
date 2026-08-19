@@ -167,6 +167,12 @@ __used NS_INLINE void STAccurateSleep(NSTimeInterval seconds) {
 // sync seconds
 - (void)dragLinearWithStartPoint:(CGPoint)startLocation endPoint:(CGPoint)endLocation duration:(NSTimeInterval)seconds;
 
+// Giữ ngón tại mép trước khi di chuyển để SpringBoard bắt system edge gesture.
+- (void)dragLinearWithStartPoint:(CGPoint)startLocation
+                        endPoint:(CGPoint)endLocation
+                        duration:(NSTimeInterval)seconds
+                      edgeDelay:(NSTimeInterval)edgeDelay;
+
 // sync seconds
 - (void)dragCurveWithStartPoint:(CGPoint)startLocation endPoint:(CGPoint)endLocation duration:(NSTimeInterval)seconds;
 

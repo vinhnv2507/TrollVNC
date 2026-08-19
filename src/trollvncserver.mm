@@ -4387,8 +4387,8 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
-// Mở Control Center bằng cử chỉ bắt đầu NGOÀI mép vật lý. Kịch bản swipe thông
-// thường bị clamp vào pixel cuối nên SpringBoard chỉ coi là vuốt trong app.
+// Mở Control Center bằng sender HID hệ thống, bắt đầu tại pixel sát mép và giữ
+// ngắn trước khi kéo để SpringBoard có thời gian nhận edge gesture.
 static NSData *tvCtlControlCenter(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         CGSize size = [UIScreen mainScreen].nativeBounds.size;
@@ -4398,16 +4398,16 @@ static NSData *tvCtlControlCenter(void) {
         BOOL faceIDLayout = MAX(width, height) / MIN(width, height) >= 2.0;
         CGPoint start, end;
         if (faceIDLayout) {
-            // iPhone Face ID: kéo từ ngoài góc trên-phải xuống.
-            start = CGPointMake(width * 0.94, -MAX(8.0, height * 0.012));
+            // iPhone Face ID: kéo từ pixel đầu ở góc trên-phải xuống.
+            start = CGPointMake(width * 0.94, 1.0);
             end = CGPointMake(width * 0.94, height * 0.42);
         } else {
-            // iPhone 6s/7/8/SE: kéo từ ngoài mép dưới lên.
-            start = CGPointMake(width * 0.50, height + MAX(8.0, height * 0.012));
+            // iPhone 6s/7/8/SE: kéo từ pixel cuối ở mép dưới lên.
+            start = CGPointMake(width * 0.50, height - 1.0);
             end = CGPointMake(width * 0.50, height * 0.42);
         }
         [[STHIDEventGenerator sharedGenerator]
-            dragLinearWithStartPoint:start endPoint:end duration:0.45];
+            dragLinearWithStartPoint:start endPoint:end duration:0.45 edgeDelay:0.08];
     });
     TVLog(@"Control socket: controlcenter -> edge HID gesture");
     return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
