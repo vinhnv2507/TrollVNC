@@ -157,7 +157,14 @@ class AppsPanel(QWidget):
 
         self.note = QLabel("")
         self.note.setWordWrap(True)
-        layout.addWidget(self.note)
+        note_row = QHBoxLayout()
+        note_row.setSpacing(4)
+        note_row.addWidget(self.note, 1)
+        self.clear_log_button = QPushButton("Xóa log")
+        self.clear_log_button.setToolTip("Xóa nội dung trạng thái/log đang hiển thị")
+        self.clear_log_button.clicked.connect(self.note.clear)
+        note_row.addWidget(self.clear_log_button, 0, Qt.AlignTop)
+        layout.addLayout(note_row)
 
     # ------------------------------------------------------------------ trạng thái
 

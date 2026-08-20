@@ -120,6 +120,12 @@ class AppsPanelTest(unittest.TestCase):
         self.assertIn("không phản hồi", self.panel.status.text())
         self.assertTrue(self.panel.refresh_button.isEnabled())
 
+    def test_clear_log_button_clears_operation_note(self) -> None:
+        self.panel.set_note("Keeper check failed", error=True)
+        self.assertTrue(self.panel.note.text())
+        self.panel.clear_log_button.click()
+        self.assertEqual(self.panel.note.text(), "")
+
     def test_loading_disables_refresh_until_result(self) -> None:
         self.panel.set_loading()
         self.assertFalse(self.panel.refresh_button.isEnabled())
