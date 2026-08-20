@@ -197,6 +197,22 @@ class TileControlTest(unittest.TestCase):
         tile = self.grid.tiles["10.0.0.9:5901"]
         self.assertTrue(tile.control_enabled)
 
+    def test_earnapp_monitor_marks_only_its_own_devices(self) -> None:
+        other = self.specs[1].key
+        self.grid.set_monitored_keys([self.key])
+        self.assertTrue(self.grid.tiles[self.key].monitored)
+        self.assertFalse(self.grid.tiles[other].monitored)
+        self.assertTrue(self.grid._monitor_timer.isActive())
+
+        self.grid.set_monitored_keys([])
+        self.assertFalse(self.grid.tiles[self.key].monitored)
+        self.assertFalse(self.grid._monitor_timer.isActive())
+
+    def test_monitor_marks_survive_grid_rebuild(self) -> None:
+        self.grid.set_monitored_keys([self.key])
+        self.grid.set_devices(self.specs)
+        self.assertTrue(self.grid.tiles[self.key].monitored)
+
 
 class WindowGridControlTest(unittest.TestCase):
     def setUp(self) -> None:

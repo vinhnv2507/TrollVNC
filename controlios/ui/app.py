@@ -982,6 +982,7 @@ class ScreenTextMonitorDialog(QDialog):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.run_once)
         self.running = False
+        self.monitored_keys: set[str] = set()
         window.bridge.monitor_event.connect(self._on_event)
         window.bridge.monitor_done.connect(self._on_done)
 
@@ -1055,18 +1056,32 @@ class ScreenTextMonitorDialog(QDialog):
     def refresh_target_count(self, *_args) -> None:
         count = len(self.target_keys())
         self.target_count.setText(f"Sẽ kiểm tra {count} máy trong phạm vi này.")
+        if self.timer.isActive():
+            opened = self.window.detail.key
+            state = ("BẬT" if opened in self.monitored_keys else "TẮT") if opened else "chưa mở máy"
+            self.status.setText(
+                f"Đang canh {len(self.monitored_keys)} máy cố định. "
+                f"Máy đang mở: {state}.")
 
     def start_monitor(self) -> None:
         self.settings.setValue("minutes", self.minutes.value())
         self.settings.setValue("concurrency", self.concurrency.value())
         self.settings.setValue("scope", self.scope.currentData())
+        keys = self.target_keys()
+        if not keys:
+            self.status.setText("Phạm vi đã chọn không có máy để bật canh.")
+            return
+        self.monitored_keys = set(keys)
+        self.window.grid.set_monitored_keys(self.monitored_keys)
         self.timer.start(self.minutes.value() * 60 * 1000)
         self.start_button.setEnabled(False)
-        self.status.setText("Đang canh liên tục khi phần mềm PC còn mở")
+        self.refresh_target_count()
         self.run_once()
 
     def stop_monitor(self) -> None:
         self.timer.stop()
+        self.monitored_keys.clear()
+        self.window.grid.set_monitored_keys(set())
         self.start_button.setEnabled(True)
         self.status.setText("Đang tắt")
 
@@ -1076,7 +1091,8 @@ class ScreenTextMonitorDialog(QDialog):
         self.settings.setValue("scope", self.scope.currentData())
         self.settings.setValue("minutes", self.minutes.value())
         self.settings.setValue("concurrency", self.concurrency.value())
-        keys = self.target_keys()
+        keys = (list(self.monitored_keys) if self.timer.isActive()
+                else self.target_keys())
         if not keys:
             self.refresh_target_count()
             self.log.appendPlainText("Phạm vi đã chọn hiện không có máy để kiểm tra.")
@@ -1098,9 +1114,12 @@ class ScreenTextMonitorDialog(QDialog):
 
     def _on_done(self, total: int, found: int, failures: list) -> None:
         self.running = False
-        self.status.setText(
-            f"Xong: {total} máy, thấy lỗi {found}, lỗi kiểm tra {len(failures)}")
-        self.log.appendPlainText(self.status.text())
+        result = f"Xong: {total} máy, thấy lỗi {found}, lỗi kiểm tra {len(failures)}"
+        self.log.appendPlainText(result)
+        if self.timer.isActive():
+            self.refresh_target_count()
+        else:
+            self.status.setText(result)
 
 
 class ScriptDialog(QDialog):
@@ -2207,6 +2226,8 @@ class MainWindow(QMainWindow):
         # cũ sẽ bị bỏ qua và khung không co lại đúng cỡ máy mới mở.
         self._detail_aspect = -1.0
         self._fit_detail_pane()
+        if self.screen_monitor_dialog:
+            self.screen_monitor_dialog.refresh_target_count()
 
     def _device_name(self, key: str) -> str:
         for device in self.registry.devices:
@@ -2253,6 +2274,8 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Đã chọn {len(keys)} máy", 3000)
         if self.script_dialog:
             self.script_dialog.refresh_targets()
+        if self.screen_monitor_dialog:
+            self.screen_monitor_dialog.refresh_target_count()
         # Nhãn "thao tác áp cho N máy" phải theo kịp, nếu không nó đứng ở con số
         # lúc nạp danh sách và người dùng tưởng đang thao tác một máy.
         self.apps_panel.set_targets(len(self.action_targets()))

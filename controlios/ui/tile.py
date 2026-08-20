@@ -42,6 +42,8 @@ class DeviceTile(QWidget):
         self.state = State.OFFLINE
         self.detail = ""
         self.selected = False
+        self.monitored = False
+        self._monitor_bright = False
         self._pixmap: QPixmap | None = None
         self._scaled: QPixmap | None = None
         self._scaled_for = None
@@ -97,6 +99,16 @@ class DeviceTile(QWidget):
     def set_selected(self, selected: bool) -> None:
         if selected != self.selected:
             self.selected = selected
+            self.update()
+
+    def set_monitored(self, monitored: bool) -> None:
+        if monitored != self.monitored:
+            self.monitored = monitored
+            self.update()
+
+    def set_monitor_phase(self, bright: bool) -> None:
+        if self.monitored and bright != self._monitor_bright:
+            self._monitor_bright = bright
             self.update()
 
     # ------------------------------------------------------------------ events
@@ -184,9 +196,17 @@ class DeviceTile(QWidget):
             painter.drawPixmap(self._image_rect.topLeft(), scaled)
 
         colour = STATE_COLOUR.get(self.state, QColor("#6b7280"))
-        painter.setPen(QPen(QColor("#4f8cff") if self.selected else colour,
-                            3 if self.selected else 1))
+        if self.monitored:
+            monitor_colour = QColor("#fff176" if self._monitor_bright else "#f59e0b")
+            painter.setPen(QPen(monitor_colour, 5 if self._monitor_bright else 3))
+        else:
+            painter.setPen(QPen(QColor("#4f8cff") if self.selected else colour,
+                                3 if self.selected else 1))
         painter.drawRect(body.adjusted(1, 1, -2, -2))
+
+        if self.monitored and self.selected:
+            painter.setPen(QPen(QColor("#4f8cff"), 2))
+            painter.drawRect(body.adjusted(5, 5, -6, -6))
 
         label = QRect(0, self.height() - LABEL_HEIGHT, self.width(), LABEL_HEIGHT)
         painter.fillRect(label, QColor("#1b1f27"))

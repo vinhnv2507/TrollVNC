@@ -47,6 +47,8 @@ class DeviceGrid(QScrollArea):
         self.tiles: Dict[str, DeviceTile] = {}
         self.order: List[str] = []
         self.selection: List[str] = []
+        self._monitored_keys: set[str] = set()
+        self._monitor_phase = False
         self._focus_key: Optional[str] = None
         self.control_enabled = False
         #: ô vừa được thao tác — tạm nâng nhịp để thấy phản hồi
@@ -83,6 +85,10 @@ class DeviceGrid(QScrollArea):
         self._control_timer.setInterval(4000)
         self._control_timer.timeout.connect(self._release_control_boost)
 
+        self._monitor_timer = QTimer(self)
+        self._monitor_timer.setInterval(650)
+        self._monitor_timer.timeout.connect(self._pulse_monitored_tiles)
+
     # ---------------------------------------------------------------- contents
 
     def set_devices(self, specs: List[DeviceSpec]) -> None:
@@ -95,6 +101,7 @@ class DeviceGrid(QScrollArea):
 
         for spec in specs:
             tile = DeviceTile(spec, self.tile_width, self._body)
+            tile.set_monitored(spec.key in self._monitored_keys)
             tile.clicked.connect(self._on_tile_clicked)
             tile.activated.connect(self.device_activated)
             tile.set_control_enabled(self.control_enabled)
@@ -112,6 +119,24 @@ class DeviceGrid(QScrollArea):
         self._columns = 0
         self._relayout()
         self.selection_changed.emit(self.selection)
+
+    def set_monitored_keys(self, keys) -> None:
+        self._monitored_keys = set(keys)
+        for key, tile in self.tiles.items():
+            tile.set_monitored(key in self._monitored_keys)
+        if self._monitored_keys:
+            if not self._monitor_timer.isActive():
+                self._monitor_timer.start()
+        else:
+            self._monitor_timer.stop()
+            self._monitor_phase = False
+
+    def _pulse_monitored_tiles(self) -> None:
+        self._monitor_phase = not self._monitor_phase
+        for key in self._monitored_keys:
+            tile = self.tiles.get(key)
+            if tile:
+                tile.set_monitor_phase(self._monitor_phase)
 
     def _context_targets(self, key: str) -> List[str]:
         """Giữ nhóm chọn khi chuột phải trong nhóm; ngoài nhóm thì chỉ chọn máy đó."""
