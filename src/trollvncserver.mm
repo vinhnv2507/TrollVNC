@@ -4620,14 +4620,17 @@ static void tvUnlockOnceAtStartupIfNeeded(void) {
                                                    : @"unlocked -> no Home press");
 }
 
-static void tvScheduleInitialUnlockCheck(void) {
-    // Exactly one check for this daemon lifetime. Give SpringBoard time to
-    // publish its lock state after ControlIOS starts.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
-                   dispatch_get_main_queue(), ^{
-        tvUnlockOnceAtStartupIfNeeded();
+static void tvScheduleInitialUnlockCheckAfterFirstClient(void) {
+    // Run exactly once per daemon lifetime, after the first VNC connection.
+    // At this point SpringBoard has completed boot and its lock state is reliable.
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            tvUnlockOnceAtStartupIfNeeded();
+        });
+        TVLog(@"One-shot unlock check scheduled after first VNC client (1s)");
     });
-    TVLog(@"One-shot startup unlock check scheduled (5s)");
 }
 
 #pragma mark - Scale
@@ -6666,6 +6669,7 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
 
     gClientCount++;
     TVLog(@"Client connected, active clients=%d", gClientCount);
+    tvScheduleInitialUnlockCheckAfterFirstClient();
 
     // Client mới cần một framebuffer đầy đủ ngay cả khi màn hình đang đứng yên.
     // Nếu không, kênh input vẫn chạy nhưng ô trên PC có thể đen vô thời hạn.
@@ -7699,7 +7703,6 @@ int main(int argc, const char *argv[]) {
 
         tvStartControlSocketIfNeeded();
         tvEnsureKeeperAtStartup();
-        tvScheduleInitialUnlockCheck();
         tvStartWiFiIPWatchdog();
     }
 
