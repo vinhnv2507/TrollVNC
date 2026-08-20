@@ -4603,13 +4603,21 @@ static void tvEnsureKeeperAtStartup(void) {
 
 static void tvUnlockOnceAtStartupIfNeeded(void) {
     BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
-    if (!locked) {
-        TVLog(@"Startup unlock check: screen is not locked; no Home press");
-        return;
-    }
+    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
+    if (locked)
+        [generator menuPress];
 
-    [[STHIDEventGenerator sharedGenerator] menuPress];
-    TVLog(@"Startup unlock check: locked -> Home pressed once");
+    // Run once per daemon lifetime. Sending extra decrement presses is safe:
+    // iOS clamps the value at its minimum brightness level.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+                                 (locked ? 800 : 0) * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+        for (int i = 0; i < 16; ++i)
+            [[STHIDEventGenerator sharedGenerator] displayBrightnessDecrementPress];
+        TVLog(@"Startup unlock check: brightness reduced to minimum");
+    });
+    TVLog(@"Startup unlock check: %@", locked ? @"locked -> Home pressed once"
+                                                   : @"unlocked -> no Home press");
 }
 
 static void tvScheduleInitialUnlockCheck(void) {
