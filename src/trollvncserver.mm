@@ -4601,51 +4601,25 @@ static void tvEnsureKeeperAtStartup(void) {
     TVLog(@"Keeper startup check scheduled (port %d)", kTvKeeperdPort);
 }
 
-static dispatch_source_t gAutoUnlockTimer = NULL;
-
-static void tvAutoUnlockIfNeeded(void) {
+static void tvUnlockOnceAtStartupIfNeeded(void) {
     BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
-    BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
-    if (!locked && !blanked)
+    if (!locked) {
+        TVLog(@"Startup unlock check: screen is not locked; no Home press");
         return;
-
-    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-    [generator menuPress];
-    // Luôn hạ về nấc tối nhất sau khi đánh thức. Gửi dư nấc là
-    // có chủ ý; iOS tự chặn tại giá trị min.
-    for (int i = 0; i < 16; ++i)
-        [generator displayBrightnessDecrementPress];
-
-    if (locked) {
-        // Chờ animation thức màn hình xong rồi vuốt lên. Máy không có
-        // passcode sẽ vào Home; máy có passcode dừng ở màn hình nhập mã.
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 900 * NSEC_PER_MSEC),
-                       dispatch_get_main_queue(), ^{
-            CGSize size = [UIScreen mainScreen].nativeBounds.size;
-            CGPoint start = CGPointMake(size.width * 0.5, size.height * 0.82);
-            CGPoint end = CGPointMake(size.width * 0.5, size.height * 0.20);
-            [[STHIDEventGenerator sharedGenerator]
-                dragLinearWithStartPoint:start endPoint:end duration:0.30];
-        });
     }
-    TVLog(@"Auto-unlock watchdog: Home%s, brightness min", locked ? " + swipe" : "");
+
+    [[STHIDEventGenerator sharedGenerator] menuPress];
+    TVLog(@"Startup unlock check: locked -> Home pressed once");
 }
 
-static void tvStartAutoUnlockWatchdog(void) {
-    if (gAutoUnlockTimer)
-        return;
-    dispatch_queue_t queue = dispatch_get_main_queue();
-    gAutoUnlockTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    dispatch_source_set_timer(
-        gAutoUnlockTimer,
-        dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
-        30 * NSEC_PER_SEC,
-        1 * NSEC_PER_SEC);
-    dispatch_source_set_event_handler(gAutoUnlockTimer, ^{
-        tvAutoUnlockIfNeeded();
+static void tvScheduleInitialUnlockCheck(void) {
+    // Exactly one check for this daemon lifetime. Give SpringBoard time to
+    // publish its lock state after ControlIOS starts.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC),
+                   dispatch_get_main_queue(), ^{
+        tvUnlockOnceAtStartupIfNeeded();
     });
-    dispatch_resume(gAutoUnlockTimer);
-    TVLog(@"Auto-unlock watchdog started (30s)");
+    TVLog(@"One-shot startup unlock check scheduled (5s)");
 }
 
 #pragma mark - Scale
@@ -6644,12 +6618,6 @@ static void clientGoneHook(rfbClientPtr cl) {
     }
 #endif
 
-    // KeepAlive: disable when no clients remain
-    if (gClientCount == 0) {
-        [[STHIDEventGenerator sharedGenerator] setKeepAliveInterval:0];
-        TVLog(@"No clients remaining; KeepAlive stopped.");
-    }
-
     // Update TXT with possibly changed state (e.g., viewOnly unaffected, but keep consistent)
     refreshBonjourTXTRecord();
 
@@ -6751,12 +6719,6 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
         [PSAssistiveTouchSettingsDetail setEnabled:YES];
     }
 #endif
-
-    // KeepAlive: enable when at least one client is connected and interval > 0
-    if (gClientCount > 0 && gKeepAliveSec > 0.0) {
-        [[STHIDEventGenerator sharedGenerator] setKeepAliveInterval:gKeepAliveSec];
-        TVLog(@"KeepAlive started with interval (%.3f sec)", gKeepAliveSec);
-    }
 
     return RFB_CLIENT_ACCEPT;
 }
@@ -7729,7 +7691,7 @@ int main(int argc, const char *argv[]) {
 
         tvStartControlSocketIfNeeded();
         tvEnsureKeeperAtStartup();
-        tvStartAutoUnlockWatchdog();
+        tvScheduleInitialUnlockCheck();
         tvStartWiFiIPWatchdog();
     }
 

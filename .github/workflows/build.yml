@@ -127,7 +127,7 @@ jobs:
           TVNC_CLIPBOARD_ENABLED: true
           TVNC_SINGLE_NOTIF_ENABLED: true
           TVNC_CLIENT_NOTIFS_ENABLED: true
-          TVNC_KEEPALIVE_SEC: 15
+          TVNC_KEEPALIVE_SEC: 0
           TVNC_ORIENTATION_SYNC: true
           TVNC_NATURAL_SCROLL: false
           TVNC_AUTO_ASSIST_ENABLED: false
