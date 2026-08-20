@@ -13,7 +13,8 @@ from PySide6.QtCore import Qt, QSize, Signal
 from PySide6.QtGui import QAction, QBrush, QColor, QFont, QIcon, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMenu, QPushButton, QVBoxLayout, QWidget,
+    QListWidgetItem, QMenu, QPlainTextEdit, QPushButton, QSizePolicy,
+    QVBoxLayout, QWidget,
 )
 
 from ..control_channel import AppInfo
@@ -26,6 +27,28 @@ ICON_COLOURS = [
     "#4f8cff", "#3ddc84", "#f0b429", "#e5484d", "#a855f7",
     "#06b6d4", "#f97316", "#ec4899", "#84cc16", "#6366f1",
 ]
+
+
+class CompactLogView(QPlainTextEdit):
+    """Read-only log that never widens its containing dock."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setReadOnly(True)
+        self.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.setMinimumWidth(0)
+        self.setMinimumHeight(70)
+        self.setMaximumHeight(115)
+        self.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+
+    # Keep the small QLabel-compatible API used by the panel and its tests.
+    def text(self) -> str:
+        return self.toPlainText()
+
+    def setText(self, text: str) -> None:
+        self.setPlainText(text)
 
 
 def colour_index(bundle_id: str) -> int:
@@ -155,8 +178,7 @@ class AppsPanel(QWidget):
         self.status.setStyleSheet("color: #9aa4b2;")
         layout.addWidget(self.status)
 
-        self.note = QLabel("")
-        self.note.setWordWrap(True)
+        self.note = CompactLogView()
         note_row = QHBoxLayout()
         note_row.setSpacing(4)
         note_row.addWidget(self.note, 1)

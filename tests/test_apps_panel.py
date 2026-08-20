@@ -12,7 +12,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import Qt                           # noqa: E402
-from PySide6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PySide6.QtWidgets import (QApplication, QMessageBox, QPlainTextEdit,
+                               QSizePolicy)  # noqa: E402
 
 from controlios.config import Registry                  # noqa: E402
 from controlios.control_channel import AppInfo          # noqa: E402
@@ -125,6 +126,14 @@ class AppsPanelTest(unittest.TestCase):
         self.assertTrue(self.panel.note.text())
         self.panel.clear_log_button.click()
         self.assertEqual(self.panel.note.text(), "")
+
+    def test_operation_log_does_not_expand_apps_dock_width(self) -> None:
+        self.panel.set_note("172.30.3.1:5901: " + "very-long-error " * 100, error=True)
+        self.assertEqual(self.panel.note.lineWrapMode(), QPlainTextEdit.NoWrap)
+        self.assertEqual(self.panel.note.horizontalScrollBarPolicy(),
+                         Qt.ScrollBarAsNeeded)
+        self.assertEqual(self.panel.note.sizePolicy().horizontalPolicy(),
+                         QSizePolicy.Ignored)
 
     def test_loading_disables_refresh_until_result(self) -> None:
         self.panel.set_loading()
