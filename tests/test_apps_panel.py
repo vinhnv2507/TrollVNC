@@ -135,6 +135,11 @@ class AppsPanelTest(unittest.TestCase):
         self.assertEqual(self.panel.note.sizePolicy().horizontalPolicy(),
                          QSizePolicy.Ignored)
 
+    def test_app_list_is_compact_and_scrollable(self) -> None:
+        self.assertEqual(self.panel.list.maximumHeight(), 420)
+        self.assertEqual(self.panel.list.verticalScrollBarPolicy(),
+                         Qt.ScrollBarAsNeeded)
+
     def test_loading_disables_refresh_until_result(self) -> None:
         self.panel.set_loading()
         self.assertFalse(self.panel.refresh_button.isEnabled())

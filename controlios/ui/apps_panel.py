@@ -128,12 +128,14 @@ class AppsPanel(QWidget):
         self.list = QListWidget()
         self.list.setIconSize(QSize(ICON_SIZE, ICON_SIZE))
         self.list.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.list.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.list.setMaximumHeight(420)
         self.list.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list.customContextMenuRequested.connect(self._context_menu)
         # Nhấn ĐÚP để MỞ app. Bấm một lần chỉ CHỌN — để dùng các nút
         # Snapshot/Khôi phục/Xoá data (hoặc chuột phải) mà không vô tình mở app.
         self.list.itemDoubleClicked.connect(self._on_activated)
-        layout.addWidget(self.list, 1)
+        layout.addWidget(self.list)
 
         # Độ sáng / Cài .ipa / Đẩy file đã chuyển ra thanh công cụ chính.
 
@@ -178,15 +180,17 @@ class AppsPanel(QWidget):
         self.status.setStyleSheet("color: #9aa4b2;")
         layout.addWidget(self.status)
 
+        layout.addStretch(1)
         self.note = CompactLogView()
-        note_row = QHBoxLayout()
-        note_row.setSpacing(4)
-        note_row.addWidget(self.note, 1)
+        layout.addWidget(self.note)
+
+        clear_row = QHBoxLayout()
+        clear_row.addStretch(1)
         self.clear_log_button = QPushButton("Xóa log")
         self.clear_log_button.setToolTip("Xóa nội dung trạng thái/log đang hiển thị")
         self.clear_log_button.clicked.connect(self.note.clear)
-        note_row.addWidget(self.clear_log_button, 0, Qt.AlignTop)
-        layout.addLayout(note_row)
+        clear_row.addWidget(self.clear_log_button)
+        layout.addLayout(clear_row)
 
     # ------------------------------------------------------------------ trạng thái
 
