@@ -4601,23 +4601,47 @@ static void tvEnsureKeeperAtStartup(void) {
     TVLog(@"Keeper startup check scheduled (port %d)", kTvKeeperdPort);
 }
 
-static void tvUnlockOnceAtStartupIfNeeded(void) {
-    BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
-    STHIDEventGenerator *generator = [STHIDEventGenerator sharedGenerator];
-    if (locked)
-        [generator menuPress];
+static void tvDimDisplayToMinimum(void) {
+    for (int i = 0; i < 16; ++i)
+        [[STHIDEventGenerator sharedGenerator] displayBrightnessDecrementPress];
+    TVLog(@"First-client unlock check: brightness reduced to minimum");
+}
 
-    // Run once per daemon lifetime. Sending extra decrement presses is safe:
-    // iOS clamps the value at its minimum brightness level.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
-                                 (locked ? 800 : 0) * NSEC_PER_MSEC),
-                   dispatch_get_main_queue(), ^{
-        for (int i = 0; i < 16; ++i)
-            [[STHIDEventGenerator sharedGenerator] displayBrightnessDecrementPress];
-        TVLog(@"Startup unlock check: brightness reduced to minimum");
-    });
-    TVLog(@"Startup unlock check: %@", locked ? @"locked -> Home pressed once"
-                                                   : @"unlocked -> no Home press");
+static void tvVerifyStartupUnlockAndOpenSettings(NSUInteger attempt) {
+    BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
+    BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
+    TVLog(@"First-client unlock verification %lu/6: locked=%d blanked=%d",
+          (unsigned long)attempt, locked, blanked);
+
+    if (!locked) {
+        tvDimDisplayToMinimum();
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 500 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            (void)tvCtlLaunchApp(@"com.apple.Preferences");
+            TVLog(@"First-client unlock verified; Settings launch requested");
+        });
+        return;
+    }
+
+    [[STHIDEventGenerator sharedGenerator] menuPress];
+    TVLog(@"First-client unlock verification %lu/6: Home pressed",
+          (unsigned long)attempt);
+
+    if (attempt < 6) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC),
+                       dispatch_get_main_queue(), ^{
+            tvVerifyStartupUnlockAndOpenSettings(attempt + 1);
+        });
+    } else {
+        // Keep the requested low brightness even if iOS still reports locked.
+        // A passcode-protected first unlock after reboot cannot be bypassed.
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 800 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            tvDimDisplayToMinimum();
+            (void)tvCtlLaunchApp(@"com.apple.Preferences");
+            TVLog(@"First-client unlock remained locked after 6 attempts; Settings launch requested");
+        });
+    }
 }
 
 static void tvScheduleInitialUnlockCheckAfterFirstClient(void) {
@@ -4627,7 +4651,7 @@ static void tvScheduleInitialUnlockCheckAfterFirstClient(void) {
     dispatch_once(&onceToken, ^{
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
                        dispatch_get_main_queue(), ^{
-            tvUnlockOnceAtStartupIfNeeded();
+            tvVerifyStartupUnlockAndOpenSettings(1);
         });
         TVLog(@"One-shot unlock check scheduled after first VNC client (1s)");
     });
