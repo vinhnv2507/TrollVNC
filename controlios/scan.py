@@ -23,6 +23,7 @@ from typing import Iterable, List, Sequence
 from .config import DEFAULT_PORT
 
 _ARP_LINE = re.compile(r"^\s*(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F-]{11,})\s+(\w+)")
+CONTROL_DISCOVERY_PORT = 46752
 
 
 def arp_hosts(prefix: str = "172.30.") -> List[str]:
@@ -96,25 +97,48 @@ def discover_bonjour(timeout: float = 4.0, prefix: str = "") -> List[str]:
     ]
 
 
+async def _tcp_port_open(host: str, port: int, timeout: float) -> bool:
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+    except Exception:
+        return False
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except Exception:
+        pass
+    return True
+
+
 async def _probe(host: str, port: int, timeout: float) -> bool:
+    """Recognise ControlIOS through RFB or its dedicated control socket.
+
+    A busy/already-connected RFB server can close a new probe without sending
+    its banner. Port 46752 remains available independently of the VNC slot.
+    """
     try:
         reader, writer = await asyncio.wait_for(
             asyncio.open_connection(host, port), timeout=timeout
         )
     except Exception:
-        return False
-    try:
-        # A real RFB server greets with "RFB 003.00x\n" before anything else.
-        banner = await asyncio.wait_for(reader.readexactly(4), timeout=timeout)
-        return banner == b"RFB "
-    except Exception:
-        return False
-    finally:
-        writer.close()
+        writer = None
+    if writer is not None:
         try:
-            await writer.wait_closed()
+            banner = await asyncio.wait_for(reader.readexactly(4), timeout=timeout)
+            if banner == b"RFB ":
+                return True
         except Exception:
             pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except Exception:
+                pass
+
+    return await _tcp_port_open(host, CONTROL_DISCOVERY_PORT, timeout)
 
 
 async def probe_hosts(

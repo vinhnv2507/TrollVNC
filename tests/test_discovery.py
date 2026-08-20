@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 import unittest.mock
@@ -120,6 +121,23 @@ class MergeTest(unittest.TestCase):
         registry = Registry()
         registry.merge_hosts(["172.30.3.152:5901"])
         self.assertEqual(registry.merge_hosts(["172.30.3.152:5901"]), 0)
+
+
+class ProbeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_falls_back_to_control_socket_when_rfb_has_no_banner(self) -> None:
+        reader = unittest.mock.AsyncMock()
+        reader.readexactly.side_effect = asyncio.IncompleteReadError(b"", 4)
+        writer = unittest.mock.MagicMock()
+        writer.wait_closed = unittest.mock.AsyncMock()
+
+        with unittest.mock.patch.object(
+            scan.asyncio, "open_connection",
+            side_effect=[(reader, writer), (unittest.mock.Mock(), writer)],
+        ) as connect:
+            self.assertTrue(await scan._probe("172.30.3.152", 5901, 0.1))
+
+        self.assertEqual(connect.call_args_list[1].args,
+                         ("172.30.3.152", scan.CONTROL_DISCOVERY_PORT))
 
 
 if __name__ == "__main__":
