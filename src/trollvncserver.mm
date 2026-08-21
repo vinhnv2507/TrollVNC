@@ -3300,6 +3300,27 @@ static void wheelScheduleFlush(rfbClientPtr cl, CGPoint anchorPoint, double dela
     });
 }
 
+static BOOL tvGetTouchLockNotifyState(void);
+
+static NSMutableArray<NSString *> *tvHomeAuditEntries(void) {
+    static NSMutableArray<NSString *> *entries;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{ entries = [NSMutableArray array]; });
+    return entries;
+}
+
+static void tvRecordHomeAudit(NSString *source, NSString *detail) {
+    NSMutableArray<NSString *> *entries = tvHomeAuditEntries();
+    @synchronized (entries) {
+        NSString *line = [NSString stringWithFormat:@"%.3f | %@ | touchLock=%d%@%@",
+                          [[NSDate date] timeIntervalSince1970], source ?: @"unknown",
+                          tvGetTouchLockNotifyState(), detail.length ? @" | " : @"", detail ?: @""];
+        [entries addObject:line];
+        while (entries.count > 200) [entries removeObjectAtIndex:0];
+        TVLog(@"HOME-AUDIT %@", line);
+    }
+}
+
 static void ptrAddEvent(int buttonMask, int x, int y, rfbClientPtr cl) {
     if (gViewOnly)
         return;
@@ -3335,6 +3356,8 @@ static void ptrAddEvent(int buttonMask, int x, int y, rfbClientPtr cl) {
     bool rightNow = (buttonMask & 4) != 0;
     bool rightPrev = (lastMask & 4) != 0;
     if (rightNow && !rightPrev) {
+        tvRecordHomeAudit(@"vnc-right-button", cl && cl->host
+                          ? [NSString stringWithUTF8String:cl->host] : @"unknown-client");
         [gen menuDown];
     } else if (!rightNow && rightPrev) {
         [gen menuUp];
@@ -4381,6 +4404,8 @@ static NSData *tvCtlWakeIfLocked(void) {
     if (!locked && !blanked)
         return [@"OK unlocked\n" dataUsingEncoding:NSUTF8StringEncoding];
 
+    tvRecordHomeAudit(@"wakeiflocked",
+                      [NSString stringWithFormat:@"locked=%d blanked=%d", locked, blanked]);
     [[STHIDEventGenerator sharedGenerator] menuPress];
     TVLog(@"Control socket: wakeiflocked -> Home (locked=%d blanked=%d)", locked, blanked);
     return [(locked ? @"OK home locked\n" : @"OK home blanked\n")
@@ -4542,6 +4567,19 @@ static BOOL tvGetTouchLockNotifyState(void) {
     return status == NOTIFY_STATUS_OK && state != 0;
 }
 
+static NSData *tvCtlHomeAudit(BOOL clear) {
+    NSMutableArray<NSString *> *entries = tvHomeAuditEntries();
+    @synchronized (entries) {
+        if (clear) {
+            [entries removeAllObjects];
+            return [@"OK cleared\n" dataUsingEncoding:NSUTF8StringEncoding];
+        }
+        NSString *body = entries.count ? [entries componentsJoinedByString:@"\n"] : @"(empty)";
+        return [[NSString stringWithFormat:@"OK %lu\n%@\n", (unsigned long)entries.count, body]
+                dataUsingEncoding:NSUTF8StringEncoding];
+    }
+}
+
 typedef boolean_t (^TVIOHIDEventFilterBlock)(void *, void *, void *, IOHIDEventRef);
 
 static BOOL tvHIDEventContainsHome(IOHIDEventRef event) {
@@ -4579,6 +4617,8 @@ static void tvInstallTouchLockHIDFilter(void) {
         dlsym(handle, "IOHIDEventSystemClientRegisterEventFilterBlock");
     auto scheduleClient = (void (*)(IOHIDEventSystemClientRef, CFRunLoopRef, CFStringRef))
         dlsym(handle, "IOHIDEventSystemClientScheduleWithRunLoop");
+    auto getSenderID = (uint64_t (*)(IOHIDEventRef))
+        dlsym(handle, "IOHIDEventGetSenderID");
     if (!createClient || !registerFilter || !scheduleClient) {
         TVLog(@"Touch lock HID filter: required API unavailable");
         return;
@@ -4594,10 +4634,19 @@ static void tvInstallTouchLockHIDFilter(void) {
                    ^boolean_t(void *target, void *refcon, void *sender, IOHIDEventRef event) {
         (void)target;
         (void)refcon;
-        (void)sender;
+        BOOL containsHome = tvHIDEventContainsHome(event);
+        BOOL consumed = containsHome && tvGetTouchLockNotifyState();
+        if (containsHome) {
+            uint64_t senderID = getSenderID ? getSenderID(event) : 0;
+            tvRecordHomeAudit(@"hid-home",
+                              [NSString stringWithFormat:@"sender=%p senderID=0x%llx down=%lld consumed=%d",
+                               sender, (unsigned long long)senderID,
+                               (long long)IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardDown),
+                               consumed]);
+        }
         // Returning true consumes the event. Keep Power/volume available as
         // physical escape controls; only Home is disabled with touch lock on.
-        return tvGetTouchLockNotifyState() && tvHIDEventContainsHome(event);
+        return consumed;
     }, NULL, NULL);
     scheduleClient(gTvTouchLockHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
     TVLog(@"Touch lock HID filter installed (Home only)");
@@ -4757,6 +4806,9 @@ static void tvVerifyStartupUnlockAndOpenSettings(NSUInteger attempt) {
         return;
     }
 
+    tvRecordHomeAudit(@"startup-unlock",
+                      [NSString stringWithFormat:@"attempt=%lu locked=%d blanked=%d",
+                       (unsigned long)attempt, locked, blanked]);
     [[STHIDEventGenerator sharedGenerator] menuPress];
     TVLog(@"First-client unlock verification %lu/6: Home pressed",
           (unsigned long)attempt);
@@ -5739,7 +5791,11 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
                              duration:sec > 0 ? sec : 0.3];
         tvJSStopIfNeeded();
     };
-    ctx[@"home"] = ^{ tvTrace(@"home"); [gen menuPress]; };
+    ctx[@"home"] = ^{
+        tvTrace(@"home");
+        tvRecordHomeAudit(@"javascript-home", @"");
+        [gen menuPress];
+    };
     ctx[@"key"] = ^(NSString *k) { tvTrace([@"key " stringByAppendingString:(k ?: @"")]); [gen keyPress:k]; };
     ctx[@"typeText"] = ^(NSString *s) {
         tvTrace([@"typeText " stringByAppendingString:(s ?: @"")]);
@@ -6476,6 +6532,10 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlShutdown();
     } else if ([cmd isEqualToString:@"wakeiflocked"]) {
         resp = tvCtlWakeIfLocked();
+    } else if ([cmd isEqualToString:@"homeaudit"]) {
+        resp = tvCtlHomeAudit(NO);
+    } else if ([cmd isEqualToString:@"homeaudit clear"]) {
+        resp = tvCtlHomeAudit(YES);
     } else if ([cmd isEqualToString:@"controlcenter"]) {
         resp = tvCtlControlCenter();
     } else if ([cmd hasPrefix:@"rotationlock "]) {
