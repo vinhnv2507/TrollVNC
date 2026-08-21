@@ -262,6 +262,12 @@ class ControlChannel:
         lines = reply.strip().splitlines()
         return "\n".join(lines[1:]) if lines and lines[0].startswith("OK ") else reply.strip()
 
+    async def diagnostics(self) -> str:
+        """Return device health, lock state and recent relevant crash reports."""
+        reply = await self.command("diagnostics", read_timeout=15)
+        lines = reply.strip().splitlines()
+        return "\n".join(lines[1:]) if lines and lines[0] == "OK" else reply.strip()
+
     async def frontmost_app(self) -> Optional[str]:
         """Bundle ID đang hiển thị; ``None`` khi ở màn hình hệ thống/không xác định."""
         reply = (await self.command("frontmost")).strip()

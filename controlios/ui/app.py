@@ -1823,6 +1823,8 @@ class MainWindow(QMainWindow):
         keeper_menu = QMenu(keeper_button)
         keeper_check_act = keeper_menu.addAction("Kiểm tra + bật lại nếu chết")
         keeper_check_act.triggered.connect(lambda _checked=False: self._ensure_keeper())
+        diagnostics_act = keeper_menu.addAction("Chẩn đoán máy…")
+        diagnostics_act.triggered.connect(self._show_device_diagnostics)
         keeper_menu.addSeparator()
         self.keeper_watch_act = keeper_menu.addAction("Tự động canh mọi máy")
         self.keeper_watch_act.setCheckable(True)
@@ -2697,6 +2699,15 @@ class MainWindow(QMainWindow):
         dialog = BulkResultDialog("Nguồn phát Home", len(targets), self)
         dialog.show()
         self.pool.home_audit(targets, clear, dialog.on_event, dialog.on_done)
+
+    def _show_device_diagnostics(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        dialog = BulkResultDialog("Chẩn đoán thiết bị", len(targets), self)
+        dialog.show()
+        self.pool.diagnostics(targets, dialog.on_event, dialog.on_done)
 
     def _set_assistive_touch(self, state: str) -> None:
         targets = self.action_targets()

@@ -349,6 +349,10 @@ class FakeControlServer:
         if cmd == "homeaudit clear":
             return b"OK cleared\n"
 
+        if cmd == "diagnostics":
+            return (b"OK\nuptime=3600\ndisk_free=1073741824\nkeeper=1\n"
+                    b"frontmost=com.brd.earnapp\ncrash_count=0\n")
+
         if cmd == "wakeiflocked":
             if self.unpatched:
                 return b"ERR Unknown\n"

@@ -541,6 +541,12 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Nhật ký Home", action, on_event, on_done)
 
+    def diagnostics(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        async def action(channel):
+            return await channel.diagnostics()
+
+        self._bulk_app_action(keys, "Chẩn đoán thiết bị", action, on_event, on_done)
+
     def terminate_app(self, keys: Iterable[str], bundle_id: str,
                       on_event=None, on_done=None) -> None:
         async def action(channel):
