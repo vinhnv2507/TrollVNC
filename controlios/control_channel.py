@@ -229,7 +229,25 @@ class ControlChannel:
         """Bật/tắt lớp phủ TrollStore chặn cảm ứng toàn hệ thống."""
         if state not in {"on", "off", "status"}:
             raise ValueError("state phải là on, off hoặc status")
-        reply = (await self.command(f"touchlock {state}", read_timeout=8)).strip().lower()
+        try:
+            reply = (await self.command(f"touchlock {state}", read_timeout=8)).strip().lower()
+        except ControlError as original_error:
+            # Foregrounding the overlay can recycle the control socket after
+            # iOS has already committed the requested state. Reconnect and
+            # verify to avoid reporting a false failure while VNC stays alive.
+            if state == "status":
+                raise
+            expected = f"ok {state}"
+            for _ in range(4):
+                await asyncio.sleep(1.0)
+                try:
+                    reply = (await self.command("touchlock status", read_timeout=5)).strip().lower()
+                except ControlError:
+                    continue
+                if reply == expected:
+                    return state == "on"
+                break
+            raise original_error
         if reply == "ok on":
             return True
         if reply == "ok off":
