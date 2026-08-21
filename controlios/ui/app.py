@@ -1552,6 +1552,21 @@ class MainWindow(QMainWindow):
         gesture_row.addWidget(rotation_button)
         self.device_gesture_buttons["rotationlock"] = rotation_button
 
+        touch_lock_button = QToolButton()
+        touch_lock_button.setText("▣ Khóa cảm ứng")
+        touch_lock_button.setToolTip(
+            "Phủ toàn màn hình để chặn chạm tay; app đang mở vẫn tiếp tục chạy")
+        touch_lock_button.setPopupMode(QToolButton.InstantPopup)
+        touch_lock_menu = QMenu(touch_lock_button)
+        for label, state in [("Bật khóa cảm ứng", "on"),
+                             ("Tắt khóa cảm ứng", "off")]:
+            action = touch_lock_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, s=state: self._set_touch_lock(s))
+        touch_lock_button.setMenu(touch_lock_menu)
+        gesture_row.addWidget(touch_lock_button)
+        self.device_gesture_buttons["touchlock"] = touch_lock_button
+
         # AssistiveTouch iOS (nút tròn nổi) — bật/tắt cho máy đang xem/chọn.
         at_button = QToolButton()
         at_button.setText("⊙ AssistiveTouch")
@@ -2655,6 +2670,16 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
         self.pool.rotation_lock(
+            targets, state,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
+
+    def _set_touch_lock(self, state: str) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        self.pool.touch_lock(
             targets, state,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))

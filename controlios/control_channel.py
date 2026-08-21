@@ -225,6 +225,17 @@ class ControlChannel:
             return False
         raise ControlError(f"Không đổi được khóa xoay: {reply}")
 
+    async def set_touch_lock(self, state: str) -> bool:
+        """Bật/tắt lớp phủ TrollStore chặn cảm ứng toàn hệ thống."""
+        if state not in {"on", "off", "status"}:
+            raise ValueError("state phải là on, off hoặc status")
+        reply = (await self.command(f"touchlock {state}", read_timeout=8)).strip().lower()
+        if reply == "ok on":
+            return True
+        if reply == "ok off":
+            return False
+        raise ControlError(f"Không đổi được khóa cảm ứng: {reply}")
+
     async def frontmost_app(self) -> Optional[str]:
         """Bundle ID đang hiển thị; ``None`` khi ở màn hình hệ thống/không xác định."""
         reply = (await self.command("frontmost")).strip()

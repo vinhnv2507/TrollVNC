@@ -526,6 +526,14 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Đổi khóa xoay", action, on_event, on_done)
 
+    def touch_lock(self, keys: Iterable[str], state: str,
+                   on_event=None, on_done=None) -> None:
+        async def action(channel):
+            locked = await channel.set_touch_lock(state)
+            return f"khóa cảm ứng: {'bật' if locked else 'tắt'}"
+
+        self._bulk_app_action(keys, "Đổi khóa cảm ứng", action, on_event, on_done)
+
     def terminate_app(self, keys: Iterable[str], bundle_id: str,
                       on_event=None, on_done=None) -> None:
         async def action(channel):

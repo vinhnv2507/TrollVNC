@@ -145,6 +145,12 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         await self.channel.shutdown()
         self.assertEqual(self.server.shutdown_count, 1)
 
+    async def test_touch_lock_is_per_device(self) -> None:
+        self.assertTrue(await self.channel.set_touch_lock("on"))
+        self.assertTrue(self.server.touch_locked)
+        self.assertFalse(await self.channel.set_touch_lock("off"))
+        self.assertFalse(self.server.touch_locked)
+
     async def test_push_prelude_sends_base64(self) -> None:
         import base64
         await self.channel.push_prelude("function foo(){}")

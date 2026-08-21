@@ -52,6 +52,7 @@ class FakeControlServer:
     keeper_start_noop: bool = False
     reboot_count: int = 0
     shutdown_count: int = 0
+    touch_locked: bool = False
     locked: bool = False
     home_count: int = 0
     #: bundle id đã bị xoá dữ liệu; (bundle, tên) đã khôi phục
@@ -334,6 +335,14 @@ class FakeControlServer:
         if cmd == "shutdown":
             self.shutdown_count += 1
             return b"OK shutting down\n"
+
+        if cmd.startswith("touchlock "):
+            state = cmd.split(" ", 1)[1]
+            if state == "on":
+                self.touch_locked = True
+            elif state == "off":
+                self.touch_locked = False
+            return f"OK {'on' if self.touch_locked else 'off'}\n".encode()
 
         if cmd == "wakeiflocked":
             if self.unpatched:
