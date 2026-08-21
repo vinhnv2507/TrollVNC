@@ -4895,6 +4895,60 @@ static NSData *tvCtlKeeper(NSString *argument) {
     return [@"ERR Usage keeper status|start\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSData *tvCtlDiagnostics(void) {
+    NSProcessInfo *processInfo = [NSProcessInfo processInfo];
+    NSDictionary *fs = [[NSFileManager defaultManager] attributesOfFileSystemForPath:@"/var" error:nil];
+    unsigned long long total = [fs[NSFileSystemSize] unsignedLongLongValue];
+    unsigned long long free = [fs[NSFileSystemFreeSize] unsignedLongLongValue];
+    double loads[3] = {0, 0, 0};
+    getloadavg(loads, 3);
+
+    BOOL keychainLocked = NO;
+    BOOL passcodeSet = NO;
+    BOOL screenLocked = tvReadAccurateLockState(&keychainLocked, &passcodeSet);
+    BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
+    NSString *frontmost = tvFrontmostBundleID() ?: @"none";
+
+    NSMutableArray<NSDictionary *> *crashes = [NSMutableArray array];
+    NSArray<NSString *> *roots = @[@"/var/mobile/Library/Logs/CrashReporter",
+                                   @"/Library/Logs/CrashReporter"];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *root in roots) {
+        NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:root];
+        for (NSString *relative in enumerator) {
+            NSString *lower = relative.lowercaseString;
+            if (!([lower hasSuffix:@".ips"] || [lower hasSuffix:@".crash"]))
+                continue;
+            if (![lower containsString:@"controlios"] && ![lower containsString:@"trollvnc"] &&
+                ![lower containsString:@"keeper"] && ![lower containsString:@"earnapp"])
+                continue;
+            NSString *path = [root stringByAppendingPathComponent:relative];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+            [crashes addObject:@{@"path": path,
+                                 @"date": attrs[NSFileModificationDate] ?: [NSDate distantPast]}];
+        }
+    }
+    [crashes sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
+        return [b[@"date"] compare:a[@"date"]];
+    }];
+
+    NSMutableString *out = [NSMutableString stringWithString:@"OK\n"];
+    [out appendFormat:@"uptime=%.0f\n", processInfo.systemUptime];
+    [out appendFormat:@"memory_total=%llu\n", processInfo.physicalMemory];
+    [out appendFormat:@"disk_total=%llu\n", total];
+    [out appendFormat:@"disk_free=%llu\n", free];
+    [out appendFormat:@"load=%.2f %.2f %.2f\n", loads[0], loads[1], loads[2]];
+    [out appendFormat:@"screen_locked=%d\nkeychain_locked=%d\npasscode=%d\nblanked=%d\n",
+                      screenLocked, keychainLocked, passcodeSet, blanked];
+    [out appendFormat:@"touch_lock=%d\nkeeper=%d\nvnc_clients=%d\nfrontmost=%@\n",
+                      tvGetTouchLockNotifyState(), tvKeeperdRunning(), gClientCount, frontmost];
+    NSUInteger count = MIN((NSUInteger)5, crashes.count);
+    [out appendFormat:@"crash_count=%lu\n", (unsigned long)crashes.count];
+    for (NSUInteger index = 0; index < count; ++index)
+        [out appendFormat:@"crash=%@\n", crashes[index][@"path"]];
+    return [out dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 static void tvEnsureKeeperAtStartup(void) {
     dispatch_queue_t queue = dispatch_queue_create(
         "com.controlios.server.keeper-startup-check", DISPATCH_QUEUE_SERIAL);
@@ -6679,6 +6733,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"keeper "]) {
         resp = tvCtlKeeper([cmd substringFromIndex:7]);
+    } else if ([cmd isEqualToString:@"diagnostics"]) {
+        resp = tvCtlDiagnostics();
     } else if ([cmd hasPrefix:@"setscale "]) {
         resp = tvCtlSetScale([cmd substringFromIndex:9]);
     } else if ([cmd hasPrefix:@"findtext64 "]) {
