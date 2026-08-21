@@ -4736,6 +4736,12 @@ static void tvDimDisplayToMinimum(void) {
 }
 
 static void tvVerifyStartupUnlockAndOpenSettings(NSUInteger attempt) {
+    // A pending startup-unlock retry must never inject Home while the explicit
+    // touch blocker is active. Otherwise two retries can open App Switcher.
+    if (tvGetTouchLockNotifyState()) {
+        TVLog(@"First-client unlock verification cancelled: touch lock is active");
+        return;
+    }
     BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
     BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
     TVLog(@"First-client unlock verification %lu/6: locked=%d blanked=%d",
@@ -7856,8 +7862,8 @@ int main(int argc, const char *argv[]) {
         installTerminationHandlers();
 
         tvStartControlSocketIfNeeded();
-        // Never preserve a touch blocker across a daemon/device restart.
-        (void)tvSetTouchLockNotifyState(NO);
+        // Keep touch-lock state across a daemon restart. notifyd resets it on a
+        // real device reboot, so reboot still starts safely with touch lock off.
         tvInstallTouchLockHIDFilter();
         tvEnsureKeeperAtStartup();
         tvStartWiFiIPWatchdog();
