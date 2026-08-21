@@ -4601,6 +4601,7 @@ static BOOL tvHIDEventContainsHome(IOHIDEventRef event) {
 }
 
 static IOHIDEventSystemClientRef gTvTouchLockHIDClient = NULL;
+static const uint64_t kTvBlockedPhysicalHomeSenderID = 0x1000001d4ULL;
 
 static void tvInstallTouchLockHIDFilter(void) {
     void *handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",
@@ -4635,21 +4636,24 @@ static void tvInstallTouchLockHIDFilter(void) {
         (void)target;
         (void)refcon;
         BOOL containsHome = tvHIDEventContainsHome(event);
-        BOOL consumed = containsHome && tvGetTouchLockNotifyState();
+        uint64_t senderID = containsHome && getSenderID ? getSenderID(event) : 0;
+        BOOL blockedPhysicalHome = containsHome &&
+            senderID == kTvBlockedPhysicalHomeSenderID;
+        BOOL consumed = blockedPhysicalHome && tvGetTouchLockNotifyState();
         if (containsHome) {
-            uint64_t senderID = getSenderID ? getSenderID(event) : 0;
             tvRecordHomeAudit(@"hid-home",
-                              [NSString stringWithFormat:@"sender=%p senderID=0x%llx down=%lld consumed=%d",
+                              [NSString stringWithFormat:@"sender=%p senderID=0x%llx down=%lld physicalTarget=%d consumed=%d",
                                sender, (unsigned long long)senderID,
                                (long long)IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardDown),
-                               consumed]);
+                               blockedPhysicalHome, consumed]);
         }
-        // Returning true consumes the event. Keep Power/volume available as
-        // physical escape controls; only Home is disabled with touch lock on.
+        // Block only the noisy physical Home source while touch lock is on.
+        // Synthetic Home from the authenticated VNC client remains available.
         return consumed;
     }, NULL, NULL);
     scheduleClient(gTvTouchLockHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-    TVLog(@"Touch lock HID filter installed (Home only)");
+    TVLog(@"Touch lock HID filter installed (physical Home sender 0x%llx)",
+          (unsigned long long)kTvBlockedPhysicalHomeSenderID);
 }
 
 static NSString *tvFrontmostBundleID(void) {
