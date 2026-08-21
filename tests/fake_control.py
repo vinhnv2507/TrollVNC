@@ -344,6 +344,11 @@ class FakeControlServer:
                 self.touch_locked = False
             return f"OK {'on' if self.touch_locked else 'off'}\n".encode()
 
+        if cmd == "homeaudit":
+            return b"OK 1\n1724230800.000 | hid-home | touchLock=1 | senderID=0x1\n"
+        if cmd == "homeaudit clear":
+            return b"OK cleared\n"
+
         if cmd == "wakeiflocked":
             if self.unpatched:
                 return b"ERR Unknown\n"

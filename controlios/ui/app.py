@@ -1563,6 +1563,11 @@ class MainWindow(QMainWindow):
             action = touch_lock_menu.addAction(label)
             action.triggered.connect(
                 lambda _checked=False, s=state: self._set_touch_lock(s))
+        touch_lock_menu.addSeparator()
+        touch_lock_menu.addAction("Xem nguồn phát Home…").triggered.connect(
+            lambda: self._show_home_audit(False))
+        touch_lock_menu.addAction("Xóa nhật ký Home").triggered.connect(
+            lambda: self._show_home_audit(True))
         touch_lock_button.setMenu(touch_lock_menu)
         gesture_row.addWidget(touch_lock_button)
         self.device_gesture_buttons["touchlock"] = touch_lock_button
@@ -2683,6 +2688,15 @@ class MainWindow(QMainWindow):
             targets, state,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
+
+    def _show_home_audit(self, clear: bool) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        dialog = BulkResultDialog("Nguồn phát Home", len(targets), self)
+        dialog.show()
+        self.pool.home_audit(targets, clear, dialog.on_event, dialog.on_done)
 
     def _set_assistive_touch(self, state: str) -> None:
         targets = self.action_targets()

@@ -534,6 +534,13 @@ class DevicePool:
 
         self._bulk_app_action(keys, "Đổi khóa cảm ứng", action, on_event, on_done)
 
+    def home_audit(self, keys: Iterable[str], clear: bool = False,
+                   on_event=None, on_done=None) -> None:
+        async def action(channel):
+            return await channel.home_audit(clear)
+
+        self._bulk_app_action(keys, "Nhật ký Home", action, on_event, on_done)
+
     def terminate_app(self, keys: Iterable[str], bundle_id: str,
                       on_event=None, on_done=None) -> None:
         async def action(channel):

@@ -236,6 +236,14 @@ class ControlChannel:
             return False
         raise ControlError(f"Không đổi được khóa cảm ứng: {reply}")
 
+    async def home_audit(self, clear: bool = False) -> str:
+        """Read or clear the device-side Home-key audit trail."""
+        reply = await self.command("homeaudit clear" if clear else "homeaudit", read_timeout=8)
+        if clear:
+            return "đã xóa nhật ký Home"
+        lines = reply.strip().splitlines()
+        return "\n".join(lines[1:]) if lines and lines[0].startswith("OK ") else reply.strip()
+
     async def frontmost_app(self) -> Optional[str]:
         """Bundle ID đang hiển thị; ``None`` khi ở màn hình hệ thống/không xác định."""
         reply = (await self.command("frontmost")).strip()
