@@ -1033,9 +1033,9 @@ class ScreenTextMonitorDialog(QDialog):
         self.start_button = QPushButton("Bật canh 24/7")
         self.start_button.clicked.connect(self.start_monitor)
         buttons.addWidget(self.start_button)
-        stop = QPushButton("Tắt")
-        stop.clicked.connect(self.stop_monitor)
-        buttons.addWidget(stop)
+        self.stop_button = QPushButton("Tắt canh máy này")
+        self.stop_button.clicked.connect(self.stop_monitor)
+        buttons.addWidget(self.stop_button)
         once = QPushButton("Kiểm tra ngay")
         once.clicked.connect(self.run_once)
         buttons.addWidget(once)
@@ -1054,14 +1054,20 @@ class ScreenTextMonitorDialog(QDialog):
         return [device.key for device in self.window.registry.devices if device.enabled]
 
     def refresh_target_count(self, *_args) -> None:
-        count = len(self.target_keys())
+        targets = set(self.target_keys())
+        count = len(targets)
         self.target_count.setText(f"Sẽ kiểm tra {count} máy trong phạm vi này.")
-        if self.timer.isActive():
+        watched_here = targets & self.monitored_keys
+        self.start_button.setEnabled(bool(targets - self.monitored_keys))
+        self.stop_button.setEnabled(bool(watched_here))
+        if self.monitored_keys:
             opened = self.window.detail.key
             state = ("BẬT" if opened in self.monitored_keys else "TẮT") if opened else "chưa mở máy"
             self.status.setText(
                 f"Đang canh {len(self.monitored_keys)} máy cố định. "
                 f"Máy đang mở: {state}.")
+        else:
+            self.status.setText("Đang tắt")
 
     def start_monitor(self) -> None:
         self.settings.setValue("minutes", self.minutes.value())
@@ -1071,19 +1077,25 @@ class ScreenTextMonitorDialog(QDialog):
         if not keys:
             self.status.setText("Phạm vi đã chọn không có máy để bật canh.")
             return
-        self.monitored_keys = set(keys)
+        added = set(keys) - self.monitored_keys
+        self.monitored_keys.update(keys)
         self.window.grid.set_monitored_keys(self.monitored_keys)
         self.timer.start(self.minutes.value() * 60 * 1000)
-        self.start_button.setEnabled(False)
+        if added:
+            self.log.appendPlainText(
+                f"Đã bật canh thêm {len(added)} máy; tổng {len(self.monitored_keys)} máy.")
         self.refresh_target_count()
         self.run_once()
 
     def stop_monitor(self) -> None:
-        self.timer.stop()
-        self.monitored_keys.clear()
-        self.window.grid.set_monitored_keys(set())
-        self.start_button.setEnabled(True)
-        self.status.setText("Đang tắt")
+        removed = self.monitored_keys & set(self.target_keys())
+        self.monitored_keys.difference_update(removed)
+        self.window.grid.set_monitored_keys(self.monitored_keys)
+        if not self.monitored_keys:
+            self.timer.stop()
+        self.log.appendPlainText(
+            f"Đã tắt canh {len(removed)} máy; còn {len(self.monitored_keys)} máy.")
+        self.refresh_target_count()
 
     def run_once(self) -> None:
         if self.running:
