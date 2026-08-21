@@ -37,6 +37,8 @@
 	<true/>
 	<key>com.apple.backboard.client</key>
 	<true/>
+	<key>com.apple.assertiond.app-state-monitor</key>
+	<true/>
 	<key>com.apple.backboardd.launchapplications</key>
 	<true/>
 	<key>com.apple.developer.networking.HotspotHelper</key>

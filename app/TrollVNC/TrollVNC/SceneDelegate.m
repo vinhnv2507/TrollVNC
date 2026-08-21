@@ -50,6 +50,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
 @property(nonatomic, strong) SBSAccessibilityWindowHostingController *touchBlockHost;
 @property(nonatomic, assign) int touchLockNotifyToken;
 @property(nonatomic, assign) BOOL touchBlockRegistered;
+@property(nonatomic, weak) UIWindowScene *touchLockScene;
 @end
 
 @implementation SceneDelegate
@@ -61,6 +62,12 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
     // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
     // This delegate does not imply the connecting scene or session are new (see
     // `application:configurationForConnectingSceneSession` instead).
+    self.touchLockScene = (UIWindowScene *)scene;
+    [[UIDevice currentDevice] beginGeneratingDeviceOrientationNotifications];
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(refreshTouchBlockFrame)
+                                                 name:UIDeviceOrientationDidChangeNotification
+                                               object:nil];
     __weak typeof(self) weakSelf = self;
     notify_register_dispatch(kTVNCTouchLockNotification, &_touchLockNotifyToken,
                              dispatch_get_main_queue(), ^(int token) {
@@ -72,6 +79,14 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
     uint64_t state = 0;
     notify_get_state(_touchLockNotifyToken, &state);
     [self setTouchBlockingEnabled:(state != 0) inScene:(UIWindowScene *)scene];
+}
+
+- (void)refreshTouchBlockFrame {
+    if (!self.touchBlockWindow || !self.touchLockScene)
+        return;
+    self.touchBlockWindow.frame = self.touchLockScene.coordinateSpace.bounds;
+    self.touchBlockWindow.rootViewController.view.frame = self.touchBlockWindow.bounds;
+    [self.touchBlockWindow.rootViewController.view setNeedsLayout];
 }
 
 - (void)setTouchBlockingEnabled:(BOOL)enabled inScene:(UIWindowScene *)scene {
@@ -117,6 +132,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
     }
 
     self.touchBlockWindow.hidden = NO;
+    [self refreshTouchBlockFrame];
     [self.touchBlockWindow makeKeyAndVisible];
 
     if (!self.touchBlockRegistered) {
@@ -138,6 +154,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
 }
 
 - (void)sceneDidBecomeActive:(UIScene *)scene {
+    [self refreshTouchBlockFrame];
     // Called when the scene has moved from an inactive state to an active state.
     // Use this method to restart any tasks that were paused (or not yet started) when the scene was inactive.
 }
@@ -148,6 +165,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
 }
 
 - (void)sceneWillEnterForeground:(UIScene *)scene {
+    [self refreshTouchBlockFrame];
     // Called as the scene transitions from the background to the foreground.
     // Use this method to undo the changes made on entering the background.
 }
@@ -159,6 +177,8 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    [[UIDevice currentDevice] endGeneratingDeviceOrientationNotifications];
     if (_touchLockNotifyToken > 0)
         notify_cancel(_touchLockNotifyToken);
 }

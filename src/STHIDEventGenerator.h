@@ -291,6 +291,7 @@ __used NS_INLINE void STAccurateSleep(NSTimeInterval seconds) {
 
 /* MARK: --- Recycle --- */
 
+- (void)dispatchHandResetEvent;
 - (void)releaseEveryKeys;
 
 /* MARK: --- Keyboard Interruption --- */

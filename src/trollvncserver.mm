@@ -65,6 +65,10 @@
 #import "STHIDEventGenerator.h"
 #import "ScreenCapturer.h"
 
+@interface NSObject (TVBKSApplicationStateMonitor)
+- (void)setHandler:(void (^)(NSDictionary *appInfo))handler;
+@end
+
 #define LocalizedString(key, comment, bundle, table)                                                                   \
     (NSLocalizedStringFromTableInBundle((key), (table), (bundle), (comment)) ?: (key))
 
@@ -4398,14 +4402,44 @@ static BOOL tvCtlNotifyState(const char *name) {
     return status == NOTIFY_STATUS_OK && state != 0;
 }
 
-static NSData *tvCtlWakeIfLocked(void) {
+static BOOL tvReadAccurateLockState(BOOL *keychainLocked, BOOL *passcodeSet) {
     BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
+    BOOL keychain = NO;
+    BOOL passcode = NO;
+    void *sbs = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/SpringBoardServices",
+                       RTLD_LAZY | RTLD_LOCAL);
+    auto serverPort = sbs ? (mach_port_t (*)(void))dlsym(sbs, "SBSSpringBoardServerPort") : NULL;
+    auto getLockStatus = sbs ? (void (*)(mach_port_t, BOOL *, BOOL *))
+        dlsym(sbs, "SBGetScreenLockStatus") : NULL;
+    if (serverPort && getLockStatus) {
+        mach_port_t port = serverPort();
+        if (port != MACH_PORT_NULL)
+            getLockStatus(port, &locked, &passcode);
+    }
+    void *mkb = dlopen("/System/Library/PrivateFrameworks/MobileKeyBag.framework/MobileKeyBag",
+                       RTLD_LAZY | RTLD_LOCAL);
+    auto getDeviceLockState = mkb ? (int (*)(CFDictionaryRef))
+        dlsym(mkb, "MKBGetDeviceLockState") : NULL;
+    if (getDeviceLockState) {
+        int state = getDeviceLockState(NULL);
+        keychain = state == 1 || state == 2;
+    }
+    if (keychainLocked) *keychainLocked = keychain;
+    if (passcodeSet) *passcodeSet = passcode;
+    return locked;
+}
+
+static NSData *tvCtlWakeIfLocked(void) {
+    BOOL keychainLocked = NO;
+    BOOL passcodeSet = NO;
+    BOOL locked = tvReadAccurateLockState(&keychainLocked, &passcodeSet);
     BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
     if (!locked && !blanked)
         return [@"OK unlocked\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     tvRecordHomeAudit(@"wakeiflocked",
-                      [NSString stringWithFormat:@"locked=%d blanked=%d", locked, blanked]);
+                      [NSString stringWithFormat:@"locked=%d blanked=%d keychain=%d passcode=%d",
+                       locked, blanked, keychainLocked, passcodeSet]);
     [[STHIDEventGenerator sharedGenerator] menuPress];
     TVLog(@"Control socket: wakeiflocked -> Home (locked=%d blanked=%d)", locked, blanked);
     return [(locked ? @"OK home locked\n" : @"OK home blanked\n")
@@ -4496,7 +4530,45 @@ static NSData *tvCtlRotationLock(NSString *requestedState) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static id gTvBKSAppStateMonitor = nil;
+static NSString *gTvBKSFrontmostBundleID = nil;
+
+static void tvInstallBKSFrontmostMonitor(void) {
+    void *handle = dlopen("/System/Library/PrivateFrameworks/BackBoardServices.framework/BackBoardServices",
+                          RTLD_LAZY | RTLD_LOCAL);
+    Class monitorClass = handle ? NSClassFromString(@"BKSApplicationStateMonitor") : Nil;
+    if (!monitorClass) {
+        TVLog(@"BKS foreground monitor unavailable; AX fallback retained");
+        return;
+    }
+    id monitor = [[monitorClass alloc] init];
+    if (![monitor respondsToSelector:@selector(setHandler:)]) {
+        TVLog(@"BKS foreground monitor has no handler API; AX fallback retained");
+        return;
+    }
+    [monitor setHandler:^(NSDictionary *appInfo) {
+        NSString *bundleID = appInfo[@"SBApplicationStateDisplayIDKey"];
+        if (!bundleID.length || [appInfo[@"BKSApplicationStateExtensionKey"] boolValue])
+            return;
+        BOOL frontmost = [appInfo[@"BKSApplicationStateAppIsFrontmost"] boolValue];
+        @synchronized ([NSObject class]) {
+            if (frontmost)
+                gTvBKSFrontmostBundleID = [bundleID copy];
+            else if ([gTvBKSFrontmostBundleID isEqualToString:bundleID])
+                gTvBKSFrontmostBundleID = nil;
+        }
+    }];
+    gTvBKSAppStateMonitor = monitor;
+    TVLog(@"BKS foreground monitor installed");
+}
+
 static NSData *tvCtlFrontmostApp(void) {
+    @synchronized ([NSObject class]) {
+        if (gTvBKSFrontmostBundleID.length) {
+            return [[NSString stringWithFormat:@"OK %@\n", gTvBKSFrontmostBundleID]
+                    dataUsingEncoding:NSUTF8StringEncoding];
+        }
+    }
     void *handle = dlopen("/System/Library/PrivateFrameworks/AccessibilityUtilities.framework/AccessibilityUtilities",
                           RTLD_LAZY | RTLD_LOCAL);
     Class serverClass = handle ? NSClassFromString(@"AXSpringBoardServer") : Nil;
@@ -4683,6 +4755,29 @@ static void tvInstallTouchLockHIDFilter(void) {
           (unsigned long long)kTvBlockedPhysicalHomeSenderID);
 }
 
+static int gTvLockResetToken = 0;
+static int gTvBlankResetToken = 0;
+
+static void tvInstallLockTouchResetObservers(void) {
+    notify_register_dispatch("com.apple.springboard.lockstate", &gTvLockResetToken,
+                             dispatch_get_main_queue(), ^(int token) {
+        (void)token;
+        if (tvReadAccurateLockState(NULL, NULL)) {
+            [[STHIDEventGenerator sharedGenerator] dispatchHandResetEvent];
+            TVLog(@"Touch state reset: screen locked");
+        }
+    });
+    notify_register_dispatch("com.apple.springboard.hasBlankedScreen", &gTvBlankResetToken,
+                             dispatch_get_main_queue(), ^(int token) {
+        uint64_t state = 0;
+        if (notify_get_state(token, &state) == NOTIFY_STATUS_OK && state != 0) {
+            [[STHIDEventGenerator sharedGenerator] dispatchHandResetEvent];
+            TVLog(@"Touch state reset: screen blanked");
+        }
+    });
+    TVLog(@"Lock/blank touch-reset observers installed");
+}
+
 static NSString *tvFrontmostBundleID(void) {
     NSData *data = tvCtlFrontmostApp();
     NSString *reply = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -4825,10 +4920,12 @@ static void tvVerifyStartupUnlockAndOpenSettings(NSUInteger attempt) {
         TVLog(@"First-client unlock verification cancelled: touch lock is active");
         return;
     }
-    BOOL locked = tvCtlNotifyState("com.apple.springboard.lockstate");
+    BOOL keychainLocked = NO;
+    BOOL passcodeSet = NO;
+    BOOL locked = tvReadAccurateLockState(&keychainLocked, &passcodeSet);
     BOOL blanked = tvCtlNotifyState("com.apple.springboard.hasBlankedScreen");
-    TVLog(@"First-client unlock verification %lu/6: locked=%d blanked=%d",
-          (unsigned long)attempt, locked, blanked);
+    TVLog(@"First-client unlock verification %lu/6: locked=%d blanked=%d keychain=%d passcode=%d",
+          (unsigned long)attempt, locked, blanked, keychainLocked, passcodeSet);
 
     if (!locked) {
         tvDimDisplayToMinimum();
@@ -7959,6 +8056,8 @@ int main(int argc, const char *argv[]) {
         // Keep touch-lock state across a daemon restart. notifyd resets it on a
         // real device reboot, so reboot still starts safely with touch lock off.
         tvInstallTouchLockHIDFilter();
+        tvInstallLockTouchResetObservers();
+        tvInstallBKSFrontmostMonitor();
         tvEnsureKeeperAtStartup();
         tvStartWiFiIPWatchdog();
     }
