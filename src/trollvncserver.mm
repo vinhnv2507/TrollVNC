@@ -4600,8 +4600,25 @@ static BOOL tvHIDEventContainsHome(IOHIDEventRef event) {
     return NO;
 }
 
+static BOOL tvHIDEventContainsDigitizer(IOHIDEventRef event) {
+    if (!event)
+        return NO;
+    if (IOHIDEventGetType(event) == kIOHIDEventTypeDigitizer)
+        return YES;
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children)
+        return NO;
+    for (CFIndex index = 0; index < CFArrayGetCount(children); ++index) {
+        if (tvHIDEventContainsDigitizer((IOHIDEventRef)CFArrayGetValueAtIndex(children, index)))
+            return YES;
+    }
+    return NO;
+}
+
 static IOHIDEventSystemClientRef gTvTouchLockHIDClient = NULL;
 static const uint64_t kTvBlockedPhysicalHomeSenderID = 0x1000001d4ULL;
+static const uint64_t kTvRemoteSenderLegacy = 0x8000000817319371ULL;
+static const uint64_t kTvRemoteSenderModern = 0x8000000817319372ULL;
 
 static void tvInstallTouchLockHIDFilter(void) {
     void *handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",
@@ -4636,10 +4653,16 @@ static void tvInstallTouchLockHIDFilter(void) {
         (void)target;
         (void)refcon;
         BOOL containsHome = tvHIDEventContainsHome(event);
-        uint64_t senderID = containsHome && getSenderID ? getSenderID(event) : 0;
+        BOOL containsDigitizer = tvHIDEventContainsDigitizer(event);
+        uint64_t senderID = (containsHome || containsDigitizer) && getSenderID
+            ? getSenderID(event) : 0;
+        BOOL remoteEvent = senderID == kTvRemoteSenderLegacy ||
+            senderID == kTvRemoteSenderModern;
         BOOL blockedPhysicalHome = containsHome &&
             senderID == kTvBlockedPhysicalHomeSenderID;
-        BOOL consumed = blockedPhysicalHome && tvGetTouchLockNotifyState();
+        BOOL blockedPhysicalTouch = containsDigitizer && !remoteEvent;
+        BOOL consumed = (blockedPhysicalHome || blockedPhysicalTouch) &&
+            tvGetTouchLockNotifyState();
         if (containsHome) {
             tvRecordHomeAudit(@"hid-home",
                               [NSString stringWithFormat:@"sender=%p senderID=0x%llx down=%lld physicalTarget=%d consumed=%d",
@@ -4647,12 +4670,16 @@ static void tvInstallTouchLockHIDFilter(void) {
                                (long long)IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardDown),
                                blockedPhysicalHome, consumed]);
         }
+        if (containsDigitizer && tvGetTouchLockNotifyState() && !remoteEvent) {
+            TVLog(@"Touch lock: physical digitizer blocked senderID=0x%llx",
+                  (unsigned long long)senderID);
+        }
         // Block only the noisy physical Home source while touch lock is on.
         // Synthetic Home from the authenticated VNC client remains available.
         return consumed;
     }, NULL, NULL);
     scheduleClient(gTvTouchLockHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-    TVLog(@"Touch lock HID filter installed (physical Home sender 0x%llx)",
+    TVLog(@"Touch lock HID filter installed (local touch + physical Home sender 0x%llx)",
           (unsigned long long)kTvBlockedPhysicalHomeSenderID);
 }
 

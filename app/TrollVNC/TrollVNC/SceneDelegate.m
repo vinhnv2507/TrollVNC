@@ -40,7 +40,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
 + (BOOL)_isSecure { return YES; }
 + (BOOL)_isSystemWindow { return YES; }
 - (BOOL)_isWindowServerHostingManaged { return NO; }
-- (BOOL)_ignoresHitTest { return NO; }
+- (BOOL)_ignoresHitTest { return YES; }
 - (BOOL)_isSecure { return YES; }
 - (BOOL)_shouldCreateContextAsSecure { return YES; }
 @end
@@ -88,7 +88,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
 
         UIViewController *controller = [[UIViewController alloc] init];
         controller.view.backgroundColor = [UIColor clearColor];
-        controller.view.userInteractionEnabled = YES;
+        controller.view.userInteractionEnabled = NO;
 
         UILabel *label = [[UILabel alloc] init];
         label.translatesAutoresizingMaskIntoConstraints = NO;
@@ -100,7 +100,7 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
         label.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55];
         label.layer.cornerRadius = 14.0;
         label.layer.masksToBounds = YES;
-        label.userInteractionEnabled = YES;
+        label.userInteractionEnabled = NO;
         [controller.view addSubview:label];
         [NSLayoutConstraint activateConstraints:@[
             [label.centerXAnchor constraintEqualToAnchor:controller.view.centerXAnchor],
