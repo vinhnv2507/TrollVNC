@@ -4542,6 +4542,67 @@ static BOOL tvGetTouchLockNotifyState(void) {
     return status == NOTIFY_STATUS_OK && state != 0;
 }
 
+typedef boolean_t (^TVIOHIDEventFilterBlock)(void *, void *, void *, IOHIDEventRef);
+
+static BOOL tvHIDEventContainsHome(IOHIDEventRef event) {
+    if (!event)
+        return NO;
+    if (IOHIDEventGetType(event) == kIOHIDEventTypeKeyboard &&
+        IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsagePage) == kHIDPage_Consumer &&
+        IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsage) == kHIDUsage_Csmr_Menu)
+        return YES;
+
+    CFArrayRef children = IOHIDEventGetChildren(event);
+    if (!children)
+        return NO;
+    for (CFIndex index = 0; index < CFArrayGetCount(children); ++index) {
+        if (tvHIDEventContainsHome((IOHIDEventRef)CFArrayGetValueAtIndex(children, index)))
+            return YES;
+    }
+    return NO;
+}
+
+static IOHIDEventSystemClientRef gTvTouchLockHIDClient = NULL;
+
+static void tvInstallTouchLockHIDFilter(void) {
+    void *handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",
+                          RTLD_LAZY | RTLD_LOCAL);
+    if (!handle) {
+        TVLog(@"Touch lock HID filter: IOKit unavailable");
+        return;
+    }
+
+    auto createClient = (IOHIDEventSystemClientRef (*)(CFAllocatorRef))
+        dlsym(handle, "IOHIDEventSystemClientCreate");
+    auto registerFilter = (void (*)(IOHIDEventSystemClientRef, TVIOHIDEventFilterBlock,
+                                    void *, void *))
+        dlsym(handle, "IOHIDEventSystemClientRegisterEventFilterBlock");
+    auto scheduleClient = (void (*)(IOHIDEventSystemClientRef, CFRunLoopRef, CFStringRef))
+        dlsym(handle, "IOHIDEventSystemClientScheduleWithRunLoop");
+    if (!createClient || !registerFilter || !scheduleClient) {
+        TVLog(@"Touch lock HID filter: required API unavailable");
+        return;
+    }
+
+    gTvTouchLockHIDClient = createClient(kCFAllocatorDefault);
+    if (!gTvTouchLockHIDClient) {
+        TVLog(@"Touch lock HID filter: client creation failed");
+        return;
+    }
+
+    registerFilter(gTvTouchLockHIDClient,
+                   ^boolean_t(void *target, void *refcon, void *sender, IOHIDEventRef event) {
+        (void)target;
+        (void)refcon;
+        (void)sender;
+        // Returning true consumes the event. Keep Power/volume available as
+        // physical escape controls; only Home is disabled with touch lock on.
+        return tvGetTouchLockNotifyState() && tvHIDEventContainsHome(event);
+    }, NULL, NULL);
+    scheduleClient(gTvTouchLockHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+    TVLog(@"Touch lock HID filter installed (Home only)");
+}
+
 static NSString *tvFrontmostBundleID(void) {
     NSData *data = tvCtlFrontmostApp();
     NSString *reply = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
@@ -7797,6 +7858,7 @@ int main(int argc, const char *argv[]) {
         tvStartControlSocketIfNeeded();
         // Never preserve a touch blocker across a daemon/device restart.
         (void)tvSetTouchLockNotifyState(NO);
+        tvInstallTouchLockHIDFilter();
         tvEnsureKeeperAtStartup();
         tvStartWiFiIPWatchdog();
     }
