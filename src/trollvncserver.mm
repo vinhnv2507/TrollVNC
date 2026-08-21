@@ -4677,16 +4677,19 @@ static NSData *tvCtlTouchLock(NSString *argument) {
     if (!tvSetTouchLockNotifyState(enabled))
         return [@"ERR TouchLockNotifyFailed\n" dataUsingEncoding:NSUTF8StringEncoding];
 
-    // Bring ControlIOS up briefly so UIKit can create/hide the hosted CAContext.
-    // Then restore the app that was previously in front; it keeps running below
-    // the touch-blocking window.
-    (void)tvCtlLaunchApp(kTvControlIOSBundleID);
-    if (previousBundleID.length && ![previousBundleID isEqualToString:kTvControlIOSBundleID]) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC),
-                       dispatch_get_main_queue(), ^{
-            (void)tvCtlLaunchApp(previousBundleID);
-        });
-    }
+    // Launch only after this control request has had time to send its reply.
+    // Foregrounding ControlIOS can recycle the app/daemon connection on some
+    // iOS versions even though the VNC session itself remains alive.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 250 * NSEC_PER_MSEC),
+                   dispatch_get_main_queue(), ^{
+        (void)tvCtlLaunchApp(kTvControlIOSBundleID);
+        if (previousBundleID.length && ![previousBundleID isEqualToString:kTvControlIOSBundleID]) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC),
+                           dispatch_get_main_queue(), ^{
+                (void)tvCtlLaunchApp(previousBundleID);
+            });
+        }
+    });
     TVLog(@"Control socket: touchlock %@ (restore=%@)", state,
           previousBundleID ?: @"none");
     return [[NSString stringWithFormat:@"OK %@\n", state]
