@@ -4516,6 +4516,73 @@ static NSData *tvCtlFrontmostApp(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+#pragma mark - TrollStore system-wide touch blocker
+
+static const char *kTvTouchLockNotification = "com.controlios.touchlock.changed";
+static NSString *const kTvControlIOSBundleID = @"com.controlios.app";
+
+static BOOL tvSetTouchLockNotifyState(BOOL enabled) {
+    int token = 0;
+    if (notify_register_check(kTvTouchLockNotification, &token) != NOTIFY_STATUS_OK)
+        return NO;
+    int status = notify_set_state(token, enabled ? 1 : 0);
+    if (status == NOTIFY_STATUS_OK)
+        status = notify_post(kTvTouchLockNotification);
+    notify_cancel(token);
+    return status == NOTIFY_STATUS_OK;
+}
+
+static BOOL tvGetTouchLockNotifyState(void) {
+    int token = 0;
+    uint64_t state = 0;
+    if (notify_register_check(kTvTouchLockNotification, &token) != NOTIFY_STATUS_OK)
+        return NO;
+    int status = notify_get_state(token, &state);
+    notify_cancel(token);
+    return status == NOTIFY_STATUS_OK && state != 0;
+}
+
+static NSString *tvFrontmostBundleID(void) {
+    NSData *data = tvCtlFrontmostApp();
+    NSString *reply = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    reply = [reply stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (![reply hasPrefix:@"OK "] || [reply isEqualToString:@"OK none"])
+        return nil;
+    return [reply substringFromIndex:3];
+}
+
+static NSData *tvCtlTouchLock(NSString *argument) {
+    NSString *state = [[argument stringByTrimmingCharactersInSet:
+                        [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([state isEqualToString:@"status"]) {
+        return [[NSString stringWithFormat:@"OK %@\n",
+                 tvGetTouchLockNotifyState() ? @"on" : @"off"]
+                dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    if (![state isEqualToString:@"on"] && ![state isEqualToString:@"off"])
+        return [@"ERR Usage touchlock on|off|status\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    BOOL enabled = [state isEqualToString:@"on"];
+    NSString *previousBundleID = tvFrontmostBundleID();
+    if (!tvSetTouchLockNotifyState(enabled))
+        return [@"ERR TouchLockNotifyFailed\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    // Bring ControlIOS up briefly so UIKit can create/hide the hosted CAContext.
+    // Then restore the app that was previously in front; it keeps running below
+    // the touch-blocking window.
+    (void)tvCtlLaunchApp(kTvControlIOSBundleID);
+    if (previousBundleID.length && ![previousBundleID isEqualToString:kTvControlIOSBundleID]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1200 * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            (void)tvCtlLaunchApp(previousBundleID);
+        });
+    }
+    TVLog(@"Control socket: touchlock %@ (restore=%@)", state,
+          previousBundleID ?: @"none");
+    return [[NSString stringWithFormat:@"OK %@\n", state]
+            dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - ControlIOSKeeper watchdog
 
 static const int kTvKeeperdPort = 46753;
@@ -6348,6 +6415,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlRotationLock([cmd substringFromIndex:13]);
     } else if ([cmd isEqualToString:@"frontmost"]) {
         resp = tvCtlFrontmostApp();
+    } else if ([cmd hasPrefix:@"touchlock "]) {
+        resp = tvCtlTouchLock([cmd substringFromIndex:10]);
     } else if ([cmd hasPrefix:@"assistivetouch "]) {
         resp = tvCtlAssistiveTouch([cmd substringFromIndex:15]);
     } else if ([cmd hasPrefix:@"keeper "]) {
@@ -7726,6 +7795,8 @@ int main(int argc, const char *argv[]) {
         installTerminationHandlers();
 
         tvStartControlSocketIfNeeded();
+        // Never preserve a touch blocker across a daemon/device restart.
+        (void)tvSetTouchLockNotifyState(NO);
         tvEnsureKeeperAtStartup();
         tvStartWiFiIPWatchdog();
     }

@@ -16,9 +16,40 @@
 */
 
 #import "SceneDelegate.h"
+#import <notify.h>
+
+static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.changed";
+
+@interface CAContext : NSObject
+- (void)setSecure:(BOOL)secure;
+@end
+
+@interface UIWindow (TVNCTouchLockPrivate)
+- (CAContext *)_boundContext;
+- (unsigned int)_contextId;
+@end
+
+@interface SBSAccessibilityWindowHostingController : NSObject
+- (void)registerWindowWithContextID:(unsigned int)contextID atLevel:(double)level;
+@end
+
+@interface TVNCTouchBlockWindow : UIWindow
+@end
+
+@implementation TVNCTouchBlockWindow
++ (BOOL)_isSecure { return YES; }
++ (BOOL)_isSystemWindow { return YES; }
+- (BOOL)_isWindowServerHostingManaged { return NO; }
+- (BOOL)_ignoresHitTest { return NO; }
+- (BOOL)_isSecure { return YES; }
+- (BOOL)_shouldCreateContextAsSecure { return YES; }
+@end
 
 @interface SceneDelegate ()
-
+@property(nonatomic, strong) TVNCTouchBlockWindow *touchBlockWindow;
+@property(nonatomic, strong) SBSAccessibilityWindowHostingController *touchBlockHost;
+@property(nonatomic, assign) int touchLockNotifyToken;
+@property(nonatomic, assign) BOOL touchBlockRegistered;
 @end
 
 @implementation SceneDelegate
@@ -30,6 +61,69 @@
     // If using a storyboard, the `window` property will automatically be initialized and attached to the scene.
     // This delegate does not imply the connecting scene or session are new (see
     // `application:configurationForConnectingSceneSession` instead).
+    __weak typeof(self) weakSelf = self;
+    notify_register_dispatch(kTVNCTouchLockNotification, &_touchLockNotifyToken,
+                             dispatch_get_main_queue(), ^(int token) {
+        uint64_t state = 0;
+        notify_get_state(token, &state);
+        [weakSelf setTouchBlockingEnabled:(state != 0) inScene:(UIWindowScene *)scene];
+    });
+
+    uint64_t state = 0;
+    notify_get_state(_touchLockNotifyToken, &state);
+    [self setTouchBlockingEnabled:(state != 0) inScene:(UIWindowScene *)scene];
+}
+
+- (void)setTouchBlockingEnabled:(BOOL)enabled inScene:(UIWindowScene *)scene {
+    if (!enabled) {
+        self.touchBlockWindow.hidden = YES;
+        return;
+    }
+
+    if (!self.touchBlockWindow) {
+        TVNCTouchBlockWindow *window = [[TVNCTouchBlockWindow alloc] initWithWindowScene:scene];
+        window.frame = scene.screen.bounds;
+        window.windowLevel = 10000001.0;
+        window.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.12];
+
+        UIViewController *controller = [[UIViewController alloc] init];
+        controller.view.backgroundColor = [UIColor clearColor];
+        controller.view.userInteractionEnabled = YES;
+
+        UILabel *label = [[UILabel alloc] init];
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+        label.text = @"🔒\nControlIOS đã khóa cảm ứng";
+        label.numberOfLines = 2;
+        label.textAlignment = NSTextAlignmentCenter;
+        label.textColor = [UIColor whiteColor];
+        label.font = [UIFont boldSystemFontOfSize:18.0];
+        label.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.55];
+        label.layer.cornerRadius = 14.0;
+        label.layer.masksToBounds = YES;
+        label.userInteractionEnabled = YES;
+        [controller.view addSubview:label];
+        [NSLayoutConstraint activateConstraints:@[
+            [label.centerXAnchor constraintEqualToAnchor:controller.view.centerXAnchor],
+            [label.centerYAnchor constraintEqualToAnchor:controller.view.centerYAnchor],
+            [label.widthAnchor constraintGreaterThanOrEqualToConstant:245.0],
+            [label.heightAnchor constraintEqualToConstant:86.0],
+        ]];
+
+        window.rootViewController = controller;
+        self.touchBlockWindow = window;
+    }
+
+    self.touchBlockWindow.hidden = NO;
+    [self.touchBlockWindow makeKeyAndVisible];
+
+    if (!self.touchBlockRegistered) {
+        self.touchBlockHost = [[NSClassFromString(@"SBSAccessibilityWindowHostingController") alloc] init];
+        unsigned int contextID = [self.touchBlockWindow _contextId];
+        [[self.touchBlockWindow _boundContext] setSecure:YES];
+        [self.touchBlockHost registerWindowWithContextID:contextID
+                                                 atLevel:self.touchBlockWindow.windowLevel];
+        self.touchBlockRegistered = YES;
+    }
 }
 
 - (void)sceneDidDisconnect:(UIScene *)scene {
@@ -59,6 +153,11 @@
     // Called as the scene transitions from the foreground to the background.
     // Use this method to save data, release shared resources, and store enough scene-specific state information
     // to restore the scene back to its current state.
+}
+
+- (void)dealloc {
+    if (_touchLockNotifyToken > 0)
+        notify_cancel(_touchLockNotifyToken);
 }
 
 @end
