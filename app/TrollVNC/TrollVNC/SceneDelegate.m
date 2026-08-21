@@ -84,13 +84,16 @@ static const char *kTVNCTouchLockNotification = "com.controlios.touchlock.change
         TVNCTouchBlockWindow *window = [[TVNCTouchBlockWindow alloc] initWithWindowScene:scene];
         window.frame = scene.screen.bounds;
         window.windowLevel = 10000001.0;
-        window.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.12];
+        window.backgroundColor = [UIColor clearColor];
 
         UIViewController *controller = [[UIViewController alloc] init];
         controller.view.backgroundColor = [UIColor clearColor];
         controller.view.userInteractionEnabled = NO;
+        controller.view.layer.borderColor = [UIColor colorWithRed:1.0 green:0.08 blue:0.08 alpha:1.0].CGColor;
+        controller.view.layer.borderWidth = 5.0;
 
         UILabel *label = [[UILabel alloc] init];
+        label.hidden = YES;
         label.translatesAutoresizingMaskIntoConstraints = NO;
         label.text = @"🔒\nControlIOS đã khóa cảm ứng";
         label.numberOfLines = 2;
