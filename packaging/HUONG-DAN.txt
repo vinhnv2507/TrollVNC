@@ -1,9 +1,9 @@
-CONTROL IOS — bản đóng gói (chạy không cần cài Python)
-========================================================
+CONTROL IOS PC — bản đóng gói (chạy không cần cài Python)
+===========================================================
 
 CÁCH CHẠY
-- Chép NGUYÊN thư mục "ControlIOS" này sang máy khác (đừng tách riêng file .exe).
-- Chạy ControlIOS.exe.
+- Chép NGUYÊN thư mục "ControlIOS PC" này sang máy khác (đừng tách riêng file .exe).
+- Chạy "ControlIOS PC.exe".
 - Dữ liệu (config, ảnh chụp, kịch bản) tự tạo CẠNH file exe:
     config/devices.json   danh sách máy
     config/scripts.json   kịch bản đã lưu
@@ -29,5 +29,5 @@ NẠP ẢNH/VIDEO
 - Ảnh chạy ngay. Video lạ định dạng cần ffmpeg trên PATH để tự chuẩn hoá.
 
 XỬ LÝ SỰ CỐ
-- Không mở được: chạy từ PowerShell để xem lỗi:  .\ControlIOS.exe
+- Không mở được: chạy từ PowerShell để xem lỗi:  & ".\ControlIOS PC.exe"
 - Antivirus có thể chặn exe chưa ký — cho phép chạy.

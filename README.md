@@ -1,4 +1,4 @@
-﻿# Control IOS
+﻿# Control IOS PC
 
 Quản lý và điều khiển nhiều iPhone chạy **TrollVNC** từ một cửa sổ duy nhất —
 thay cho việc mở hàng trăm cửa sổ TightVNC rời rạc. Thiết kế cho quy mô **250

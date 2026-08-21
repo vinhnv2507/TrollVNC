@@ -1,4 +1,4 @@
-"""Control IOS entry point.
+"""Control IOS PC entry point.
 
     python main.py                       # mở giao diện
     python main.py --bonjour             # tìm qua mDNS (nhanh nhất, khuyên dùng)
@@ -28,7 +28,7 @@ def main() -> int:
             return 1
         return 0
 
-    parser = argparse.ArgumentParser(prog="Control IOS")
+    parser = argparse.ArgumentParser(prog="Control IOS PC")
     parser.add_argument("--scan", nargs="+", metavar="TARGET",
                         help="dải cần quét: 172.30.3.0/24, 172.30.3.10-90, hoặc IP")
     parser.add_argument("--bonjour", action="store_true",

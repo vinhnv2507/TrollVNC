@@ -1462,7 +1462,7 @@ class ScriptDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self, registry_path: Path = DEFAULT_REGISTRY) -> None:
         super().__init__()
-        self.setWindowTitle("Control IOS")
+        self.setWindowTitle("Control IOS PC")
         self.resize(1500, 950)
         self.registry_path = registry_path
         self.registry = Registry.load(registry_path)
