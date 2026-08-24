@@ -114,11 +114,11 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
     NSString *message = [NSString stringWithContentsOfFile:kTVAutomationToastPath
                                                    encoding:NSUTF8StringEncoding
                                                       error:NULL];
-    if (!message.length || !self.touchLockScene)
+    if (!message.length)
         return;
     [[NSFileManager defaultManager] removeItemAtPath:kTVAutomationToastPath error:NULL];
 
-    CGRect bounds = self.touchLockScene.coordinateSpace.bounds;
+    CGRect bounds = [UIScreen mainScreen].bounds;
     CGFloat screenWidth = CGRectGetWidth(bounds);
     UIFont *font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
     NSDictionary *attributes = @{ NSFontAttributeName : font };
@@ -135,7 +135,7 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
     [self.automationToastWindow.layer removeAllAnimations];
     self.automationToastWindow.hidden = YES;
 
-    TVNCAutomationToastWindow *window = [[TVNCAutomationToastWindow alloc] initWithWindowScene:self.touchLockScene];
+    TVNCAutomationToastWindow *window = [[TVNCAutomationToastWindow alloc] initWithFrame:CGRectMake(pillX, startY, pillWidth, pillHeight)];
     window.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
     window.windowLevel = 10000002.0;
     window.backgroundColor = [UIColor clearColor];
