@@ -5016,6 +5016,17 @@ static void tvVerifyStartupUnlockAndOpenSettings(NSUInteger attempt) {
 }
 
 static BOOL tvShouldRunStartupUnlockCheck(void) {
+    // Installing/restarting ControlIOS while the device is already in use must
+    // never be treated as a device startup. Only allow the startup gesture in
+    // the first few minutes after iOS boot.
+    NSTimeInterval uptime = [NSProcessInfo processInfo].systemUptime;
+    static const NSTimeInterval kStartupUnlockWindow = 5 * 60.0;
+    if (uptime > kStartupUnlockWindow) {
+        TVLog(@"Startup unlock check skipped: uptime %.0fs exceeds %.0fs window",
+              uptime, kStartupUnlockWindow);
+        return NO;
+    }
+
     struct timeval boottv = {0};
     size_t len = sizeof(boottv);
     int mib[2] = {CTL_KERN, KERN_BOOTTIME};
