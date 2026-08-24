@@ -110,16 +110,16 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
 
     CGRect bounds = self.touchLockScene.coordinateSpace.bounds;
     CGFloat screenWidth = CGRectGetWidth(bounds);
-    UIFont *font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
+    UIFont *font = [UIFont systemFontOfSize:13.0 weight:UIFontWeightMedium];
     NSDictionary *attributes = @{ NSFontAttributeName : font };
     CGFloat textWidth = [message boundingRectWithSize:CGSizeMake(screenWidth - 64.0, 0)
                                               options:NSStringDrawingUsesLineFragmentOrigin
                                            attributes:attributes
                                               context:nil].size.width;
-    CGFloat pillWidth = MAX(140.0, MIN(screenWidth - 32.0, textWidth + 40.0));
-    CGFloat pillHeight = 44.0;
+    CGFloat pillWidth = MAX(100.0, MIN(screenWidth - 32.0, textWidth + 24.0));
+    CGFloat pillHeight = 32.0;
     CGFloat pillX = (screenWidth - pillWidth) / 2.0;
-    CGFloat targetY = 44.0;
+    CGFloat targetY = 32.0;
     CGFloat startY = -pillHeight - 12.0;
 
     [self.automationToastWindow.layer removeAllAnimations];
@@ -137,14 +137,14 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
     controller.view.backgroundColor = [UIColor clearColor];
     controller.view.userInteractionEnabled = NO;
 
-    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(16.0, 0, pillWidth - 32.0, pillHeight)];
+    UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(10.0, 0, pillWidth - 20.0, pillHeight)];
     label.text = message;
     label.textAlignment = NSTextAlignmentCenter;
     label.textColor = [UIColor whiteColor];
     label.font = font;
     label.adjustsFontSizeToFitWidth = YES;
     label.minimumScaleFactor = 0.7;
-    label.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.86];
+    label.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.50];
     label.layer.cornerRadius = pillHeight / 2.0;
     label.layer.masksToBounds = YES;
     [controller.view addSubview:label];
