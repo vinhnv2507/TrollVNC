@@ -38,6 +38,9 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
 @interface TVNCTouchBlockWindow : UIWindow
 @end
 
+@interface TVNCAutomationToastWindow : UIWindow
+@end
+
 @implementation TVNCTouchBlockWindow
 + (BOOL)_isSecure { return YES; }
 + (BOOL)_isSystemWindow { return YES; }
@@ -47,10 +50,17 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
 - (BOOL)_shouldCreateContextAsSecure { return YES; }
 @end
 
+@implementation TVNCAutomationToastWindow
++ (BOOL)_isSystemWindow { return YES; }
+- (BOOL)_isWindowServerHostingManaged { return NO; }
+- (BOOL)_ignoresHitTest { return YES; }
+@end
+
 @interface SceneDelegate ()
 @property(nonatomic, strong) TVNCTouchBlockWindow *touchBlockWindow;
 @property(nonatomic, strong) SBSAccessibilityWindowHostingController *touchBlockHost;
 @property(nonatomic, strong) UIWindow *automationToastWindow;
+@property(nonatomic, strong) SBSAccessibilityWindowHostingController *automationToastHost;
 @property(nonatomic, assign) NSUInteger automationToastGeneration;
 @property(nonatomic, assign) int touchLockNotifyToken;
 @property(nonatomic, assign) int automationToastNotifyToken;
@@ -125,7 +135,7 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
     [self.automationToastWindow.layer removeAllAnimations];
     self.automationToastWindow.hidden = YES;
 
-    UIWindow *window = [[UIWindow alloc] initWithWindowScene:self.touchLockScene];
+    TVNCAutomationToastWindow *window = [[TVNCAutomationToastWindow alloc] initWithWindowScene:self.touchLockScene];
     window.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
     window.windowLevel = 10000002.0;
     window.backgroundColor = [UIColor clearColor];
@@ -150,6 +160,9 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
     [controller.view addSubview:label];
     window.rootViewController = controller;
     self.automationToastWindow = window;
+    self.automationToastHost = [[NSClassFromString(@"SBSAccessibilityWindowHostingController") alloc] init];
+    unsigned int contextID = [window _contextId];
+    [self.automationToastHost registerWindowWithContextID:contextID atLevel:window.windowLevel];
     self.automationToastGeneration += 1;
     NSUInteger generation = self.automationToastGeneration;
     window.hidden = NO;
@@ -243,6 +256,7 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
 
 - (void)sceneDidBecomeActive:(UIScene *)scene {
     [self refreshTouchBlockFrame];
+    [self showAutomationToastFromPayload];
     // Called when the scene has moved from an inactive state to an active state.
     // Use this method to restart any tasks that were paused (or not yet started) when the scene was inactive.
 }
@@ -254,6 +268,7 @@ static const char *kTVAutomationToastNotification = "com.controlios.automation-t
 
 - (void)sceneWillEnterForeground:(UIScene *)scene {
     [self refreshTouchBlockFrame];
+    [self showAutomationToastFromPayload];
     // Called as the scene transitions from the background to the foreground.
     // Use this method to undo the changes made on entering the background.
 }
