@@ -6976,9 +6976,9 @@ static void tvPublishUserSingleNotifs(void) {
     };
 
     NSString *localizedContentTmpl;
-    localizedContentTmpl = (gClientCount == 1) ? LocalizedString(@"There is %d active VNC client.", @"Localizable",
+    localizedContentTmpl = (gClientCount == 1) ? LocalizedString(@"There is %d active ControlIOS client.", @"Localizable",
                                                                  tvLocalizationBundle(), @"trollvncserver")
-                                               : LocalizedString(@"There are %d active VNC clients.", @"Localizable",
+                                               : LocalizedString(@"There are %d active ControlIOS clients.", @"Localizable",
                                                                  tvLocalizationBundle(), @"trollvncserver");
 
     NSString *localizedContent = [NSString stringWithFormat:localizedContentTmpl, gClientCount];
@@ -7006,7 +7006,7 @@ static void tvPublishClientConnectedNotif(NSString *host) {
 
     NSString *localizedContentTmpl;
     localizedContentTmpl =
-        LocalizedString(@"A VNC client connected from %@.", @"Localizable", tvLocalizationBundle(), @"trollvncserver");
+        LocalizedString(@"A ControlIOS client connected from %@.", @"Localizable", tvLocalizationBundle(), @"trollvncserver");
 
     NSString *localizedContent = [NSString stringWithFormat:localizedContentTmpl, host];
     dispatch_async(dispatch_get_main_queue(), ^(void) {
@@ -7025,7 +7025,7 @@ static void tvPublishClientDisconnectedNotif(NSString *host) {
     };
 
     NSString *localizedContentTmpl;
-    localizedContentTmpl = LocalizedString(@"A VNC client disconnected from %@.", @"Localizable",
+    localizedContentTmpl = LocalizedString(@"A ControlIOS client disconnected from %@.", @"Localizable",
                                            tvLocalizationBundle(), @"trollvncserver");
 
     NSString *localizedContent = [NSString stringWithFormat:localizedContentTmpl, host];

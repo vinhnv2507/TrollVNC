@@ -11,10 +11,10 @@
 "A new version %@ is available! You’re currently using v%@. Download the latest version from Havoc Marketplace." = "A new version %1$@ is available! You’re currently using v%2$@. Download the latest version from Havoc Marketplace.";
 
 /* trollvncserver */
-"A VNC client connected from %@." = "A VNC client connected from %@.";
+"A ControlIOS client connected from %@." = "A ControlIOS client connected from %@.";
 
 /* trollvncserver */
-"A VNC client disconnected from %@." = "A VNC client disconnected from %@.";
+"A ControlIOS client disconnected from %@." = "A ControlIOS client disconnected from %@.";
 
 /* No comment provided by engineer. */
 "Apply" = "Apply";
@@ -152,10 +152,10 @@
 "The self-signed CA certificate and private key have been successfully generated. You need to trust this certificate in your client browser or operating system. Restart the service to apply the changes." = "The self-signed CA certificate and private key have been successfully generated. You need to trust this certificate in your client browser or operating system. Restart the service to apply the changes.";
 
 /* trollvncserver */
-"There are %d active VNC clients." = "There are %d active VNC clients.";
+"There are %d active ControlIOS clients." = "There are %d active ControlIOS clients.";
 
 /* trollvncserver */
-"There is %d active VNC client." = "There is %d active VNC client.";
+"There is %d active ControlIOS client." = "There is %d active ControlIOS client.";
 
 /* No comment provided by engineer. */
 "TrollVNC" = "ControlIOS";

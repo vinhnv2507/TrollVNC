@@ -11,10 +11,10 @@
 "A new version %@ is available! You’re currently using v%@. Download the latest version from Havoc Marketplace." = "有新版本 %@ 可用！你当前使用的是 v%@。请从浩劫商店下载最新版本。";
 
 /* trollvncserver */
-"A VNC client connected from %@." = "来自 %@ 的 VNC 客户端已连接。";
+"A ControlIOS client connected from %@." = "来自 %@ 的 ControlIOS 客户端已连接。";
 
 /* trollvncserver */
-"A VNC client disconnected from %@." = "来自 %@ 的 VNC 客户端已断开连接。";
+"A ControlIOS client disconnected from %@." = "来自 %@ 的 ControlIOS 客户端已断开连接。";
 
 /* No comment provided by engineer. */
 "Apply" = "应用";
@@ -152,10 +152,10 @@
 "The self-signed CA certificate and private key have been successfully generated. You need to trust this certificate in your client browser or operating system. Restart the service to apply the changes." = "自签名 CA 证书和私钥已成功生成。你需要在客户端浏览器或操作系统中信任此证书。重启服务以使更改生效。";
 
 /* trollvncserver */
-"There are %d active VNC clients." = "有 %d 个活动的 VNC 客户端。";
+"There are %d active ControlIOS clients." = "有 %d 个活动的 ControlIOS 客户端。";
 
 /* trollvncserver */
-"There is %d active VNC client." = "有 %d 个活动的 VNC 客户端。";
+"There is %d active ControlIOS client." = "有 %d 个活动的 ControlIOS 客户端。";
 
 /* No comment provided by engineer. */
 "TrollVNC" = "ControlIOS";
