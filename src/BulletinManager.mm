@@ -17,14 +17,11 @@
 
 #import <Foundation/Foundation.h>
 #import <UserNotifications/UserNotifications.h>
-#import <notify.h>
 
 #import "BulletinManager.h"
 #import "Logging.h"
 
 #define BANNER_CATEGORY "com.82flex.trollvnc.notification-category.standard"
-#define TV_AUTOMATION_TOAST_PATH @"/var/tmp/com.controlios.automation-toast"
-#define TV_AUTOMATION_TOAST_NOTIFICATION "com.controlios.automation-toast"
 
 @interface UNUserNotificationCenter (Private)
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier;
@@ -109,27 +106,6 @@
 }
 
 - (void)popBannerWithContent:(NSString *)messageContent userInfo:(NSDictionary *)userInfo {
-    if (messageContent.length > 0) {
-        NSString *temporaryPath = [TV_AUTOMATION_TOAST_PATH stringByAppendingString:@".tmp"];
-        NSError *error = nil;
-        [messageContent writeToFile:temporaryPath
-                         atomically:YES
-                           encoding:NSUTF8StringEncoding
-                              error:&error];
-        if (!error) {
-                        NSFileManager *fileManager = [NSFileManager defaultManager];
-                        [fileManager removeItemAtPath:TV_AUTOMATION_TOAST_PATH error:NULL];
-                        [fileManager moveItemAtPath:temporaryPath
-                                                                toPath:TV_AUTOMATION_TOAST_PATH
-                                                                 error:&error];
-        }
-        if (error) {
-            TVLog(@"Automation toast payload failed: %@", error);
-        } else {
-            notify_post(TV_AUTOMATION_TOAST_NOTIFICATION);
-        }
-    }
-
 #if !TARGET_IPHONE_SIMULATOR
     UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
 

@@ -1264,7 +1264,7 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
                 @"LỆ 0..1. Cử chỉ: tap·tapRegion·doubleTap·two/threeFingerTap·longPress·swipe·"
                 @"home·key·typeText. Chờ/lặp: sleep·random·while·for·if·stop. Màu/ảnh: "
                 @"getColor·matchColor·waitColor·findImage. App/Web: launchApp·killApp·openURL·"
-                @"openURLIn·httpGet·httpPost·toast. Tệp: readFile·writeFile·fileExists (JSON có "
+                @"openURLIn·httpGet·httpPost. Tệp: readFile·writeFile·fileExists (JSON có "
                 @"sẵn: JSON.parse/stringify). Mẹo: lấy toạ độ trên khung VNC ở PC (góc dưới).";
     hint.translatesAutoresizingMaskIntoConstraints = NO;
 
@@ -1349,13 +1349,12 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
         mk(@"findImage", @"let p = findImage(\"/var/mobile/Media/tpl.png\");\nif (p) tap(p.x, p.y);\n"),
         mk(@"ocr (đọc chữ)", @"let s = ocr(0.0, 0.4, 1.0, 0.6);\n"),
     ]];
-    UIMenu *aw = [UIMenu menuWithTitle:@"App / Web / Thông báo" children:@[
+    UIMenu *aw = [UIMenu menuWithTitle:@"App / Web" children:@[
         mk(@"launchApp", @"launchApp(\"com.zing.zalo\");\n"),
         mk(@"killApp", @"killApp(\"com.zing.zalo\");\n"),
         mk(@"openURL", @"openURL(\"https://\");\n"),
         mk(@"httpGet", @"let r = httpGet(\"https://\");\n"),
         mk(@"httpPost", @"let r = httpPost(\"https://\", \"a=1&b=2\");\n"),
-        mk(@"toast", @"toast(\"noi dung\");\n"),
     ]];
     UIMenu *fl = [UIMenu menuWithTitle:@"Tệp / Khác" children:@[
         mk(@"readFile", @"let s = readFile(\"/var/mobile/x.txt\");\n"),
@@ -1410,7 +1409,7 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
         dispatch_async(dispatch_get_main_queue(), ^{
             [self refreshStatus];
             if ([r containsString:@"NoScript"])
-                [self toast:@"Kịch bản trống"];
+                self.status.text = @"○ Chưa có kịch bản";
         });
     });
 }
@@ -1422,14 +1421,6 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
             [self refreshStatus];
         });
     });
-}
-
-- (void)toast:(NSString *)t {
-    UIAlertController *a = [UIAlertController alertControllerWithTitle:t
-                                                              message:nil
-                                                       preferredStyle:UIAlertControllerStyleAlert];
-    [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    [self presentViewController:a animated:YES completion:nil];
 }
 
 @end
