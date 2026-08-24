@@ -49,7 +49,8 @@
 #ifdef THEBOOTSTRAP
         mSectionIdentifier = @"com.controlios.app";
 #else
-        mSectionIdentifier = @"com.apple.Preferences";
+    // Match the bundle that requests notification authorization in the app.
+    mSectionIdentifier = @"com.controlios.app";
 #endif
 
         mNotificationCenter = [[UNUserNotificationCenter alloc] initWithBundleIdentifier:mSectionIdentifier];
