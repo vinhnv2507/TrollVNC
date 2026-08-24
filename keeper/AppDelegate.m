@@ -31,6 +31,7 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
 @implementation AppDelegate {
     UILabel *_status;
     NSTimer *_uiTimer;
+    BOOL _appActive;      // app có ở foreground/active không (để ngừng ghi UI khi nền)
 }
 
 - (BOOL)application:(UIApplication *)application
@@ -81,17 +82,43 @@ extern int posix_spawnattr_set_persona_gid_np(posix_spawnattr_t *, uid_t)
         BGProcessingTaskRequest *req =
             [[BGProcessingTaskRequest alloc] initWithIdentifier:kBGReviveID];
         req.requiresNetworkConnectivity = NO;
-        req.requiresExternalPower = NO;   // cho phép chạy cả khi không sạc
-        req.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:60];
+        // Chỉ cho BGTask chạy khi CẮM SẠC + thời gian muộn hơn: giảm tải relaunch
+        // nền -> giảm áp lực RAM (nguyên nhân crash 0xd1510c8d/reset máy). Recovery
+        // chính vẫn dựa vào keeperd độc lập + PC mở app -> KHÔNG giảm khả năng remote.
+        req.requiresExternalPower = YES;   // chỉ khi cắm sạc
+        req.earliestBeginDate = [NSDate dateWithTimeIntervalSinceNow:6 * 3600]; // sau 6h
         [[BGTaskScheduler sharedScheduler] submitTaskRequest:req error:NULL];
     }
 }
 
 - (void)applicationDidBecomeActive:(UIApplication *)application {
+    _appActive = YES;
     [self ensureKeeperd];
+    // bật lại timer (đã tắt khi vào nền để không ghi UI/scene lúc suspend)
+    if (!_uiTimer) {
+        _uiTimer = [NSTimer scheduledTimerWithTimeInterval:3.0
+                                                    target:self
+                                                  selector:@selector(ensureKeeperd)
+                                                  userInfo:nil
+                                                   repeats:YES];
+    }
+}
+
+- (void)applicationDidEnterBackground:(UIApplication *)application {
+    _appActive = NO;
+    // Tắt timer khi app vào nền/suspend: tránh main thread giữ QoS cao + ghi UI
+    // (scene-update) liên tục -> watchdog kill (0x8badf00d). keeperd là tiến trình
+    // ĐỘC LẬP (spawn trước UIApplicationMain) nên vẫn sống dù timer dừng. Recovery
+    // khi ở nền vẫn có: BGTask launchHandler + applicationDidBecomeActive + chính
+    // keeperd tự canh/relaunch ControlIOS.
+    [_uiTimer invalidate];
+    _uiTimer = nil;
 }
 
 - (void)setStatus:(NSString *)text {
+    // Chỉ ghi UI khi app còn active; lúc nền bỏ qua để không thúc scene/redraw.
+    if (!_appActive)
+        return;
     _status.text = [NSString stringWithFormat:@"ControlIOS Keeper\n%@", text];
 }
 
