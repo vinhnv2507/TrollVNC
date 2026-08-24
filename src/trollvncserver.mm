@@ -5015,16 +5015,50 @@ static void tvVerifyStartupUnlockAndOpenSettings(NSUInteger attempt) {
     }
 }
 
+static BOOL tvShouldRunStartupUnlockCheck(void) {
+    struct timeval boottv = {0};
+    size_t len = sizeof(boottv);
+    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+    if (sysctl(mib, 2, &boottv, &len, NULL, 0) != 0 || len != sizeof(boottv)) {
+        TVLog(@"Startup unlock check skipped: boot time unavailable");
+        return NO;
+    }
+
+    NSString *bootID = [NSString stringWithFormat:@"%lld.%06d",
+                        (long long)boottv.tv_sec, (int)boottv.tv_usec];
+    NSString *markerPath = @"/var/tmp/com.controlios.startup-unlock-boot";
+    NSString *previousBootID = [NSString stringWithContentsOfFile:markerPath
+                                                          encoding:NSUTF8StringEncoding
+                                                             error:NULL];
+    if ([previousBootID isEqualToString:bootID]) {
+        TVLog(@"Startup unlock check skipped: already handled this boot");
+        return NO;
+    }
+
+    NSError *error = nil;
+    BOOL written = [bootID writeToFile:markerPath
+                            atomically:YES
+                              encoding:NSUTF8StringEncoding
+                                 error:&error];
+    if (!written) {
+        TVLog(@"Startup unlock check skipped: cannot write boot marker (%@)", error);
+        return NO;
+    }
+    return YES;
+}
+
 static void tvScheduleInitialUnlockCheckAfterFirstClient(void) {
-    // Run exactly once per daemon lifetime, after the first VNC connection.
-    // At this point SpringBoard has completed boot and its lock state is reliable.
+    // Run at most once per iOS boot. A daemon restart after ControlIOS is killed
+    // must not be mistaken for a device reboot and must not press Home/Settings.
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
+        if (!tvShouldRunStartupUnlockCheck())
+            return;
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC),
                        dispatch_get_main_queue(), ^{
             tvVerifyStartupUnlockAndOpenSettings(1);
         });
-        TVLog(@"One-shot unlock check scheduled after first VNC client (1s)");
+        TVLog(@"One-shot unlock check scheduled after first VNC client of this boot (1s)");
     });
 }
 
