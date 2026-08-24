@@ -16,13 +16,15 @@
 */
 
 #import <Foundation/Foundation.h>
-#import <UIKit/UIKit.h>
 #import <UserNotifications/UserNotifications.h>
+#import <notify.h>
 
 #import "BulletinManager.h"
 #import "Logging.h"
 
 #define BANNER_CATEGORY "com.82flex.trollvnc.notification-category.standard"
+#define TV_AUTOMATION_TOAST_PATH @"/var/tmp/com.controlios.automation-toast"
+#define TV_AUTOMATION_TOAST_NOTIFICATION "com.controlios.automation-toast"
 
 @interface UNUserNotificationCenter (Private)
 - (instancetype)initWithBundleIdentifier:(NSString *)bundleIdentifier;
@@ -32,9 +34,6 @@
     NSString *mSectionIdentifier;
     UNUserNotificationCenter *mNotificationCenter;
     NSString *mSingleNotificationIdentifier;
-    UIWindow *mToastWindow;
-    UILabel *mToastLabel;
-    NSUInteger mToastGeneration;
 }
 
 + (instancetype)sharedManager {
@@ -111,7 +110,25 @@
 
 - (void)popBannerWithContent:(NSString *)messageContent userInfo:(NSDictionary *)userInfo {
     if (messageContent.length > 0) {
-        [self showToastOverlay:messageContent];
+        NSString *temporaryPath = [TV_AUTOMATION_TOAST_PATH stringByAppendingString:@".tmp"];
+        NSError *error = nil;
+        [messageContent writeToFile:temporaryPath
+                         atomically:YES
+                           encoding:NSUTF8StringEncoding
+                              error:&error];
+        if (!error) {
+            [[NSFileManager defaultManager] replaceItemAtPath:TV_AUTOMATION_TOAST_PATH
+                                                withItemAtPath:temporaryPath
+                                               backupItemName:nil
+                                                      options:NSFileManagerItemReplacementUsingNewMetadataOnly
+                                             resultingItemURL:nil
+                                                        error:&error];
+        }
+        if (error) {
+            TVLog(@"Automation toast payload failed: %@", error);
+        } else {
+            notify_post(TV_AUTOMATION_TOAST_NOTIFICATION);
+        }
     }
 
 #if !TARGET_IPHONE_SIMULATOR
@@ -136,80 +153,6 @@
 
     [mNotificationCenter addNotificationRequest:request withCompletionHandler:nil];
 #endif
-}
-
-- (void)showToastOverlay:(NSString *)messageContent {
-    dispatch_async(dispatch_get_main_queue(), ^{
-        CGRect screenBounds = [UIScreen mainScreen].bounds;
-        CGFloat screenWidth = screenBounds.size.width;
-        UIFont *font = [UIFont systemFontOfSize:16.0 weight:UIFontWeightMedium];
-        NSDictionary *attributes = @{ NSFontAttributeName : font };
-        CGFloat textWidth = [messageContent boundingRectWithSize:CGSizeMake(screenWidth - 64.0, 0)
-                                                         options:NSStringDrawingUsesLineFragmentOrigin
-                                                      attributes:attributes
-                                                         context:nil].size.width;
-        CGFloat pillWidth = MAX(140.0, MIN(screenWidth - 32.0, textWidth + 40.0));
-        CGFloat pillHeight = 44.0;
-        CGFloat pillX = (screenWidth - pillWidth) / 2.0;
-        CGFloat targetY = 44.0;
-        CGFloat startY = -pillHeight - 12.0;
-
-        if (self->mToastWindow) {
-            [self->mToastWindow.layer removeAllAnimations];
-            self->mToastWindow.hidden = YES;
-        }
-
-        UIWindow *window = [[UIWindow alloc] initWithFrame:CGRectMake(pillX, startY, pillWidth, pillHeight)];
-        window.backgroundColor = [UIColor clearColor];
-        window.opaque = NO;
-        window.windowLevel = UIWindowLevelAlert + 3000.0;
-        window.userInteractionEnabled = NO;
-
-        UIViewController *controller = [UIViewController new];
-        controller.view.frame = CGRectMake(0, 0, pillWidth, pillHeight);
-        controller.view.backgroundColor = [UIColor clearColor];
-        controller.view.userInteractionEnabled = NO;
-
-        UILabel *label = [[UILabel alloc] initWithFrame:CGRectMake(16.0, 0, pillWidth - 32.0, pillHeight)];
-        label.text = messageContent;
-        label.textAlignment = NSTextAlignmentCenter;
-        label.textColor = [UIColor whiteColor];
-        label.font = font;
-        label.adjustsFontSizeToFitWidth = YES;
-        label.minimumScaleFactor = 0.7;
-        label.backgroundColor = [[UIColor blackColor] colorWithAlphaComponent:0.86];
-        label.layer.cornerRadius = pillHeight / 2.0;
-        label.layer.masksToBounds = YES;
-        [controller.view addSubview:label];
-        window.rootViewController = controller;
-        self->mToastWindow = window;
-        self->mToastLabel = label;
-        self->mToastGeneration += 1;
-        NSUInteger generation = self->mToastGeneration;
-        window.hidden = NO;
-
-        [UIView animateWithDuration:0.25
-                              delay:0.0
-             usingSpringWithDamping:0.8
-              initialSpringVelocity:1.0
-                            options:UIViewAnimationOptionCurveEaseInOut
-                         animations:^{
-                             window.frame = CGRectMake(pillX, targetY, pillWidth, pillHeight);
-                         }
-                         completion:nil];
-
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.5 * NSEC_PER_SEC)),
-                       dispatch_get_main_queue(), ^{
-            if (generation != self->mToastGeneration)
-                return;
-            [UIView animateWithDuration:0.25 animations:^{
-                window.frame = CGRectMake(pillX, startY, pillWidth, pillHeight);
-            } completion:^(__unused BOOL finished) {
-                if (generation == self->mToastGeneration)
-                    window.hidden = YES;
-            }];
-        });
-    });
 }
 
 - (void)revokeSingleNotification {
