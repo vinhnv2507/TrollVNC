@@ -117,12 +117,11 @@
                            encoding:NSUTF8StringEncoding
                               error:&error];
         if (!error) {
-            [[NSFileManager defaultManager] replaceItemAtPath:TV_AUTOMATION_TOAST_PATH
-                                                withItemAtPath:temporaryPath
-                                               backupItemName:nil
-                                                      options:NSFileManagerItemReplacementUsingNewMetadataOnly
-                                             resultingItemURL:nil
-                                                        error:&error];
+                        NSFileManager *fileManager = [NSFileManager defaultManager];
+                        [fileManager removeItemAtPath:TV_AUTOMATION_TOAST_PATH error:NULL];
+                        [fileManager moveItemAtPath:temporaryPath
+                                                                toPath:TV_AUTOMATION_TOAST_PATH
+                                                                 error:&error];
         }
         if (error) {
             TVLog(@"Automation toast payload failed: %@", error);
