@@ -4446,6 +4446,18 @@ static NSData *tvCtlWakeIfLocked(void) {
         dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSData *tvCtlDeviceName(void) {
+    NSString *name = [[UIDevice currentDevice].name
+        stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!name.length)
+        return [@"ERR DeviceNameUnavailable\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSData *utf8 = [name dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *encoded = [utf8 base64EncodedStringWithOptions:0];
+    return [[NSString stringWithFormat:@"OK %@\n", encoded]
+        dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 // Open Control Center through the Accessibility/SpringBoard route used by
 // AssistiveTouch. This is independent of synthetic edge gestures.
 static BOOL tvOpenControlCenterThroughAccessibility(void) {
@@ -6756,6 +6768,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlShutdown();
     } else if ([cmd isEqualToString:@"wakeiflocked"]) {
         resp = tvCtlWakeIfLocked();
+    } else if ([cmd isEqualToString:@"devicename"]) {
+        resp = tvCtlDeviceName();
     } else if ([cmd isEqualToString:@"homeaudit"]) {
         resp = tvCtlHomeAudit(NO);
     } else if ([cmd isEqualToString:@"homeaudit clear"]) {
