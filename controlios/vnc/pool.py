@@ -704,7 +704,7 @@ class DevicePool:
                             on_event(
                                 key,
                                 f"đang lấy mẫu {sample_seconds} giây · PID {first.pid} · "
-                                f"{first.sockets} socket",
+                                f"{first.sockets} socket app/extension",
                             )
                         await asyncio.sleep(sample_seconds)
                         second = await channel.app_network_sample(bundle_id)
@@ -726,7 +726,7 @@ class DevicePool:
                                 key,
                                 f"{verdict}: RX {rx / 1024:.1f} KB ({rx_rate:.1f} KB/s) · "
                                 f"TX {tx / 1024:.1f} KB ({tx_rate:.1f} KB/s) · "
-                                f"{second.sockets} socket · PID {second.pid}",
+                                f"{second.sockets} socket app/extension · PID {second.pid}",
                             )
                     except Exception as exc:
                         text = str(exc)

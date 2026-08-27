@@ -507,9 +507,10 @@ liên quan tới **Canh EarnApp…** cũ. Mỗi lượt Control IOS sẽ:
 trạng thái lỗi còn tồn tại.
 
 RX/TX là lưu lượng Wi-Fi/cellular của thiết bị trong cửa sổ lấy mẫu; PID và
-socket là của riêng EarnApp. Đây là phép ước lượng thực dụng vì iOS không cung
-cấp bộ đếm byte ổn định theo từng app. Đặt ngưỡng RX đủ lớn (mặc định 32 KB/10
-giây) để loại lưu lượng nhỏ của kênh điều khiển. Cần bản iOS **ControlIOS 4.5+**.
+socket là của EarnApp và các extension mạng nằm trong bundle EarnApp (từ iOS
+ControlIOS 4.7). Đây là phép ước lượng thực dụng vì iOS không cung cấp bộ đếm
+byte ổn định theo từng app. Đặt ngưỡng RX đủ lớn (mặc định 32 KB/10 giây) để
+loại lưu lượng nhỏ của kênh điều khiển.
 
 ### Truyền ảnh, video và tệp hai chiều
 

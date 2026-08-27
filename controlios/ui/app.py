@@ -1329,7 +1329,7 @@ class EarnAppTrafficDialog(QDialog):
         note = QLabel(
             "Chức năng này chỉ đọc PID, socket và hai mẫu RX/TX của EarnApp. "
             "Nó không mở app, không OCR và không khởi động lại EarnApp. "
-            "Cần ControlIOS iOS 4.5 trở lên."
+            "ControlIOS iOS 4.7 trở lên sẽ tính cả socket của extension EarnApp."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
