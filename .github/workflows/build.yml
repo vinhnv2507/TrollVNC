@@ -2,7 +2,9 @@ name: Build ControlIOS
 
 on:
   push:
-    branches: [release]
+    # `main` là nhánh phát hành chuẩn. Mỗi lần cập nhật được push sẽ tự build
+    # đủ các scheme và tạo/cập nhật GitHub Release để chỉ cần tải file về.
+    branches: [main]
   workflow_dispatch:
     inputs:
       is_managed:
@@ -181,7 +183,7 @@ jobs:
           if-no-files-found: warn
 
   release:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/release'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: build
     runs-on: macos-14
     permissions:

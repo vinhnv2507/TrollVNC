@@ -26,6 +26,7 @@
 #import <UIKit/UIKit.h>                      // UIImage cho findImage (template matching)
 #import <Vision/Vision.h>                    // OCR (nhận chữ trên màn)
 #import <Security/Security.h>   // xác thực chữ ký license (ECDSA P-256)
+#import <TargetConditionals.h>
 
 #import <arpa/inet.h>
 #import <atomic>
@@ -38,6 +39,7 @@
 #import <fcntl.h>
 #import <ifaddrs.h>
 #import <mach-o/dyld.h>
+#import <net/if.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
 #import <notify.h>
@@ -61,6 +63,9 @@
 #import "FBSOrientationObserver.h"
 #import "IOKitSPI.h"
 #import "Logging.h"
+#if !TARGET_OS_SIMULATOR
+#import "libproc.h"
+#endif
 #import "PSAssistiveTouchSettingsDetail.h"
 #import "STHIDEventGenerator.h"
 #import "ScreenCapturer.h"
@@ -3987,6 +3992,87 @@ static LSApplicationWorkspace *tvAppWorkspace(void) {
     return [cls defaultWorkspace];
 }
 
+static pid_t tvPIDForBundleIdentifier(NSString *bundleId) {
+    if (bundleId.length == 0)
+        return 0;
+    pid_t pid = 0;
+    void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                          "SpringBoardServices", RTLD_LAZY);
+    if (handle) {
+        int (*processIDForIdentifier)(CFStringRef, pid_t *) =
+            (int (*)(CFStringRef, pid_t *))dlsym(
+                handle, "SBSProcessIDForDisplayIdentifier");
+        if (processIDForIdentifier)
+            processIDForIdentifier((__bridge CFStringRef)bundleId, &pid);
+    }
+    return pid > 0 ? pid : 0;
+}
+
+/// `nettraffic <bundle id>` — PID và số socket thuộc app, kèm bộ đếm byte của
+/// Wi-Fi/cellular. iOS không cung cấp API ổn định để gán từng byte cho một app;
+/// PC lấy hai mẫu khi EarnApp còn cùng PID + còn socket để ước lượng app có đang
+/// thực sự trao đổi băng thông hay không.
+static NSData *tvCtlNetworkTraffic(NSString *bundleId) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:
+                    [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0 || [bundleId rangeOfCharacterFromSet:
+            [NSCharacterSet whitespaceCharacterSet]].location != NSNotFound)
+        return [@"ERR BadBundleID\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    pid_t pid = tvPIDForBundleIdentifier(bundleId);
+    uint64_t received = 0;
+    uint64_t sent = 0;
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) == 0) {
+        for (struct ifaddrs *item = interfaces; item; item = item->ifa_next) {
+            if (!item->ifa_name || !item->ifa_data)
+                continue;
+            BOOL isWiFi = strcmp(item->ifa_name, "en0") == 0;
+            BOOL isCellular = strncmp(item->ifa_name, "pdp_ip", 6) == 0;
+            if (!isWiFi && !isCellular)
+                continue;
+            const struct if_data *data = (const struct if_data *)item->ifa_data;
+            received += (uint64_t)data->ifi_ibytes;
+            sent += (uint64_t)data->ifi_obytes;
+        }
+        freeifaddrs(interfaces);
+    }
+
+    int socketCount = 0;
+#if !TARGET_OS_SIMULATOR
+    if (pid > 0) {
+        int needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+        if (needed > 0) {
+            // Chừa thêm chỗ vì app có thể mở FD giữa hai lần gọi proc_pidinfo.
+            std::vector<struct proc_fdinfo> descriptors(
+                (size_t)needed / sizeof(struct proc_fdinfo) + 32);
+            int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, descriptors.data(),
+                                     (int)(descriptors.size() * sizeof(struct proc_fdinfo)));
+            int count = MAX(0, bytes) / (int)sizeof(struct proc_fdinfo);
+            for (int index = 0; index < count; index++) {
+                const struct proc_fdinfo &descriptor = descriptors[(size_t)index];
+                if (descriptor.proc_fdtype != PROX_FDTYPE_SOCKET)
+                    continue;
+                struct socket_fdinfo info = {};
+                int got = proc_pidfdinfo(pid, descriptor.proc_fd,
+                                        PROC_PIDFDSOCKETINFO, &info, sizeof(info));
+                if (got != sizeof(info))
+                    continue;
+                if (info.psi.soi_family == AF_INET || info.psi.soi_family == AF_INET6)
+                    socketCount++;
+            }
+        }
+    }
+#endif
+
+    unsigned long long timestamp = (unsigned long long)
+        ([[NSDate date] timeIntervalSince1970] * 1000.0);
+    NSString *reply = [NSString stringWithFormat:@"OK %d %llu %llu %d %llu\n",
+                        pid, (unsigned long long)received, (unsigned long long)sent,
+                        socketCount, timestamp];
+    return [reply dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 /// TSV: bundleId \t ten hien thi \t loai (User/System) \t phien ban
 static NSData *tvCtlTSVForApps(void) {
     LSApplicationWorkspace *ws = tvAppWorkspace();
@@ -5255,10 +5341,10 @@ static NSData *tvCtlListDirectory(NSString *path) {
 }
 
 /// `getfile <path>` — truyền file nhị phân qua control socket. Chỉ cho phép đọc
-/// trong kho snapshot để không biến cổng điều khiển thành trình đọc file tùy ý.
-static void tvCtlSendSnapshotFile(int cfd, NSString *path) {
-    NSString *root = @"/var/mobile/controlios-snap/";
-    NSString *clean = [path stringByStandardizingPath];
+/// trong vùng dữ liệu của người dùng mobile; không mở /var/root hay file hệ thống.
+static void tvCtlSendMobileFile(int cfd, NSString *path) {
+    NSString *root = @"/var/mobile/";
+    NSString *clean = [[path stringByStandardizingPath] stringByResolvingSymlinksInPath];
     if (![clean hasPrefix:root] || [clean containsString:@"/../"]) {
         const char *err = "ERR BadPath\n";
         tvCtlWriteAll(cfd, err, strlen(err));
@@ -6740,6 +6826,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         }
     } else if ([cmd isEqualToString:@"apps"]) {
         resp = tvCtlTSVForApps();
+    } else if ([cmd hasPrefix:@"nettraffic "]) {
+        resp = tvCtlNetworkTraffic([cmd substringFromIndex:11]);
     } else if ([cmd hasPrefix:@"launch "]) {
         resp = tvCtlLaunchApp([[cmd substringFromIndex:7]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
@@ -6750,7 +6838,7 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlListDirectory([[cmd substringFromIndex:3]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"getfile "]) {
-        tvCtlSendSnapshotFile(cfd, [[cmd substringFromIndex:8]
+        tvCtlSendMobileFile(cfd, [[cmd substringFromIndex:8]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"put "]) {
         resp = tvCtlReceiveFile(cfd, [cmd substringFromIndex:4], pending, pendingLength);
