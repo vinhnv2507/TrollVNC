@@ -4287,18 +4287,18 @@ static NSData *tvCtlSavePhoto(NSString *path) {
     __block NSError *err = nil;
     @try {
         [[PHPhotoLibrary sharedPhotoLibrary] performChanges:^{
-            if (isVideo) {
-                // addResourceWithType bỏ qua bước kiểm tra tương thích gắt của
-                // creationRequestForAssetFromVideoAtFileURL: — bước đó từ chối cả
-                // video H.264 hợp lệ nếu thiếu track audio, level cao, hoặc moov
-                // atom nằm cuối file (không faststart).
-                PHAssetCreationRequest *req = [PHAssetCreationRequest creationRequestForAsset];
-                [req addResourceWithType:PHAssetResourceTypeVideo
-                                 fileURL:fileURL
-                                 options:nil];
-            } else {
-                [PHAssetCreationRequest creationRequestForAssetFromImageAtFileURL:fileURL];
-            }
+            // Dùng resource request cho cả ảnh lẫn video. API tiện ích
+            // creationRequestForAssetFromImageAtFileURL: có thể từ chối một số
+            // JPEG/PNG hợp lệ bằng PHPhotosErrorDomain 3302 trước khi tạo asset.
+            PHAssetCreationRequest *req = [PHAssetCreationRequest creationRequestForAsset];
+            PHAssetResourceCreationOptions *options =
+                [[PHAssetResourceCreationOptions alloc] init];
+            options.originalFilename = path.lastPathComponent;
+            options.shouldMoveFile = NO;
+            [req addResourceWithType:(isVideo ? PHAssetResourceTypeVideo
+                                               : PHAssetResourceTypePhoto)
+                             fileURL:fileURL
+                             options:options];
         } completionHandler:^(BOOL success, NSError *error) {
             ok = success;
             err = error;
@@ -4323,9 +4323,11 @@ static NSData *tvCtlSavePhoto(NSString *path) {
     }
 
     TVLog(@"Control socket: savephoto %@ -> FAIL %@", path, err);
-    NSString *msg = err.localizedDescription.length
-        ? [NSString stringWithFormat:@"ERR %@\n", err.localizedDescription]
-        : @"ERR Failed\n";
+    NSString *domain = err.domain.length ? err.domain : @"UnknownDomain";
+    NSString *detail = err.localizedDescription.length
+        ? err.localizedDescription : @"Failed";
+    NSString *msg = [NSString stringWithFormat:@"ERR domain=%@ code=%ld %@\n",
+                                               domain, (long)err.code, detail];
     return [msg dataUsingEncoding:NSUTF8StringEncoding];
 }
 
