@@ -16,6 +16,10 @@ from typing import Dict, List, Set, Tuple
 @dataclass
 class FakeControlServer:
     token: str = "Congavinh1"
+    device_name: str = "iPhone cua An"
+    network_sample: Tuple[int, int, int, int, int] = (
+        321, 1_000_000, 500_000, 3, 1_000,
+    )
 
     #: bundle id -> (tên, loại, phiên bản)
     apps: Dict[str, Tuple[str, str, str]] = field(
@@ -219,6 +223,17 @@ class FakeControlServer:
         if cmd == "frontmost":
             return f"OK {self.frontmost or 'none'}\n".encode()
 
+        if cmd == "devicename":
+            import base64
+            encoded = base64.b64encode(self.device_name.encode("utf-8")).decode("ascii")
+            return f"OK {encoded}\n".encode()
+
+        if cmd.startswith("nettraffic "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            values = " ".join(str(value) for value in self.network_sample)
+            return f"OK {values}\n".encode()
+
         if cmd.startswith("container "):
             bundle = cmd[len("container "):].strip()
             if bundle not in self.apps:
@@ -399,7 +414,7 @@ class FakeControlServer:
     def _get_file(self, path: str) -> bytes:
         if self.unpatched:
             return b"ERR Unknown\n"
-        if not path.startswith("/var/mobile/controlios-snap/"):
+        if not path.startswith("/var/mobile/"):
             return b"ERR BadPath\n"
         data = self.received.get(path)
         if data is None:

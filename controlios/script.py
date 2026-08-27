@@ -511,7 +511,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 if control is None:
                     raise ConnectionError(
                         f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
-                        "trong config/devices.json và dùng TrollVNC đã vá"
+                        "trong config/devices.json và dùng ControlIOS"
                     )
                 if step.op == "launchapp":
                     await control.launch(step.args[0])
@@ -521,7 +521,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 if control is None:
                     raise ConnectionError(
                         f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
-                        "trong config/devices.json và dùng TrollVNC đã vá"
+                        "trong config/devices.json và dùng ControlIOS"
                     )
                 if step.op == "restartapp":
                     bundle, delay = step.args
@@ -536,7 +536,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 if control is None:
                     raise ConnectionError(
                         f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
-                        "trong config/devices.json và dùng TrollVNC đã vá"
+                        "trong config/devices.json và dùng ControlIOS"
                     )
                 if step.op == "clipboard":
                     await control.set_clipboard(step.args[0])
@@ -546,7 +546,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 if control is None:
                     raise ConnectionError(
                         f"lệnh {step.op} cần kênh điều khiển; đặt control_token "
-                        "trong config/devices.json và dùng TrollVNC đã vá"
+                        "trong config/devices.json và dùng ControlIOS"
                     )
                 bundle = step.args[0]
                 await control.terminate(bundle)   # đóng app để file được nhả trước

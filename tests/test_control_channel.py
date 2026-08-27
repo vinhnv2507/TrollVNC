@@ -11,7 +11,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from controlios import script                                   # noqa: E402
 from controlios.control_channel import (                        # noqa: E402
-    AppInfo, ControlChannel, ControlError, NotPatchedError, UnauthorizedError, probe,
+    AppInfo, AppNetworkSample, ControlChannel, ControlError, NotPatchedError,
+    UnauthorizedError, probe,
 )
 from tests.fake_control import FakeControlServer                # noqa: E402
 
@@ -61,6 +62,25 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.channel.wake_if_locked(), "locked")
         self.assertEqual(self.server.home_count, 1)
 
+    async def test_reads_device_name(self) -> None:
+        self.server.device_name = "iPhone của An"
+        self.assertEqual(await self.channel.device_name(), "iPhone của An")
+
+    async def test_reads_app_network_sample(self) -> None:
+        self.server.network_sample = (99, 10_000, 20_000, 4, 3_000)
+
+        sample = await self.channel.app_network_sample("com.brd.earnapp")
+
+        self.assertEqual(sample, AppNetworkSample(99, 10_000, 20_000, 4, 3_000))
+
+    def test_network_delta_needs_same_process_and_growing_counters(self) -> None:
+        first = AppNetworkSample(99, 10_000, 20_000, 2, 1_000)
+        newer = AppNetworkSample(99, 42_000, 25_000, 3, 5_000)
+        restarted = AppNetworkSample(100, 50_000, 30_000, 2, 5_000)
+
+        self.assertEqual(first.delta_to(newer), (32_000, 5_000, 4.0))
+        self.assertIsNone(first.delta_to(restarted))
+
     async def test_download_snapshot_tree_without_ssh(self) -> None:
         import tempfile
         root = "/var/mobile/controlios-snap/com.golike.app/backup"
@@ -73,6 +93,24 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
                              b"xin chao")
             self.assertEqual((Path(folder) / "backup/Library/prefs.plist").read_bytes(),
                              b"plist")
+
+    async def test_download_photo_from_mobile_without_ssh(self) -> None:
+        import tempfile
+        remote = "/var/mobile/Media/DCIM/100APPLE/IMG_0001.JPG"
+        self.server.received[remote] = b"jpeg-data"
+        with tempfile.TemporaryDirectory() as folder:
+            local = Path(folder) / "IMG_0001.JPG"
+
+            written = await self.channel.get_file(remote, local)
+
+            self.assertEqual(written, 9)
+            self.assertEqual(local.read_bytes(), b"jpeg-data")
+
+    async def test_download_outside_mobile_is_refused(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaises(ControlError):
+                await self.channel.get_file("/etc/passwd", Path(folder) / "passwd")
 
     async def test_download_snapshot_encodes_ios_names_invalid_on_windows(self) -> None:
         import tempfile

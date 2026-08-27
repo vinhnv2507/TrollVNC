@@ -21,9 +21,16 @@ STATE_COLOUR = {
 }
 
 
-LABEL_HEIGHT = 22
+LABEL_HEIGHT = 38
 # Tỉ lệ ngang/dọc trước khi có khung hình đầu tiên (iPhone màn hình dài).
 DEFAULT_ASPECT = 9 / 19.5
+
+
+def device_display_name(spec: DeviceSpec) -> str:
+    """Tên đã biết của iPhone kèm địa chỉ để phân biệt các máy."""
+
+    name = (spec.name or "").strip()
+    return spec.host if not name or name == spec.host else f"{name} — {spec.host}"
 
 
 class DeviceTile(QWidget):
@@ -213,9 +220,17 @@ class DeviceTile(QWidget):
         painter.setPen(colour)
         painter.drawEllipse(6, self.height() - 15, 8, 8)
         painter.setPen(QColor("#d5d9e0"))
-        text = self.spec.name if self.spec.name != self.spec.host else self.spec.host
+        text = device_display_name(self.spec)
         painter.drawText(
-            label.adjusted(20, 0, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,
-            painter.fontMetrics().elidedText(text, Qt.ElideMiddle, label.width() - 26),
+            label.adjusted(20, 0, -4, -18), Qt.AlignVCenter | Qt.AlignLeft,
+            painter.fontMetrics().elidedText(text, Qt.ElideRight, label.width() - 26),
+        )
+        group = self.spec.group.strip() or "Chưa được gán"
+        painter.setPen(QColor("#9aa6b2"))
+        painter.drawText(
+            label.adjusted(20, 19, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,
+            painter.fontMetrics().elidedText(
+                f"Nhóm: {group}", Qt.ElideRight, label.width() - 26
+            ),
         )
         painter.end()

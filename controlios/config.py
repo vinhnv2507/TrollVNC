@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sys
 import tempfile
 from dataclasses import dataclass, field, asdict
@@ -18,8 +19,13 @@ DEFAULT_SCAN_RANGE = "172.30.2.0/24\n172.30.3.0/24"
 # Nơi để dữ liệu (config, captures...). Khi đóng gói EXE, để CẠNH file exe cho
 # dễ mang đi máy khác; khi chạy từ mã nguồn thì ở gốc project.
 if getattr(sys, "frozen", False):
-    PROJECT_ROOT = Path(sys.executable).resolve().parent
+    # Dữ liệu người dùng phải sống ngoài thư mục build. Khi thay bản EXE hoặc
+    # xoá/rebuild dist, danh sách máy và nhóm vẫn được giữ lại.
+    _legacy_project_root = Path(sys.executable).resolve().parent
+    _appdata = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    PROJECT_ROOT = _appdata / "ControlIOS PC"
 else:
+    _legacy_project_root = None
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REGISTRY = PROJECT_ROOT / "config" / "devices.json"
 
@@ -27,6 +33,31 @@ DEFAULT_REGISTRY = PROJECT_ROOT / "config" / "devices.json"
 DEFAULT_SCRIPTS = PROJECT_ROOT / "config" / "scripts.json"
 # Thư viện kịch bản auto-click JavaScript (chạy TRÊN MÁY qua daemon).
 DEFAULT_JS_SCRIPTS = PROJECT_ROOT / "config" / "autoclick_js.json"
+
+
+def _migrate_legacy_frozen_data() -> None:
+    """Import data from the old dist/config location once after an upgrade."""
+
+    if _legacy_project_root is None:
+        return
+    old_config = _legacy_project_root / "config"
+    new_config = PROJECT_ROOT / "config"
+    if not old_config.is_dir():
+        return
+    try:
+        new_config.mkdir(parents=True, exist_ok=True)
+        for name in ("devices.json", "scripts.json", "autoclick_js.json"):
+            source = old_config / name
+            target = new_config / name
+            if source.is_file() and not target.exists():
+                shutil.copy2(source, target)
+    except OSError:
+        # The app can still start with an empty/default registry if Windows
+        # blocks migration; the next save will report the actual write error.
+        return
+
+
+_migrate_legacy_frozen_data()
 
 
 def load_named_scripts(path: Path | str | None = None) -> dict:

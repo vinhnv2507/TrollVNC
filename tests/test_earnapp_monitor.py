@@ -12,7 +12,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from PySide6.QtWidgets import QApplication, QWidget  # noqa: E402
 
 from controlios.config import DeviceSpec  # noqa: E402
-from controlios.ui.app import Bridge, ScreenTextMonitorDialog  # noqa: E402
+from controlios.ui.app import (  # noqa: E402
+    Bridge, EarnAppTrafficDialog, ScreenTextMonitorDialog,
+)
 from controlios.ui.grid import DeviceGrid  # noqa: E402
 
 app = QApplication.instance() or QApplication([])
@@ -62,6 +64,19 @@ class EarnAppPerDeviceTest(unittest.TestCase):
         self.assertEqual(self.dialog.monitored_keys, {first})
         self.assertTrue(self.window.grid.tiles[first].monitored)
         self.assertFalse(self.window.grid.tiles[second].monitored)
+
+    def test_traffic_checker_is_a_separate_dialog(self) -> None:
+        traffic = EarnAppTrafficDialog(self.window)
+        try:
+            self.assertIn("Canh", self.dialog.windowTitle())
+            self.assertEqual(traffic.windowTitle(), "Kiểm tra lưu lượng EarnApp")
+            self.assertFalse(hasattr(self.dialog, "min_rx_kb"))
+            self.assertTrue(hasattr(traffic, "min_rx_kb"))
+            self.assertIsNot(self.window.bridge.monitor_done,
+                             self.window.bridge.traffic_done)
+        finally:
+            traffic.timer.stop()
+            traffic.close()
 
 
 if __name__ == "__main__":

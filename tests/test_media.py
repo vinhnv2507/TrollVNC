@@ -72,12 +72,13 @@ class EnsureTest(unittest.TestCase):
         p.write_bytes(b"x")
         self.assertEqual(media.ensure_ios_media(p, WORK / "cache"), p)
 
-    def test_missing_tools_returns_original(self) -> None:
+    def test_missing_tools_fails_instead_of_uploading_incompatible_video(self) -> None:
         p = WORK / "v.mkv"
         p.write_bytes(b"x")
         with unittest.mock.patch.object(media, "ffmpeg_path", return_value=None), \
                 unittest.mock.patch.object(media, "ffprobe_path", return_value=None):
-            self.assertEqual(media.ensure_ios_media(p, WORK / "cache"), p)
+            with self.assertRaisesRegex(RuntimeError, "ffmpeg/ffprobe"):
+                media.ensure_ios_media(p, WORK / "cache")
 
     def test_ready_mp4_returned_untouched(self) -> None:
         p = WORK / "ok.mp4"
@@ -125,6 +126,38 @@ class EnsureTest(unittest.TestCase):
 
         self.assertEqual(out, dst)
         norm.assert_not_called()
+
+    def test_risky_image_is_normalized_to_jpeg(self) -> None:
+        p = WORK / "picture.webp"
+        p.write_bytes(b"x")
+        cache = WORK / "cache"
+
+        def fake_image_norm(src, dst) -> None:
+            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            Path(dst).write_bytes(b"jpeg")
+
+        with unittest.mock.patch.object(
+                media, "normalize_image_to_ios", side_effect=fake_image_norm) as norm:
+            out = media.ensure_ios_media(p, cache)
+
+        self.assertEqual(out, cache / "picture_ios_safe.jpg")
+        norm.assert_called_once_with(p, out)
+
+    def test_force_normalizes_jpeg_after_photos_3302(self) -> None:
+        p = WORK / "picture.jpg"
+        p.write_bytes(b"not-a-real-jpeg")
+        cache = WORK / "cache"
+
+        def fake_image_norm(src, dst) -> None:
+            Path(dst).parent.mkdir(parents=True, exist_ok=True)
+            Path(dst).write_bytes(b"jpeg")
+
+        with unittest.mock.patch.object(
+                media, "normalize_image_to_ios", side_effect=fake_image_norm):
+            out = media.force_ios_media(p, cache)
+
+        self.assertEqual(out.suffix, ".jpg")
+        self.assertTrue(out.exists())
 
 
 if __name__ == "__main__":

@@ -675,6 +675,74 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def measure_app_traffic(self, keys: Iterable[str], bundle_id: str,
+                            concurrency: int = 10, sample_seconds: int = 10,
+                            min_rx_bytes: int = 32 * 1024, on_event=None,
+                            on_done=None) -> None:
+        """Đo lưu lượng độc lập; không OCR, mở, đóng hay restart app."""
+
+        key_list = list(keys)
+        sample_seconds = max(3, int(sample_seconds))
+        min_rx_bytes = max(0, int(min_rx_bytes))
+
+        async def run() -> None:
+            semaphore = asyncio.Semaphore(max(1, concurrency))
+            summary = {"active": 0, "inactive": 0, "unsupported": 0}
+            failures: List[tuple] = []
+
+            async def one(key: str) -> None:
+                async with semaphore:
+                    try:
+                        channel = self._channel(key)
+                        first = await channel.app_network_sample(bundle_id)
+                        if first.pid <= 0:
+                            summary["inactive"] += 1
+                            if on_event:
+                                on_event(key, "EARNAPP KHÔNG CHẠY (không có PID)")
+                            return
+                        if on_event:
+                            on_event(
+                                key,
+                                f"đang lấy mẫu {sample_seconds} giây · PID {first.pid} · "
+                                f"{first.sockets} socket",
+                            )
+                        await asyncio.sleep(sample_seconds)
+                        second = await channel.app_network_sample(bundle_id)
+                        delta = first.delta_to(second)
+                        if delta is None:
+                            summary["inactive"] += 1
+                            if on_event:
+                                on_event(key, "KHÔNG ĐO ĐƯỢC: EarnApp đã dừng hoặc đổi PID")
+                            return
+                        rx, tx, elapsed = delta
+                        rx_rate = rx / max(elapsed, 0.001) / 1024
+                        tx_rate = tx / max(elapsed, 0.001) / 1024
+                        active = second.sockets > 0 and rx >= min_rx_bytes
+                        summary["active" if active else "inactive"] += 1
+                        if on_event:
+                            verdict = ("ĐANG CHIA SẺ BĂNG THÔNG" if active else
+                                       "CHƯA THẤY CHIA SẺ BĂNG THÔNG")
+                            on_event(
+                                key,
+                                f"{verdict}: RX {rx / 1024:.1f} KB ({rx_rate:.1f} KB/s) · "
+                                f"TX {tx / 1024:.1f} KB ({tx_rate:.1f} KB/s) · "
+                                f"{second.sockets} socket · PID {second.pid}",
+                            )
+                    except Exception as exc:
+                        text = str(exc)
+                        if "nettraffic" in text or "không hiểu lệnh" in text:
+                            summary["unsupported"] += 1
+                        else:
+                            failures.append((key, text))
+                        if on_event:
+                            on_event(key, f"LỖI đo lưu lượng: {text}")
+
+            await asyncio.gather(*(one(key) for key in key_list))
+            if on_done:
+                on_done(len(key_list), summary, failures)
+
+        self._call_coro(run())
+
     def snapshot_app(self, keys: Iterable[str], bundle_id: str, name: str = "",
                      on_event=None, on_done=None) -> None:
         """Lưu một bản snapshot dữ liệu app (ngay trên mỗi máy).
@@ -737,6 +805,22 @@ class DevicePool:
                 on_done(key, snaps, None)
             except Exception as exc:
                 on_done(key, [], str(exc))
+
+        self._call_coro(run())
+
+    def list_dir(self, key: str, path: str, on_done) -> None:
+        """Liệt kê một thư mục iOS qua control socket.
+
+        ``on_done(key, path, entries, error)`` chạy trên luồng mạng; UI chỉ
+        cập nhật sau khi callback quay lại Qt thread thông qua signal/lambda.
+        """
+
+        async def run() -> None:
+            try:
+                entries = await self._channel(key).list_dir(path)
+                on_done(key, path, entries, None)
+            except Exception as exc:
+                on_done(key, path, [], str(exc))
 
         self._call_coro(run())
 
@@ -1042,17 +1126,45 @@ class DevicePool:
             try:
                 ready = await asyncio.to_thread(media.ensure_ios_media, source)
             except Exception as exc:
+                message = f"Không chuẩn hoá được media cho iOS: {exc}"
                 if on_event:
-                    on_event("*", f"Không chuẩn hoá được, đẩy nguyên bản: {exc}")
+                    on_event("*", message)
+                failures.extend((key, message) for key in key_list)
+                if on_done:
+                    on_done(f"Nạp {source.name}", 0, failures)
+                return
             if ready != source and on_event:
                 on_event("*", f"Đã chuẩn hoá {source.name} → {ready.name} cho iOS")
 
+            fallback_lock = asyncio.Lock()
+            fallback_ready: Path | None = None
+
+            async def safe_fallback() -> Path:
+                nonlocal fallback_ready
+                async with fallback_lock:
+                    if fallback_ready is None:
+                        fallback_ready = await asyncio.to_thread(
+                            media.force_ios_media, source)
+                    return fallback_ready
+
             async def one(key: str) -> None:
                 try:
-                    await self._channel(key).push_photo(ready, normalize=False)
+                    channel = self._channel(key)
+                    try:
+                        await channel.push_photo(ready, normalize=False)
+                    except Exception as first_error:
+                        if not media.is_photos_compatibility_error(first_error):
+                            raise
+                        safe = await safe_fallback()
+                        if on_event:
+                            on_event(
+                                key,
+                                f"Photos báo lỗi 3302; đã đổi sang {safe.name} và thử lại",
+                            )
+                        await channel.push_photo(safe, normalize=False)
                     succeeded.append(key)
                     if on_event:
-                        on_event(key, f"đã nạp {ready.name} vào Thư viện")
+                        on_event(key, f"đã nạp {source.name} vào Thư viện")
                 except Exception as exc:
                     failures.append((key, str(exc)))
                     if on_event:
@@ -1149,8 +1261,8 @@ class DevicePool:
         self._call_coro(run())
 
     def export_path(self, keys: Iterable[str], remote: str, destination: Path | str,
-                    on_event=None, on_done=None) -> None:
-        """Tải file hoặc cả thư mục từ nhiều máy, tách thư mục theo từng máy."""
+                    is_dir: bool = True, on_event=None, on_done=None) -> None:
+        """Tải file/thư mục từ nhiều máy qua control socket, không cần SSH."""
 
         key_list = list(keys)
         destination = Path(destination)
@@ -1158,6 +1270,9 @@ class DevicePool:
         succeeded: List[str] = []
 
         async def run() -> None:
+            # Giới hạn số thiết bị cùng truyền để file lớn không làm nghẽn mạng farm.
+            transfer_slots = asyncio.Semaphore(4)
+
             async def one(key: str) -> None:
                 session = self._sessions.get(key)
                 spec = session.spec if session else None
@@ -1166,11 +1281,16 @@ class DevicePool:
                 leaf = Path(remote.rstrip("/")).name or "ios-root"
                 local = device_dir / leaf
                 try:
-                    device_dir.mkdir(parents=True, exist_ok=True)
-                    await self._ssh(key).download(remote, local, recursive=True)
+                    async with transfer_slots:
+                        device_dir.mkdir(parents=True, exist_ok=True)
+                        channel = self._channel(key)
+                        if is_dir:
+                            written = await channel.download_tree(remote, local)
+                        else:
+                            written = await channel.get_file(remote, local)
                     succeeded.append(key)
                     if on_event:
-                        on_event(key, f"đã xuất {remote} → {local}")
+                        on_event(key, f"đã xuất {written:,} byte: {remote} → {local}")
                 except Exception as exc:
                     failures.append((key, str(exc)))
                     if on_event:

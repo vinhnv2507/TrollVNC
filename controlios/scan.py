@@ -24,6 +24,7 @@ from .config import DEFAULT_PORT
 
 _ARP_LINE = re.compile(r"^\s*(\d+\.\d+\.\d+\.\d+)\s+([0-9a-fA-F-]{11,})\s+(\w+)")
 CONTROL_DISCOVERY_PORT = 46752
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 
 def arp_hosts(prefix: str = "172.30.") -> List[str]:
@@ -31,7 +32,8 @@ def arp_hosts(prefix: str = "172.30.") -> List[str]:
 
     try:
         out = subprocess.run(
-            ["arp", "-a"], capture_output=True, text=True, timeout=15
+            ["arp", "-a"], capture_output=True, text=True, timeout=15,
+            creationflags=_NO_WINDOW,
         ).stdout
     except Exception:
         return []

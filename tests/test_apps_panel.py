@@ -343,13 +343,40 @@ class WindowIntegrationTest(unittest.TestCase):
         )
         self.window.grid.select_all()
 
+        browser = unittest.mock.Mock()
+        browser.exec.return_value = 1
+        browser.selected_path.return_value = "/var/mobile/Documents"
+
         with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
                                  return_value=(r"C:\tmp\anh.jpg", "")), \
-             unittest.mock.patch("controlios.ui.app.QInputDialog.getText",
-                                 return_value=("/var/mobile/Documents/anh.jpg", True)):
+             unittest.mock.patch("controlios.ui.app.IOSFileBrowserDialog",
+                                 return_value=browser):
             self.window._push_file()
 
         self.assertEqual(sent, [(sent[0][0], "anh.jpg", "/var/mobile/Documents/anh.jpg")])
+        self.assertEqual(len(sent[0][0]), 2)
+
+    def test_export_ios_uses_browser_and_control_transfer(self) -> None:
+        sent = []
+        self.window.pool.export_path = lambda keys, remote, destination, **kwargs: sent.append(
+            (list(keys), remote, Path(destination), kwargs["is_dir"])
+        )
+        self.window.grid.select_all()
+        browser = unittest.mock.Mock()
+        browser.exec.return_value = 1
+        browser.selected_path.return_value = "/var/mobile/Media/DCIM/100APPLE"
+        browser.selected_is_dir.return_value = True
+
+        with unittest.mock.patch("controlios.ui.app.IOSFileBrowserDialog",
+                                 return_value=browser), \
+             unittest.mock.patch("controlios.ui.app.QFileDialog.getExistingDirectory",
+                                 return_value=r"C:\export"), \
+             unittest.mock.patch("controlios.ui.app.BulkResultDialog"):
+            self.window._export_from_ios()
+
+        self.assertEqual(sent[0][1:], (
+            "/var/mobile/Media/DCIM/100APPLE", Path(r"C:\export"), True,
+        ))
         self.assertEqual(len(sent[0][0]), 2)
 
     def test_push_file_cancelled_sends_nothing(self) -> None:

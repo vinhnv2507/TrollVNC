@@ -81,6 +81,36 @@ class AppInfo:
 
 
 @dataclass(frozen=True)
+class AppNetworkSample:
+    """Một mẫu lưu lượng thiết bị khi app đang chạy.
+
+    iOS không công khai bộ đếm byte ổn định theo từng tiến trình. Daemon vì vậy
+    trả bộ đếm của giao diện mạng cùng PID và số socket của app. Hai mẫu liên
+    tiếp cho biết thiết bị có trao đổi dữ liệu trong lúc app còn sống và giữ
+    kết nối mạng hay không.
+    """
+
+    pid: int
+    rx_bytes: int
+    tx_bytes: int
+    sockets: int
+    timestamp_ms: int
+
+    def delta_to(self, newer: "AppNetworkSample") -> tuple[int, int, float] | None:
+        """Trả ``(rx, tx, giây)``; ``None`` nếu app/counter đã khởi động lại."""
+
+        if (self.pid <= 0 or newer.pid != self.pid or
+                newer.rx_bytes < self.rx_bytes or newer.tx_bytes < self.tx_bytes or
+                newer.timestamp_ms <= self.timestamp_ms):
+            return None
+        return (
+            newer.rx_bytes - self.rx_bytes,
+            newer.tx_bytes - self.tx_bytes,
+            (newer.timestamp_ms - self.timestamp_ms) / 1000.0,
+        )
+
+
+@dataclass(frozen=True)
 class Snapshot:
     """Một bản snapshot dữ liệu app trên máy."""
 
@@ -125,7 +155,7 @@ class ControlChannel:
             )
         except (OSError, asyncio.TimeoutError) as exc:
             raise ControlError(
-                f"{self.host}:{self.port} không phản hồi — TrollVNC chưa chạy, "
+                f"{self.host}:{self.port} không phản hồi — ControlIOS chưa chạy, "
                 f"hoặc bản trên máy chưa được vá ({exc})"
             ) from None
 
@@ -157,7 +187,8 @@ class ControlChannel:
         if head.startswith("ERR Unknown"):
             raise NotPatchedError(
                 f"Máy không hiểu lệnh {line.split()[0]!r} — nhiều khả năng đang chạy "
-                "bản TrollVNC gốc, chưa cài bản đã vá."
+                "bản ControlIOS trên máy chưa hỗ trợ tính năng này "
+                "(chưa cài bản đã vá)."
             )
         if head.startswith("ERR Unavailable"):
             raise ControlError("Máy không truy cập được danh sách app (LSApplicationWorkspace).")
@@ -198,6 +229,42 @@ class ControlChannel:
         if text == "ok unlocked":
             return "unlocked"
         raise ControlError(f"Phản hồi trạng thái khóa không hợp lệ: {text}")
+
+    async def device_name(self) -> str:
+        """Đọc tên iPhone trong Settings > General > About."""
+
+        reply = (await self.command("devicename")).strip()
+        if not reply.startswith("OK "):
+            raise ControlError(f"Không đọc được tên thiết bị: {reply}")
+        try:
+            name = base64.b64decode(reply[3:].strip(), validate=True).decode("utf-8").strip()
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise ControlError("Tên thiết bị trả về không hợp lệ") from exc
+        if not name:
+            raise ControlError("Tên thiết bị trống")
+        return name
+
+    async def app_network_sample(self, bundle_id: str) -> AppNetworkSample:
+        """Lấy PID, số socket và bộ đếm mạng tại thời điểm hiện tại.
+
+        Bộ đếm RX/TX thuộc Wi-Fi/cellular của thiết bị; ``sockets`` và ``pid``
+        thuộc riêng app. So sánh hai mẫu bằng :meth:`AppNetworkSample.delta_to`
+        để ước lượng app có đang chia sẻ băng thông hay không.
+        """
+
+        if not bundle_id or any(char.isspace() for char in bundle_id):
+            raise ControlError("Bundle ID không hợp lệ")
+        reply = (await self.command(f"nettraffic {bundle_id}")).strip()
+        fields = reply.split()
+        if len(fields) != 6 or fields[0] != "OK":
+            raise ControlError(f"Phản hồi nettraffic không hợp lệ: {reply!r}")
+        try:
+            pid, rx, tx, sockets, timestamp_ms = map(int, fields[1:])
+        except ValueError as exc:
+            raise ControlError(f"Phản hồi nettraffic không hợp lệ: {reply!r}") from exc
+        if min(pid, rx, tx, sockets, timestamp_ms) < 0:
+            raise ControlError(f"Phản hồi nettraffic không hợp lệ: {reply!r}")
+        return AppNetworkSample(pid, rx, tx, sockets, timestamp_ms)
 
     async def find_text(self, needle: str) -> bool:
         """OCR framebuffer trên ControlIOS và tìm chuỗi, không phân biệt hoa/thường."""
@@ -458,6 +525,8 @@ class ControlChannel:
     async def list_dir(self, path: str) -> List[tuple]:
         """Liệt kê thư mục: danh sách (tên, cỡ byte, có phải thư mục không)."""
 
+        if not path or not path.startswith("/"):
+            raise ControlError("Đường dẫn iOS phải là đường dẫn tuyệt đối")
         text = await self.command(f"ls {path}")
         entries = []
         for row in text.splitlines():
@@ -468,7 +537,7 @@ class ControlChannel:
         return entries
 
     async def get_file(self, remote: str, local: Path | str, progress=None) -> int:
-        """Tải một file snapshot qua control socket, không cần SSH."""
+        """Tải một file trong vùng dữ liệu mobile qua control socket, không cần SSH."""
 
         local = Path(local)
         try:
@@ -571,7 +640,7 @@ class ControlChannel:
             )
         except (OSError, asyncio.TimeoutError) as exc:
             raise ControlError(
-                f"{self.host}:{self.port} không phản hồi — TrollVNC chưa chạy, "
+                f"{self.host}:{self.port} không phản hồi — ControlIOS chưa chạy, "
                 f"hoặc bản trên máy chưa được vá ({exc})"
             ) from None
 
@@ -662,7 +731,15 @@ class ControlChannel:
             local = await asyncio.to_thread(media.ensure_ios_media, local)
         remote = f"{remote_dir.rstrip('/')}/{local.name}"
         await self.put_file(local, remote)
-        await self.save_photo(remote)
+        try:
+            await self.save_photo(remote)
+        except ControlError as exc:
+            if not normalize or not media.is_photos_compatibility_error(exc):
+                raise
+            safe = await asyncio.to_thread(media.force_ios_media, local)
+            safe_remote = f"{remote_dir.rstrip('/')}/{safe.name}"
+            await self.put_file(safe, safe_remote)
+            await self.save_photo(safe_remote)
 
     async def respring(self) -> None:
         """Khởi động lại SpringBoard — gỡ giao diện treo, KHÔNG mất jailbreak."""

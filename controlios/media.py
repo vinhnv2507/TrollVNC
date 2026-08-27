@@ -20,10 +20,15 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
+from PIL import Image, ImageOps
+
 log = logging.getLogger(__name__)
+
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
 # Thư mục cache cho các file đã transcode (cạnh project/exe, không vào git).
 from .config import PROJECT_ROOT
@@ -40,11 +45,25 @@ VIDEO_EXTS = READY_VIDEO_EXTS | OTHER_VIDEO_EXTS
 
 
 def _tool(name: str, env_var: str) -> Optional[str]:
-    """Tìm ffmpeg/ffprobe: ưu tiên biến môi trường, rồi PATH."""
+    """Tìm ffmpeg/ffprobe cả khi chạy source lẫn bản PyInstaller."""
 
     override = os.environ.get(env_var)
     if override and Path(override).exists():
         return override
+
+    filename = name + (".exe" if os.name == "nt" else "")
+    roots: list[Path] = []
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        roots.append(Path(meipass))
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        roots.extend((exe_dir, exe_dir / "_internal"))
+    roots.extend((PROJECT_ROOT / "tools" / "ffmpeg", PROJECT_ROOT / "tools"))
+    for root in roots:
+        candidate = root / filename
+        if candidate.is_file():
+            return str(candidate)
     return shutil.which(name)
 
 
@@ -64,6 +83,15 @@ def is_video(path: Path | str) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTS
 
 
+def is_photos_compatibility_error(error: BaseException | str) -> bool:
+    """PhotoKit 3302 là lỗi resource/media không tương thích."""
+
+    text = str(error).lower()
+    return "3302" in text or (
+        "phphotoserrordomain" in text and "invalid" in text
+    )
+
+
 def probe_video(path: Path | str) -> Optional[dict]:
     """Trả về dict luồng video đầu tiên (codec_name, level, pix_fmt, w, h) hoặc None."""
 
@@ -76,6 +104,7 @@ def probe_video(path: Path | str) -> Optional[dict]:
              "-show_entries", "stream=codec_name,profile,level,pix_fmt,width,height",
              "-of", "json", str(path)],
             capture_output=True, text=True, timeout=30,
+            creationflags=_NO_WINDOW,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         log.warning("ffprobe lỗi với %s: %s", path, exc)
@@ -138,7 +167,8 @@ def normalize_to_ios(src: Path | str, dst: Path | str) -> None:
         "-movflags", "+faststart",
         str(dst),
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600,
+                            creationflags=_NO_WINDOW)
     if result.returncode != 0:
         raise RuntimeError(
             f"ffmpeg re-encode thất bại ({result.returncode}): "
@@ -146,33 +176,106 @@ def normalize_to_ios(src: Path | str, dst: Path | str) -> None:
         )
 
 
+def normalize_image_to_ios(src: Path | str, dst: Path | str) -> None:
+    """Ghi ảnh thành JPEG RGB tiêu chuẩn mà PhotoKit nhận ổn định."""
+
+    src = Path(src)
+    dst = Path(dst)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with Image.open(src) as opened:
+            image = ImageOps.exif_transpose(opened)
+            image.load()
+            if image.mode in ("RGBA", "LA") or (
+                    image.mode == "P" and "transparency" in image.info):
+                rgba = image.convert("RGBA")
+                background = Image.new("RGB", rgba.size, "white")
+                background.paste(rgba, mask=rgba.getchannel("A"))
+                image = background
+            elif image.mode != "RGB":
+                image = image.convert("RGB")
+            image.save(dst, "JPEG", quality=95, optimize=True)
+            return
+    except (OSError, ValueError) as pillow_error:
+        # Pillow mặc định không giải mã được một số HEIC/HEIF. Bản PC phát hành
+        # luôn kèm ffmpeg nên dùng nó làm đường lui cho các định dạng đó.
+        ffmpeg = ffmpeg_path()
+        if not ffmpeg:
+            raise RuntimeError(
+                f"không đọc được ảnh ({pillow_error}) và không tìm thấy ffmpeg"
+            ) from pillow_error
+        result = subprocess.run(
+            [ffmpeg, "-y", "-i", str(src), "-frames:v", "1",
+             "-pix_fmt", "yuvj420p", "-q:v", "2", str(dst)],
+            capture_output=True, text=True, timeout=120,
+            creationflags=_NO_WINDOW,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"không chuyển được ảnh ({result.returncode}): "
+                f"{result.stderr.strip()[-400:]}"
+            ) from pillow_error
+
+
+def _cached_output(source: Path, cache_dir: Path, suffix: str) -> Path:
+    dst = cache_dir / f"{source.stem}{suffix}"
+    try:
+        if (dst.exists() and dst.stat().st_size > 0
+                and dst.stat().st_mtime >= source.stat().st_mtime):
+            return dst
+    except OSError:
+        pass
+    return dst
+
+
+def force_ios_media(path: Path | str,
+                    cache_dir: Path | str = DEFAULT_CACHE) -> Path:
+    """Luôn tạo bản media an toàn để thử lại sau lỗi PhotoKit 3302."""
+
+    source = Path(path)
+    cache = Path(cache_dir)
+    if is_video(source):
+        dst = _cached_output(source, cache, "_ios_safe.mp4")
+        if not dst.exists() or dst.stat().st_mtime < source.stat().st_mtime:
+            normalize_to_ios(source, dst)
+        return dst
+    if is_image(source):
+        dst = _cached_output(source, cache, "_ios_safe.jpg")
+        if not dst.exists() or dst.stat().st_mtime < source.stat().st_mtime:
+            normalize_image_to_ios(source, dst)
+        return dst
+    raise RuntimeError(f"định dạng không phải ảnh/video được hỗ trợ: {source.suffix}")
+
+
 def ensure_ios_media(path: Path | str,
                      cache_dir: Path | str = DEFAULT_CACHE) -> Path:
     """Trả về đường dẫn file **nên đẩy** cho iOS.
 
-    - Ảnh, hoặc video đã đạt chuẩn: trả về nguyên bản.
+    - Ảnh JPEG/PNG/HEIC/GIF, hoặc video đã đạt chuẩn: trả về nguyên bản.
+    - WEBP/BMP/TIFF được đổi sang JPEG RGB để PhotoKit không báo 3302.
     - Video chưa đạt chuẩn (và có ffmpeg): re-encode vào ``cache_dir`` rồi trả về
       file mới. Có cache: file nguồn không đổi thì dùng lại bản đã transcode.
-    - Thiếu ffmpeg/ffprobe: trả về nguyên bản (để máy tự báo lỗi nếu không nạp
-      được, thay vì âm thầm không làm gì).
+    - Thiếu ffmpeg/ffprobe khi video cần đổi: báo lỗi rõ ràng, không gửi nguyên
+      file không tương thích sang hàng loạt máy.
     """
 
     path = Path(path)
-    if not is_video(path):
-        return path                        # ảnh hoặc đuôi lạ -> để nguyên
-    if not (ffmpeg_path() and ffprobe_path()):
-        log.warning("thiếu ffmpeg/ffprobe — đẩy video nguyên bản, có thể bị iOS từ chối")
+    if is_image(path):
+        if path.suffix.lower() in {".webp", ".bmp", ".tif", ".tiff"}:
+            return force_ios_media(path, cache_dir)
         return path
+    if not is_video(path):
+        return path
+    if not (ffmpeg_path() and ffprobe_path()):
+        raise RuntimeError(
+            "thiếu ffmpeg/ffprobe để chuẩn hóa video cho Thư viện Ảnh iOS"
+        )
     if path.suffix.lower() in READY_VIDEO_EXTS and video_is_ios_ready(path):
         return path
 
     cache_dir = Path(cache_dir)
-    dst = cache_dir / (path.stem + "_ios.mp4")
-    try:
-        if (dst.exists() and dst.stat().st_size > 0
-                and dst.stat().st_mtime >= path.stat().st_mtime):
-            return dst                     # đã transcode trước đó, nguồn không đổi
-    except OSError:
-        pass
+    dst = _cached_output(path, cache_dir, "_ios.mp4")
+    if dst.exists() and dst.stat().st_mtime >= path.stat().st_mtime:
+        return dst
     normalize_to_ios(path, dst)
     return dst

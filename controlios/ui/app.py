@@ -6,6 +6,7 @@ import asyncio
 import copy
 import logging
 import os
+import posixpath
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -16,7 +17,8 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QSpinBox, QSplitter, QStatusBar, QToolBar, QToolButton, QVBoxLayout,
+    QPushButton, QSpinBox, QSplitter, QStatusBar, QTableWidget, QTableWidgetItem,
+    QToolBar, QToolButton, QVBoxLayout,
     QWidget,
 )
 
@@ -25,6 +27,7 @@ from ..config import (
     DEFAULT_PORT, DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
     DeviceSpec, Registry, load_named_scripts, save_named_scripts,
 )
+from ..control_channel import ControlChannel, ControlError
 from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import BRIGHTNESS_STEPS, Frame, State, Tier
@@ -72,7 +75,7 @@ SCRIPT_COMMANDS = [
     ("wait 1.5", "chờ 1.5 giây"),
     ("wait 5-10", "chờ NGẪU NHIÊN 5–10 giây (mỗi máy một số)"),
     ("shot {hậu tố}", "chụp màn hình, file có hậu tố"),
-    ("clipboard {nội dung}", "đặt clipboard máy (UTF-8) — cần TrollVNC đã vá"),
+    ("clipboard {nội dung}", "đặt clipboard máy (UTF-8) — cần ControlIOS"),
     ("savephoto {đường dẫn ảnh trên máy}", "nạp ảnh đã có trên máy vào Thư viện Ảnh"),
     ("launchapp {bundle id}", "mở app theo bundle id (kênh điều khiển)"),
     ("killapp {bundle id}", "đóng app theo bundle id"),
@@ -99,7 +102,7 @@ SCRIPT_COMMANDS = [
 
 # Các cử chỉ `openapp` / `closeapp` / `applibrary` không còn nút riêng: bảng
 # Ứng dụng làm việc đó tốt hơn nhiều qua bundle id. Chúng vẫn dùng được trong
-# kịch bản, làm phương án dự phòng cho máy chưa cài bản TrollVNC đã vá.
+# kịch bản, làm phương án dự phòng cho máy chưa cài ControlIOS đầy đủ.
 
 
 def _short_reason(error: str) -> str:
@@ -107,12 +110,150 @@ def _short_reason(error: str) -> str:
 
     lowered = error.lower()
     if "chưa cài bản đã vá" in lowered or "không hiểu lệnh" in lowered:
-        return "chưa cài bản TrollVNC đã vá"
+        return "chưa cài ControlIOS đầy đủ"
     if "không phản hồi" in lowered:
-        return "không mở cổng điều khiển (chưa vá, hoặc TrollVNC không chạy)"
+        return "không mở cổng điều khiển (chưa cài đủ, hoặc ControlIOS không chạy)"
     if "token" in lowered:
         return "sai token"
     return error.split("\n")[0][:60]
+
+
+class IOSFileBrowserDialog(QDialog):
+    """Duyệt các đường dẫn mà daemon ControlIOS trên iOS nhìn thấy."""
+
+    listed = Signal(str, str, object, str)
+
+    def __init__(self, pool: DevicePool, key: str, parent=None,
+                 directories_only: bool = False) -> None:
+        super().__init__(parent)
+        self.pool = pool
+        self.key = key
+        self.directories_only = directories_only
+        self.path = "/var/mobile"
+        self.entries: list[tuple[str, int, bool]] = []
+        self.setWindowTitle(
+            "Chọn thư mục trên iOS" if directories_only else "Lấy tệp từ iOS"
+        )
+        self.resize(760, 520)
+        self.listed.connect(self._on_listed)
+
+        layout = QVBoxLayout(self)
+        presets = QHBoxLayout()
+        presets.addWidget(QLabel("Vị trí nhanh:"))
+        self.preset_combo = QComboBox()
+        self.preset_combo.addItem("Chọn vị trí…", "")
+        self.preset_combo.addItem("Ảnh & video (DCIM)", "/var/mobile/Media/DCIM")
+        self.preset_combo.addItem("Downloads", "/var/mobile/Downloads")
+        self.preset_combo.addItem("Documents", "/var/mobile/Documents")
+        self.preset_combo.addItem("Toàn bộ dữ liệu người dùng", "/var/mobile")
+        self.preset_combo.currentIndexChanged.connect(self._load_preset)
+        presets.addWidget(self.preset_combo, 1)
+        layout.addLayout(presets)
+
+        path_bar = QHBoxLayout()
+        self.path_edit = QLineEdit(self.path)
+        self.path_edit.returnPressed.connect(self._load_path_from_edit)
+        path_bar.addWidget(self.path_edit, 1)
+        up_button = QPushButton("Lên")
+        up_button.clicked.connect(self._go_parent)
+        path_bar.addWidget(up_button)
+        refresh_button = QPushButton("Tải lại")
+        refresh_button.clicked.connect(lambda: self.load_path(self.path))
+        path_bar.addWidget(refresh_button)
+        layout.addLayout(path_bar)
+
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Tên", "Loại", "Kích thước"])
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.doubleClicked.connect(self._open_selected)
+        self.table.itemSelectionChanged.connect(self._update_select_button)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        layout.addWidget(self.table, 1)
+
+        self.status = QLabel("Đang tải…")
+        layout.addWidget(self.status)
+        buttons = QDialogButtonBox(QDialogButtonBox.Cancel | QDialogButtonBox.Open)
+        self.select_button = buttons.button(QDialogButtonBox.Open)
+        self.select_button.setText("Chọn thư mục" if directories_only else "Lấy mục đã chọn")
+        self.select_button.setEnabled(False)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.load_path(self.path)
+
+    def load_path(self, path: str) -> None:
+        path = posixpath.normpath(path.strip() or "/")
+        if not path.startswith("/"):
+            self.status.setText("Đường dẫn phải bắt đầu bằng '/'.")
+            return
+        self.entries = []
+        self.table.setRowCount(0)
+        self.select_button.setEnabled(False)
+        self.status.setText(f"Đang đọc {path}…")
+        self.pool.list_dir(self.key, path, self._emit_listed)
+
+    def _load_preset(self, index: int) -> None:
+        path = self.preset_combo.itemData(index)
+        if path:
+            self.load_path(path)
+
+    def _emit_listed(self, key: str, path: str, entries: list[tuple], error: str | None) -> None:
+        self.listed.emit(key, path, entries, error or "")
+
+    def _on_listed(self, key: str, path: str, entries: list[tuple], error: str) -> None:
+        if key != self.key:
+            return
+        if error:
+            self.status.setText(f"Lỗi: {error}")
+            return
+        self.path = path
+        self.path_edit.setText(path)
+        self.entries = sorted(entries, key=lambda item: (not item[2], item[0].lower()))
+        self.table.setRowCount(len(self.entries))
+        for row, (name, size, is_dir) in enumerate(self.entries):
+            self.table.setItem(row, 0, QTableWidgetItem(name))
+            self.table.setItem(row, 1, QTableWidgetItem("Thư mục" if is_dir else "File"))
+            self.table.setItem(row, 2, QTableWidgetItem("" if is_dir else f"{size:,} byte"))
+        self.status.setText(f"{path} · {len(self.entries)} mục")
+        self._update_select_button()
+
+    def _load_path_from_edit(self) -> None:
+        self.load_path(self.path_edit.text())
+
+    def _go_parent(self) -> None:
+        self.load_path(posixpath.dirname(self.path) or "/")
+
+    def _open_selected(self) -> None:
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self.entries):
+            return
+        name, _size, is_dir = self.entries[row]
+        if is_dir:
+            self.load_path(self.path.rstrip("/") + "/" + name)
+        elif not self.directories_only:
+            self.accept()
+
+    def _update_select_button(self) -> None:
+        row = self.table.currentRow()
+        valid = row < 0 or row >= len(self.entries) or not self.directories_only
+        if 0 <= row < len(self.entries) and self.directories_only:
+            valid = bool(self.entries[row][2])
+        self.select_button.setEnabled(valid)
+
+    def selected_path(self) -> str:
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self.entries):
+            return self.path
+        name, _size, _is_dir = self.entries[row]
+        return self.path.rstrip("/") + "/" + name
+
+    def selected_is_dir(self) -> bool:
+        row = self.table.currentRow()
+        if row < 0 or row >= len(self.entries):
+            return True
+        return bool(self.entries[row][2])
 
 
 class Bridge(QObject):
@@ -132,6 +273,8 @@ class Bridge(QObject):
     ssh_done = Signal(int, object)
     monitor_event = Signal(str, str)
     monitor_done = Signal(int, int, object)
+    traffic_event = Signal(str, str)
+    traffic_done = Signal(int, object, object)
 
 
 class ScanWorker(QThread):
@@ -178,10 +321,42 @@ class ScanWorker(QThread):
         self.found.emit(result)
 
 
+class DeviceNameWorker(QThread):
+    found = Signal(str, str)
+    failed = Signal(str, str)
+
+    def __init__(self, devices: List[DeviceSpec], port: int, token: str, parent=None) -> None:
+        super().__init__(parent)
+        self.devices = devices
+        self.port = port
+        self.token = token
+
+    def run(self) -> None:
+        async def lookup() -> None:
+            async def one(device: DeviceSpec) -> None:
+                channel = ControlChannel(
+                    device.host,
+                    device.control_port or self.port,
+                    self.token,
+                    timeout=2.0,
+                    loopback=device.is_usb,
+                )
+                try:
+                    name = await channel.device_name()
+                except (ControlError, ValueError) as error:
+                    self.failed.emit(device.key, str(error))
+                    return
+                self.found.emit(device.key, name)
+
+            await asyncio.gather(*(one(device) for device in self.devices))
+
+        asyncio.run(lookup())
+
+
 class ScanDialog(QDialog):
     def __init__(self, port: int, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Quét tìm máy TrollVNC")
+        self.setWindowTitle("Quét tìm máy ControlIOS")
         self.resize(460, 260)
         self.hosts: List[str] = []
         self._worker: ScanWorker | None = None
@@ -206,7 +381,7 @@ class ScanDialog(QDialog):
         layout.addLayout(row)
 
         self.use_bonjour = QCheckBox(
-            "Tìm qua Bonjour — TrollVNC tự quảng bá _rfb._tcp (khuyên dùng)"
+            "Tìm qua Bonjour — ControlIOS tự quảng bá _rfb._tcp (khuyên dùng)"
         )
         self.use_bonjour.setChecked(True)
         self.use_bonjour.setToolTip(
@@ -241,7 +416,7 @@ class ScanDialog(QDialog):
 
     def _done(self, hosts: List[str]) -> None:
         self.hosts = hosts
-        self.status.setText(f"Tìm thấy {len(hosts)} máy TrollVNC.")
+        self.status.setText(f"Tìm thấy {len(hosts)} máy ControlIOS.")
         self.scan_button.setEnabled(True)
         if hosts:
             self.accept()
@@ -268,7 +443,7 @@ class SendTextDialog(QDialog):
             "Đặt vào clipboard máy (UTF-8, nhanh) thay vì gõ từng phím"
         )
         self.use_clipboard.setToolTip(
-            "Đi qua kênh điều khiển của TrollVNC đã vá. Nhanh hơn nhiều và giữ "
+            "Đi qua kênh điều khiển của ControlIOS. Nhanh hơn nhiều và giữ "
             "đúng dấu lẫn emoji, nhưng cần control_token và bản đã vá."
         )
         layout.addWidget(self.use_clipboard)
@@ -711,7 +886,7 @@ class JsAutoClickDialog(QDialog):
         pick_row.addWidget(lib_btn)
         layout.addLayout(pick_row)
 
-        self.status = QLabel("Kịch bản áp cho các máy đang chọn (cần TrollVNC đã vá).")
+        self.status = QLabel("Kịch bản áp cho các máy đang chọn (cần ControlIOS).")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #9aa4b2;")
         layout.addWidget(self.status)
@@ -971,7 +1146,7 @@ class JsAutoClickDialog(QDialog):
 
 
 class ScreenTextMonitorDialog(QDialog):
-    """Canh OCR mọi máy theo chu kỳ, giới hạn số máy chạy đồng thời."""
+    """Canh OCR EarnApp theo chu kỳ, giữ nguyên chức năng tự mở lại app cũ."""
 
     def __init__(self, window: "MainWindow") -> None:
         super().__init__(window)
@@ -989,9 +1164,9 @@ class ScreenTextMonitorDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
             'ControlIOS kiểm tra app foreground và tự mở EarnApp nếu cần, sau đó '
-            'OCR trực tiếp framebuffer. Nếu thấy "Not connected" hoặc '
-            '"Connecting", hệ thống chờ 10 giây và kiểm tra lại; chỉ khi trạng thái '
-            'vẫn còn mới khởi động lại com.brd.earnapp.'
+            'OCR trực tiếp framebuffer. Nếu thấy “Not connected” hoặc “Connecting”, '
+            'hệ thống chờ 10 giây và kiểm tra lại; chỉ khi trạng thái vẫn còn mới '
+            'khởi động lại com.brd.earnapp.'
         ))
         row = QHBoxLayout()
         row.addWidget(QLabel("Phạm vi:"))
@@ -1024,6 +1199,7 @@ class ScreenTextMonitorDialog(QDialog):
         row.addWidget(self.concurrency)
         row.addStretch(1)
         layout.addLayout(row)
+
         self.status = QLabel("Đang tắt")
         layout.addWidget(self.status)
         self.log = QPlainTextEdit()
@@ -1132,6 +1308,171 @@ class ScreenTextMonitorDialog(QDialog):
             self.refresh_target_count()
         else:
             self.status.setText(result)
+
+
+class EarnAppTrafficDialog(QDialog):
+    """Đo mạng EarnApp độc lập, tuyệt đối không OCR hay restart app."""
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Kiểm tra lưu lượng EarnApp")
+        self.resize(700, 480)
+        self.settings = QSettings("ControlIOS", "EarnAppTraffic")
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.run_once)
+        self.running = False
+        window.bridge.traffic_event.connect(self._on_event)
+        window.bridge.traffic_done.connect(self._on_done)
+
+        layout = QVBoxLayout(self)
+        note = QLabel(
+            "Chức năng này chỉ đọc PID, socket và hai mẫu RX/TX của EarnApp. "
+            "Nó không mở app, không OCR và không khởi động lại EarnApp. "
+            "Cần ControlIOS iOS 4.5 trở lên."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Phạm vi:"))
+        self.scope = QComboBox()
+        self.scope.addItem("Máy đang chọn", "selected")
+        self.scope.addItem("Máy đang mở (khung lớn)", "opened")
+        self.scope.addItem("Máy đang online", "online")
+        self.scope.addItem("Tất cả máy", "all")
+        saved_scope = str(self.settings.value("scope", "selected"))
+        index = self.scope.findData(saved_scope)
+        self.scope.setCurrentIndex(index if index >= 0 else 0)
+        self.scope.currentIndexChanged.connect(self.refresh_target_count)
+        row.addWidget(self.scope, 1)
+        layout.addLayout(row)
+
+        self.target_count = QLabel()
+        layout.addWidget(self.target_count)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Lấy mẫu:"))
+        self.sample_seconds = QSpinBox()
+        self.sample_seconds.setRange(3, 120)
+        self.sample_seconds.setValue(int(self.settings.value("sample_seconds", 10)))
+        self.sample_seconds.setSuffix(" giây")
+        row.addWidget(self.sample_seconds)
+        row.addWidget(QLabel("Ngưỡng RX:"))
+        self.min_rx_kb = QSpinBox()
+        self.min_rx_kb.setRange(0, 102_400)
+        self.min_rx_kb.setValue(int(self.settings.value("min_rx_kb", 32)))
+        self.min_rx_kb.setSuffix(" KB")
+        row.addWidget(self.min_rx_kb)
+        row.addWidget(QLabel("Song song:"))
+        self.concurrency = QSpinBox()
+        self.concurrency.setRange(1, 100)
+        self.concurrency.setValue(int(self.settings.value("concurrency", 10)))
+        self.concurrency.setSuffix(" máy")
+        row.addWidget(self.concurrency)
+        layout.addLayout(row)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Đo định kỳ mỗi:"))
+        self.minutes = QSpinBox()
+        self.minutes.setRange(1, 1440)
+        self.minutes.setValue(int(self.settings.value("minutes", 5)))
+        self.minutes.setSuffix(" phút")
+        row.addWidget(self.minutes)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        self.status = QLabel("Sẵn sàng")
+        layout.addWidget(self.status)
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        layout.addWidget(self.log, 1)
+
+        buttons = QHBoxLayout()
+        self.once_button = QPushButton("Kiểm tra ngay")
+        self.once_button.clicked.connect(self.run_once)
+        buttons.addWidget(self.once_button)
+        self.start_button = QPushButton("Bật đo định kỳ")
+        self.start_button.clicked.connect(self.start_monitor)
+        buttons.addWidget(self.start_button)
+        self.stop_button = QPushButton("Dừng đo định kỳ")
+        self.stop_button.clicked.connect(self.stop_monitor)
+        self.stop_button.setEnabled(False)
+        buttons.addWidget(self.stop_button)
+        buttons.addStretch(1)
+        layout.addLayout(buttons)
+        self.refresh_target_count()
+
+    def target_keys(self) -> List[str]:
+        scope = self.scope.currentData()
+        if scope == "selected":
+            return list(self.window.grid.selection)
+        if scope == "opened":
+            return [self.window.detail.key] if self.window.detail.key else []
+        if scope == "online":
+            return self.window.pool.online_keys()
+        return [device.key for device in self.window.registry.devices if device.enabled]
+
+    def refresh_target_count(self, *_args) -> None:
+        self.target_count.setText(
+            f"Sẽ đo {len(self.target_keys())} máy; không ảnh hưởng Canh EarnApp cũ."
+        )
+
+    def _save_settings(self) -> None:
+        self.settings.setValue("scope", self.scope.currentData())
+        self.settings.setValue("sample_seconds", self.sample_seconds.value())
+        self.settings.setValue("min_rx_kb", self.min_rx_kb.value())
+        self.settings.setValue("concurrency", self.concurrency.value())
+        self.settings.setValue("minutes", self.minutes.value())
+
+    def start_monitor(self) -> None:
+        self._save_settings()
+        self.timer.start(self.minutes.value() * 60 * 1000)
+        self.start_button.setEnabled(False)
+        self.stop_button.setEnabled(True)
+        self.run_once()
+
+    def stop_monitor(self) -> None:
+        self.timer.stop()
+        self.start_button.setEnabled(True)
+        self.stop_button.setEnabled(False)
+        self.status.setText("Đã dừng đo định kỳ")
+
+    def run_once(self) -> None:
+        if self.running:
+            return
+        self._save_settings()
+        keys = self.target_keys()
+        if not keys:
+            self.status.setText("Phạm vi đã chọn không có máy để đo.")
+            return
+        self.running = True
+        self.once_button.setEnabled(False)
+        self.status.setText(f"Đang lấy hai mẫu trên {len(keys)} máy…")
+        stamp = time.strftime("%H:%M:%S")
+        self.log.appendPlainText(f"[{stamp}] Bắt đầu đo {len(keys)} máy")
+        self.window.pool.measure_app_traffic(
+            keys, "com.brd.earnapp", self.concurrency.value(),
+            sample_seconds=self.sample_seconds.value(),
+            min_rx_bytes=self.min_rx_kb.value() * 1024,
+            on_event=self.window.bridge.traffic_event.emit,
+            on_done=self.window.bridge.traffic_done.emit,
+        )
+
+    def _on_event(self, key: str, message: str) -> None:
+        self.window.bridge.message.emit(f"[{key}] {message}")
+        self.log.appendPlainText(f"{key}: {message}")
+
+    def _on_done(self, total: int, summary: dict, failures: list) -> None:
+        self.running = False
+        self.once_button.setEnabled(True)
+        result = (
+            f"Xong {total} máy: đang chia sẻ {summary.get('active', 0)}, "
+            f"chưa thấy chia sẻ {summary.get('inactive', 0)}, "
+            f"chưa hỗ trợ {summary.get('unsupported', 0)}, lỗi {len(failures)}"
+        )
+        self.log.appendPlainText(result)
+        self.status.setText(result)
 
 
 class ScriptDialog(QDialog):
@@ -1480,6 +1821,7 @@ class MainWindow(QMainWindow):
         self.broadcast = False
         self.script_dialog: ScriptDialog | None = None
         self.screen_monitor_dialog: ScreenTextMonitorDialog | None = None
+        self.earnapp_traffic_dialog: EarnAppTrafficDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
@@ -1646,6 +1988,7 @@ class MainWindow(QMainWindow):
         self.grid.tiers_changed.connect(self.pool.set_tiers)
         self.grid.device_activated.connect(self._focus_device)
         self.grid.selection_changed.connect(self._on_selection)
+        self.grid.grouping_requested.connect(self._show_grid_group_menu)
         self.grid.remove_requested.connect(self._remove_selected_devices)
         self.grid.tile_pressed.connect(self._on_tile_pressed)
         self.grid.tile_moved.connect(self._on_tile_moved)
@@ -1695,6 +2038,9 @@ class MainWindow(QMainWindow):
         if self.registry_path.resolve() == DEFAULT_REGISTRY.resolve():
             self._auto_scan_timer.start()
             QTimer.singleShot(5000, self._start_auto_scan)
+
+        self._device_name_worker: DeviceNameWorker | None = None
+        QTimer.singleShot(1500, self._refresh_device_names)
 
     # ---------------------------------------------------------------- toolbar
 
@@ -1797,6 +2143,20 @@ class MainWindow(QMainWindow):
         file_button.setMenu(file_menu)
         bar.addWidget(file_button)
 
+        import_media = QAction("PC → Ảnh iOS", self)
+        import_media.setToolTip(
+            "Chọn ảnh/video trên PC và nạp thẳng vào ứng dụng Ảnh của iOS"
+        )
+        import_media.triggered.connect(self._push_photo)
+        bar.addAction(import_media)
+
+        export_ios = QAction("iOS → PC", self)
+        export_ios.setToolTip(
+            "Duyệt ảnh, video và tệp trên iOS rồi lấy về PC, không cần SSH"
+        )
+        export_ios.triggered.connect(self._export_from_ios)
+        bar.addAction(export_ios)
+
         self.addToolBarBreak()
         actions_bar = QToolBar("Thao tác")
         actions_bar.setObjectName("actions-toolbar")
@@ -1895,15 +2255,6 @@ class MainWindow(QMainWindow):
         self.record_action.toggled.connect(self._toggle_recording)
         bar.addAction(self.record_action)
 
-        save_photo = QAction("Ảnh/Video", self)
-        save_photo.setToolTip(
-            "Đẩy ảnh hoặc video từ PC rồi nạp thẳng vào Thư viện Ảnh của các máy "
-            "đang chọn. Video lạ định dạng được tự chuẩn hoá cho iOS. Cần "
-            "TrollVNC đã vá và control_token"
-        )
-        save_photo.triggered.connect(self._push_photo)
-        bar.addAction(save_photo)
-
         # Độ sáng + Âm lượng gộp một nút menu (một ô cho gọn thanh công cụ).
         media_button = QToolButton()
         media_button.setText("Sáng/Âm")
@@ -1954,11 +2305,16 @@ class MainWindow(QMainWindow):
         self.apps_action = self.apps_dock.toggleViewAction()
         self.apps_action.setText("Ứng dụng")
         self.apps_action.setToolTip(
-            "Danh sách app đã cài và các thao tác trên máy — cần TrollVNC đã vá "
+            "Danh sách app đã cài và các thao tác trên máy — cần ControlIOS "
             "và control_token trong cấu hình"
         )
         self.apps_action.toggled.connect(self._on_apps_panel_toggled)
         bar.addAction(self.apps_action)
+
+        settings_action = QAction("Cài đặt", self)
+        settings_action.setToolTip("Mở ứng dụng Cài đặt trên các máy đang chọn")
+        settings_action.triggered.connect(self._open_settings_selected)
+        bar.addAction(settings_action)
 
         ssh_action = QAction("SSH…", self)
         ssh_action.setToolTip("Chạy lệnh shell trên các máy đã jailbreak")
@@ -1979,6 +2335,10 @@ class MainWindow(QMainWindow):
         monitor.setToolTip(
             'OCR hai lần; nếu vẫn "Not connected"/"Connecting" thì mở lại EarnApp')
         monitor.triggered.connect(self._open_screen_monitor)
+        traffic = script_menu.addAction("Kiểm tra lưu lượng EarnApp…")
+        traffic.setToolTip(
+            "Chỉ đo RX/TX + PID/socket; không OCR, không mở hay khởi động lại EarnApp")
+        traffic.triggered.connect(self._open_earnapp_traffic)
         script_button.setMenu(script_menu)
         bar.addWidget(script_button)
 
@@ -2023,18 +2383,72 @@ class MainWindow(QMainWindow):
 
     def _rebuild_group_filter_menu(self) -> None:
         self.group_filter_menu.clear()
-        all_action = self.group_filter_menu.addAction(
+        self._add_group_filter_actions(self.group_filter_menu)
+
+    def _add_group_filter_actions(self, menu: QMenu) -> None:
+        all_action = menu.addAction(
             f"Tất cả máy ({sum(d.enabled for d in self.registry.devices)})")
         all_action.setCheckable(True)
         all_action.setChecked(not self.current_group)
         all_action.triggered.connect(lambda: self._select_group_filter(""))
         for group in self._group_names():
             count = sum(d.enabled and d.group == group for d in self.registry.devices)
-            action = self.group_filter_menu.addAction(f"{group} ({count})")
+            action = menu.addAction(f"{group} ({count})")
             action.setCheckable(True)
             action.setChecked(self.current_group == group)
             action.triggered.connect(
                 lambda _checked=False, value=group: self._select_group_filter(value))
+
+    def _show_grid_group_menu(self, targets: List[str], global_pos) -> None:
+        menu = QMenu(self)
+        count = len(targets)
+        menu.addSection(
+            "Xếp/Nhóm máy này" if count == 1 else f"Xếp/Nhóm {count} máy đã chọn"
+        )
+        apps_menu = menu.addMenu("Ứng dụng")
+        apps_action = apps_menu.addAction("Nạp ứng dụng đã cài…")
+        apps_action.setToolTip(
+            "Mở bảng ứng dụng và nạp danh sách app trên máy đang chọn"
+        )
+        apps_action.triggered.connect(
+            lambda _checked=False: self._open_apps_for_selection(targets)
+        )
+        settings_action = apps_menu.addAction("Mở Cài đặt")
+        settings_action.setToolTip("Mở ứng dụng Cài đặt trên máy đang chọn")
+        settings_action.triggered.connect(
+            lambda _checked=False: self._open_settings_selected()
+        )
+        menu.addSeparator()
+        menu.addAction("Theo IP tăng dần").triggered.connect(
+            lambda: self._sort_devices("ip"))
+        menu.addAction("Theo tên A → Z").triggered.connect(
+            lambda: self._sort_devices("name"))
+        move_menu = menu.addMenu("Đổi vị trí")
+        move_menu.addAction("Đưa lên trước").triggered.connect(
+            lambda: self._move_selected_devices(-1))
+        move_menu.addAction("Đưa xuống sau").triggered.connect(
+            lambda: self._move_selected_devices(1))
+        filter_menu = menu.addMenu("Hiển thị nhóm")
+        self._add_group_filter_actions(filter_menu)
+        menu.addSeparator()
+        menu.addAction("Tạo nhóm mới…").triggered.connect(self._create_group)
+        menu.addAction("Đưa vào nhóm…").triggered.connect(self._assign_selected_group)
+        menu.addAction("Bỏ khỏi nhóm").triggered.connect(
+            lambda: self._set_selected_group(""))
+        menu.exec(global_pos)
+
+    def _open_apps_for_selection(self, targets: List[str]) -> None:
+        self.grid.selection = list(targets)
+        self.apps_dock.show()
+        self.apps_dock.raise_()
+        self._reload_apps()
+
+    def _open_settings_selected(self) -> None:
+        targets = self.action_targets()
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        self._launch_app("com.apple.Preferences")
 
     def _select_group_filter(self, group: str) -> None:
         self.current_group = group
@@ -2191,11 +2605,61 @@ class MainWindow(QMainWindow):
     def _auto_scan_found(self, hosts: List[str]) -> None:
         added = self.registry.merge_hosts(hosts, DEFAULT_PORT)
         if not added:
+            self._refresh_device_names()
             return
         self.registry.save(self.registry_path)
         self._apply_page()
         self.statusBar().showMessage(
             f"Quét nền tìm thấy và kết nối thêm {added} máy mới", 6000)
+        self._refresh_device_names()
+
+    def _refresh_device_names(self) -> None:
+        if self._device_name_worker and self._device_name_worker.isRunning():
+            return
+        devices = [
+            d for d in self.registry.devices
+            if d.enabled and (not d.name.strip() or d.name.strip() in {d.host, d.udid[:8]})
+        ]
+        if not devices:
+            return
+        worker = DeviceNameWorker(
+            devices,
+            self.registry.settings.control_port,
+            self.registry.settings.control_token,
+            self,
+        )
+        self._device_name_worker = worker
+        worker.found.connect(self._on_device_name_found)
+        worker.failed.connect(self._on_device_name_failed)
+        worker.finished.connect(lambda w=worker: self._device_name_worker_finished(w))
+        worker.finished.connect(worker.deleteLater)
+        worker.start()
+
+    def _device_name_worker_finished(self, worker: DeviceNameWorker) -> None:
+        if self._device_name_worker is worker:
+            self._device_name_worker = None
+
+    def _on_device_name_found(self, key: str, name: str) -> None:
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        if not device or not name.strip():
+            return
+        current = device.name.strip()
+        if current and current not in {device.host, device.udid[:8]}:
+            return
+        if current == name.strip():
+            return
+        device.name = name.strip()
+        self.registry.save(self.registry_path)
+        self._apply_page()
+
+    def _on_device_name_failed(self, key: str, error: str) -> None:
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        if not device:
+            return
+        self.statusBar().showMessage(
+            f"Không lấy được tên {device.host}: {error.splitlines()[0][:180]}",
+            8000,
+        )
 
     def _sort_devices(self, mode: str) -> None:
         import ipaddress
@@ -2262,6 +2726,8 @@ class MainWindow(QMainWindow):
         self._fit_detail_pane()
         if self.screen_monitor_dialog:
             self.screen_monitor_dialog.refresh_target_count()
+        if self.earnapp_traffic_dialog:
+            self.earnapp_traffic_dialog.refresh_target_count()
 
     def _device_name(self, key: str) -> str:
         for device in self.registry.devices:
@@ -2279,7 +2745,11 @@ class MainWindow(QMainWindow):
 
     def _update_detail_title(self, key: Optional[str]) -> None:
         if key:
-            self.detail_title.setText(f"🖥  {self._device_name(key)}   ·   {key}")
+            device = next((d for d in self.registry.devices if d.key == key), None)
+            name = self._device_name(key)
+            host = device.host if device else key
+            title = name if name == host else f"{name} — {host}"
+            self.detail_title.setText(f"🖥  {title}")
             self.detail_title.setVisible(True)
         else:
             self.detail_title.clear()
@@ -2310,6 +2780,8 @@ class MainWindow(QMainWindow):
             self.script_dialog.refresh_targets()
         if self.screen_monitor_dialog:
             self.screen_monitor_dialog.refresh_target_count()
+        if self.earnapp_traffic_dialog:
+            self.earnapp_traffic_dialog.refresh_target_count()
         # Nhãn "thao tác áp cho N máy" phải theo kịp, nếu không nó đứng ở con số
         # lúc nạp danh sách và người dùng tưởng đang thao tác một máy.
         self.apps_panel.set_targets(len(self.action_targets()))
@@ -2494,13 +2966,13 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
-        remote, ok = QInputDialog.getText(
-            self, "Đường dẫn trên máy",
-            "Đường dẫn tuyệt đối trên iPhone:",
-            text=f"/var/mobile/Documents/{Path(path).name}",
+        browser = IOSFileBrowserDialog(
+            self.pool, targets[0], self, directories_only=True,
         )
-        if not ok or not remote.strip():
+        if browser.exec() != QDialog.Accepted:
             return
+        remote_dir = browser.selected_path()
+        remote = remote_dir.rstrip("/") + "/" + Path(path).name
 
         self.pool.push_file(
             targets, Path(path), remote.strip(),
@@ -2516,33 +2988,10 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
 
-        choices = [
-            "Ảnh + video trong Thư viện (DCIM)",
-            "File trong Downloads",
-            "File trong Documents",
-            "Đường dẫn tùy chọn…",
-        ]
-        choice, ok = QInputDialog.getItem(
-            self, "Xuất từ iOS", "Nguồn cần xuất:", choices, 0, False)
-        if not ok:
+        browser = IOSFileBrowserDialog(self.pool, targets[0], self)
+        if browser.exec() != QDialog.Accepted:
             return
-        presets = {
-            choices[0]: "/var/mobile/Media/DCIM",
-            choices[1]: "/var/mobile/Downloads",
-            choices[2]: "/var/mobile/Documents",
-        }
-        remote = presets.get(choice, "")
-        if not remote:
-            remote, ok = QInputDialog.getText(
-                self, "Đường dẫn trên iOS", "File hoặc thư mục tuyệt đối:",
-                text="/var/mobile/")
-            if not ok:
-                return
-            remote = remote.strip()
-        if not remote.startswith("/"):
-            QMessageBox.warning(self, "Đường dẫn không hợp lệ",
-                                "Đường dẫn iOS phải bắt đầu bằng '/'.")
-            return
+        remote = browser.selected_path()
 
         destination = QFileDialog.getExistingDirectory(
             self, "Chọn thư mục lưu trên PC", str(CAPTURES_DIR))
@@ -2551,7 +3000,7 @@ class MainWindow(QMainWindow):
         dialog = BulkResultDialog(f"Xuất {remote}", len(targets), self)
         dialog.show()
         self.pool.export_path(
-            targets, remote, Path(destination),
+            targets, remote, Path(destination), is_dir=browser.selected_is_dir(),
             on_event=dialog.on_event, on_done=dialog.on_done)
         self.statusBar().showMessage(
             f"Đang xuất dữ liệu từ {len(targets)} máy", 6000)
@@ -2654,7 +3103,7 @@ class MainWindow(QMainWindow):
         """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.
 
         Đây là thao tác mức thiết bị nên vẫn đi bằng cử chỉ (nút cứng qua map
-        nút chuột của TrollVNC), không qua kênh điều khiển.
+        nút chuột của ControlIOS), không qua kênh điều khiển.
         """
 
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
@@ -2804,7 +3253,7 @@ class MainWindow(QMainWindow):
         if not self.registry.settings.control_token:
             self.apps_panel.set_error(
                 "Chưa đặt control_token trong config/devices.json — không có nó thì "
-                "không hỏi được máy. Xem docs/trollvnc-patch.md."
+                "không hỏi được máy. Xem tài liệu cấu hình ControlIOS."
             )
             return
         self.apps_panel.set_loading()
@@ -2992,6 +3441,13 @@ class MainWindow(QMainWindow):
         self.screen_monitor_dialog.refresh_target_count()
         self.screen_monitor_dialog.show()
         self.screen_monitor_dialog.raise_()
+
+    def _open_earnapp_traffic(self) -> None:
+        if self.earnapp_traffic_dialog is None:
+            self.earnapp_traffic_dialog = EarnAppTrafficDialog(self)
+        self.earnapp_traffic_dialog.refresh_target_count()
+        self.earnapp_traffic_dialog.show()
+        self.earnapp_traffic_dialog.raise_()
 
     def _open_js_autoclick(self) -> None:
         if getattr(self, "js_autoclick_dialog", None) is None:

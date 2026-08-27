@@ -105,7 +105,7 @@ class QualityDialog(QDialog):
         self.idle_after.setSuffix(" giây")
         self.idle_after.setSpecialValueText("không bao giờ ngắt")
         self.idle_after.setToolTip(
-            "Máy ngoài khung nhìn bấy lâu thì ngắt hẳn, để TrollVNC trên máy "
+            "Máy ngoài khung nhìn bấy lâu thì ngắt hẳn, để ControlIOS trên máy "
             "dừng chụp hình. Cuộn tới thì tự nối lại."
         )
         idle_form.addRow("Ngắt máy không xem sau:", self.idle_after)
@@ -116,7 +116,7 @@ class QualityDialog(QDialog):
         self.scale_combo.setToolTip(
             "Máy gửi khung nhỏ hơn -> nén nhẹ hơn -> MƯỢT hơn trên máy đời cũ "
             "(iPhone 6s...), đổi lại kém nét. Đây là cách giảm tải THẬT (trên "
-            "máy), khác với Độ nét ở trên (chỉ thu nhỏ ở PC). Cần TrollVNC đã vá."
+            "máy), khác với Độ nét ở trên (chỉ thu nhỏ ở PC). Cần ControlIOS."
         )
         idle_form.addRow("Scale khung máy gửi:", self.scale_combo)
         layout.addWidget(idle_box)
@@ -163,7 +163,7 @@ class QualityDialog(QDialog):
         note = QLabel(
             "Tốc độ/độ nét có hiệu lực ngay, không phải nối lại máy.\n"
             "Đổi Scale khung máy gửi sẽ làm mỗi máy nối lại một nhịp (như xoay "
-            "máy) và cần TrollVNC đã vá."
+            "máy) và cần ControlIOS."
         )
         note.setWordWrap(True)
         note.setStyleSheet("color: #9aa4b2;")

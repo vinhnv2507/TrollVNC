@@ -149,7 +149,7 @@ class AppsPanel(QWidget):
         self.snapshot_button = QPushButton("💾 Snapshot…")
         self.snapshot_button.setToolTip(
             "Lưu một bản dữ liệu của app đang chọn (nhiều bản có tên) — cần "
-            "TrollVNC đã vá")
+            "ControlIOS đã cài đầy đủ")
         self.snapshot_button.clicked.connect(
             lambda: self._emit_for_selected(self.snapshot_requested))
         data_row.addWidget(self.snapshot_button)

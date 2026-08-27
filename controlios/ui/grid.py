@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QGridLayout, QMenu, QScrollArea, QWidget
+from PySide6.QtWidgets import QGridLayout, QScrollArea, QWidget
 
 from ..config import DeviceSpec
 from ..vnc.session import Frame, State, Tier
@@ -25,6 +25,7 @@ class DeviceGrid(QScrollArea):
     selection_changed = Signal(list)
     device_activated = Signal(str)
     remove_requested = Signal(list)
+    grouping_requested = Signal(list, object)
 
     # Điều khiển thẳng trên ô (toạ độ đã quy về framebuffer của máy)
     tile_pressed = Signal(str, int, int, int)
@@ -150,13 +151,7 @@ class DeviceGrid(QScrollArea):
 
     def _show_device_menu(self, key: str, global_pos) -> None:
         targets = self._context_targets(key)
-        menu = QMenu(self)
-        label = ("Xoá máy này…" if len(targets) == 1
-                 else f"Xoá {len(targets)} máy đã chọn…")
-        action = menu.addAction(label)
-        action.triggered.connect(
-            lambda _checked=False, keys=targets: self.remove_requested.emit(keys))
-        menu.exec(global_pos)
+        self.grouping_requested.emit(targets, global_pos)
 
     def on_frame(self, frame: Frame) -> None:
         tile = self.tiles.get(frame.key)

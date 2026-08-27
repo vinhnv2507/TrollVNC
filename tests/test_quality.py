@@ -168,6 +168,15 @@ class ScaledPixmapCacheTest(unittest.TestCase):
         finally:
             tile.close()
 
+    def test_tile_label_keeps_device_name_and_ip(self) -> None:
+        from controlios.config import DeviceSpec
+        from controlios.ui.tile import device_display_name
+
+        named = DeviceSpec(host="172.30.3.152", name="iPhone cua An")
+        unnamed = DeviceSpec(host="172.30.3.153")
+        self.assertEqual(device_display_name(named), "iPhone cua An — 172.30.3.152")
+        self.assertEqual(device_display_name(unnamed), "172.30.3.153")
+
 
 class QualityDialogTest(unittest.TestCase):
     def setUp(self) -> None:
