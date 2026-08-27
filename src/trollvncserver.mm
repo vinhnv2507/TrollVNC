@@ -4008,6 +4008,92 @@ static pid_t tvPIDForBundleIdentifier(NSString *bundleId) {
     return pid > 0 ? pid : 0;
 }
 
+#if !TARGET_OS_SIMULATOR
+static int tvInternetSocketCountForPID(pid_t pid) {
+    if (pid <= 0)
+        return 0;
+    int socketCount = 0;
+    int needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
+    if (needed <= 0)
+        return 0;
+    std::vector<struct proc_fdinfo> descriptors(
+        (size_t)needed / sizeof(struct proc_fdinfo) + 32);
+    int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, descriptors.data(),
+                             (int)(descriptors.size() * sizeof(struct proc_fdinfo)));
+    int count = MAX(0, bytes) / (int)sizeof(struct proc_fdinfo);
+    for (int index = 0; index < count; index++) {
+        const struct proc_fdinfo &descriptor = descriptors[(size_t)index];
+        if (descriptor.proc_fdtype != PROX_FDTYPE_SOCKET)
+            continue;
+        struct socket_fdinfo info = {};
+        int got = proc_pidfdinfo(pid, descriptor.proc_fd,
+                                PROC_PIDFDSOCKETINFO, &info, sizeof(info));
+        if (got != sizeof(info))
+            continue;
+        if (info.psi.soi_family == AF_INET || info.psi.soi_family == AF_INET6)
+            socketCount++;
+    }
+    return socketCount;
+}
+
+static NSString *tvNormalizedProcessPath(NSString *path) {
+    NSString *normalized = path.stringByStandardizingPath;
+    // proc_pidpath thường trả /private/var trong khi LaunchServices đôi khi trả
+    // /var cho cùng bundle. Chuẩn hoá alias này trước khi so sánh prefix.
+    if ([normalized hasPrefix:@"/var/"])
+        normalized = [@"/private" stringByAppendingString:normalized];
+    return normalized;
+}
+
+static int tvRelatedAppSocketCount(NSString *bundleId, pid_t mainPID,
+                                   int *relatedProcessCount) {
+    NSMutableSet<NSNumber *> *pids = [NSMutableSet set];
+    if (mainPID > 0)
+        [pids addObject:@(mainPID)];
+
+    NSString *bundlePath = nil;
+    for (LSApplicationProxy *app in [tvAppWorkspace() allApplications]) {
+        if ([app.applicationIdentifier isEqualToString:bundleId]) {
+            bundlePath = tvNormalizedProcessPath(app.bundleURL.path ?: @"");
+            break;
+        }
+    }
+
+    if (bundlePath.length > 0) {
+        int needed = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+        if (needed > 0) {
+            std::vector<pid_t> allPids((size_t)needed / sizeof(pid_t) + 64);
+            int bytes = proc_listpids(PROC_ALL_PIDS, 0, allPids.data(),
+                                      (int)(allPids.size() * sizeof(pid_t)));
+            int count = MAX(0, bytes) / (int)sizeof(pid_t);
+            NSString *bundlePrefix = [bundlePath stringByAppendingString:@"/"];
+            for (int index = 0; index < count; index++) {
+                pid_t candidate = allPids[(size_t)index];
+                if (candidate <= 0 || candidate == mainPID)
+                    continue;
+                char rawPath[PROC_PIDPATHINFO_MAXSIZE] = {};
+                if (proc_pidpath(candidate, rawPath, sizeof(rawPath)) <= 0)
+                    continue;
+                NSString *processPath = tvNormalizedProcessPath(
+                    [NSString stringWithUTF8String:rawPath] ?: @"");
+                // Bao gồm executable chính và mọi extension .appex/PlugIns nằm
+                // trong cùng EarnApp.app. Phần proxy thường chạy ở extension,
+                // không nằm trong PID giao diện mà SpringBoard trả về.
+                if ([processPath hasPrefix:bundlePrefix])
+                    [pids addObject:@(candidate)];
+            }
+        }
+    }
+
+    int socketCount = 0;
+    for (NSNumber *number in pids)
+        socketCount += tvInternetSocketCountForPID((pid_t)number.intValue);
+    if (relatedProcessCount)
+        *relatedProcessCount = (int)pids.count;
+    return socketCount;
+}
+#endif
+
 /// `nettraffic <bundle id>` — PID và số socket thuộc app, kèm bộ đếm byte của
 /// Wi-Fi/cellular. iOS không cung cấp API ổn định để gán từng byte cho một app;
 /// PC lấy hai mẫu khi EarnApp còn cùng PID + còn socket để ước lượng app có đang
@@ -4039,31 +4125,13 @@ static NSData *tvCtlNetworkTraffic(NSString *bundleId) {
     }
 
     int socketCount = 0;
+    int relatedProcessCount = pid > 0 ? 1 : 0;
 #if !TARGET_OS_SIMULATOR
-    if (pid > 0) {
-        int needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, NULL, 0);
-        if (needed > 0) {
-            // Chừa thêm chỗ vì app có thể mở FD giữa hai lần gọi proc_pidinfo.
-            std::vector<struct proc_fdinfo> descriptors(
-                (size_t)needed / sizeof(struct proc_fdinfo) + 32);
-            int bytes = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, descriptors.data(),
-                                     (int)(descriptors.size() * sizeof(struct proc_fdinfo)));
-            int count = MAX(0, bytes) / (int)sizeof(struct proc_fdinfo);
-            for (int index = 0; index < count; index++) {
-                const struct proc_fdinfo &descriptor = descriptors[(size_t)index];
-                if (descriptor.proc_fdtype != PROX_FDTYPE_SOCKET)
-                    continue;
-                struct socket_fdinfo info = {};
-                int got = proc_pidfdinfo(pid, descriptor.proc_fd,
-                                        PROC_PIDFDSOCKETINFO, &info, sizeof(info));
-                if (got != sizeof(info))
-                    continue;
-                if (info.psi.soi_family == AF_INET || info.psi.soi_family == AF_INET6)
-                    socketCount++;
-            }
-        }
-    }
+    socketCount = tvRelatedAppSocketCount(bundleId, pid, &relatedProcessCount);
 #endif
+
+    TVLog(@"Control socket: nettraffic %@ mainPID=%d relatedProcesses=%d sockets=%d",
+          bundleId, pid, relatedProcessCount, socketCount);
 
     unsigned long long timestamp = (unsigned long long)
         ([[NSDate date] timeIntervalSince1970] * 1000.0);
