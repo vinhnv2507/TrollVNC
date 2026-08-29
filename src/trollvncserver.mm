@@ -191,7 +191,10 @@ static int gModMapScheme = 0;
 static BOOL gAutoAssistEnabled = NO;
 static BOOL gCursorEnabled = NO;
 static BOOL gKeyEventLogging = NO;
-static BOOL gOrientationSyncEnabled = YES;
+// Resizing the RFB framebuffer requires reconnecting clients that do not
+// support DesktopSize. Keep orientation sync opt-in so rotating a phone does
+// not cause surprise disconnects during normal remote control.
+static BOOL gOrientationSyncEnabled = NO;
 
 // Classic VNC authentication
 static char **gAuthPasswdVec = NULL;        // owns the vector
@@ -7271,6 +7274,33 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
         TVLog(@"VNC: từ chối client — chưa kích hoạt bản quyền");
         return RFB_CLIENT_REFUSE;
     }
+
+    // Keep the VNC transport responsive on Wi‑Fi/USB relays. The default
+    // Darwin keepalive interval is often measured in hours, so a phone that
+    // briefly changes networks can leave the PC holding a half-open socket
+    // until the next framebuffer request times out. Fast keepalive probes
+    // let the PC reconnect promptly, while TCP_NODELAY keeps input events
+    // from waiting behind a pending framebuffer packet.
+    int yes = 1;
+#ifdef SO_NOSIGPIPE
+    setsockopt(cl->sock, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+#endif
+    setsockopt(cl->sock, SOL_SOCKET, SO_KEEPALIVE, &yes, sizeof(yes));
+#ifdef TCP_KEEPALIVE
+    int keepAliveIdle = 30;
+    setsockopt(cl->sock, IPPROTO_TCP, TCP_KEEPALIVE, &keepAliveIdle, sizeof(keepAliveIdle));
+#endif
+#ifdef TCP_KEEPINTVL
+    int keepAliveInterval = 5;
+    setsockopt(cl->sock, IPPROTO_TCP, TCP_KEEPINTVL, &keepAliveInterval, sizeof(keepAliveInterval));
+#endif
+#ifdef TCP_KEEPCNT
+    int keepAliveCount = 3;
+    setsockopt(cl->sock, IPPROTO_TCP, TCP_KEEPCNT, &keepAliveCount, sizeof(keepAliveCount));
+#endif
+#ifdef TCP_NODELAY
+    setsockopt(cl->sock, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes));
+#endif
     cl->clientGoneHook = clientGoneHook;
     if (!cl->viewOnly && gViewOnly)
         cl->viewOnly = TRUE;
@@ -7606,9 +7636,20 @@ static void setupGeometry(void) {
         exit(EXIT_FAILURE);
     }
 
+    // Match the initial framebuffer to the current orientation. Previously
+    // geometry was always allocated as portrait and the first captured frame
+    // in landscape triggered maybeResizeFramebufferForRotation(), which
+    // intentionally disconnects clients because they do not advertise
+    // DesktopSize support. A client connecting while the phone was already
+    // rotated therefore got dropped immediately and appeared as an
+    // intermittent connection failure on the PC.
+    int rotQ = (gOrientationSyncEnabled ? gRotationQuad.load(std::memory_order_relaxed) : 0) & 3;
+    int orientedW = (rotQ % 2 == 0) ? gSrcWidth : gSrcHeight;
+    int orientedH = (rotQ % 2 == 0) ? gSrcHeight : gSrcWidth;
+
     // Apply output scaling if requested, then align (width multiple of 4)
-    int tmpW = (gScale > 0.0 && gScale < 1.0) ? MAX(1, (int)floor((double)gSrcWidth * gScale)) : gSrcWidth;
-    int tmpH = (gScale > 0.0 && gScale < 1.0) ? MAX(1, (int)floor((double)gSrcHeight * gScale)) : gSrcHeight;
+    int tmpW = (gScale > 0.0 && gScale < 1.0) ? MAX(1, (int)floor((double)orientedW * gScale)) : orientedW;
+    int tmpH = (gScale > 0.0 && gScale < 1.0) ? MAX(1, (int)floor((double)orientedH * gScale)) : orientedH;
     alignDimensions(tmpW, tmpH, &gWidth, &gHeight);
     gFBSize = (size_t)gWidth * (size_t)gHeight * (size_t)gBytesPerPixel;
 
@@ -8296,8 +8337,11 @@ int main(int argc, const char *argv[]) {
     }
 
     @autoreleasepool {
-        setupGeometry();
         setupOrientationObserver();
+        // Prime gRotationQuad before allocating the framebuffer so a device
+        // that is already in landscape does not connect once and then get
+        // dropped by the first orientation resize.
+        setupGeometry();
 
         setupRfbLogging();
         tvPreventAutomaticLock();

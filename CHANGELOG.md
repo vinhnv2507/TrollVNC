@@ -1,5 +1,15 @@
 # Changelog
 
+## [4.8] - 2026-08-29
+
+### Fixed
+- Initialize the framebuffer using the current device orientation before
+  accepting clients, avoiding an immediate disconnect on landscape devices.
+- Enable TCP keepalive and `TCP_NODELAY` on accepted VNC sockets so transient
+  Wi-Fi/USB interruptions are detected quickly and input remains responsive.
+- Make orientation synchronization opt-in by default; enabling it still
+  preserves the existing rotation behavior for setups that need it.
+
 All notable changes to TrollVNC are documented here.
 
 ## [3.2] – 2026-04-19

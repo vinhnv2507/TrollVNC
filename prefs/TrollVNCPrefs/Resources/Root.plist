@@ -330,7 +330,7 @@
 			<key>label</key>
 			<string>Sync Interface Orientation</string>
 			<key>default</key>
-			<true/>
+			<false/>
 		</dict>
 		<dict>
 			<key>cell</key>
