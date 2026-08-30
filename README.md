@@ -530,7 +530,11 @@ Trình duyệt iOS có các vị trí nhanh:
 
 - Thư viện ảnh/video: `/var/mobile/Media/DCIM`
 - Downloads: `/var/mobile/Downloads`
-- Documents: `/var/mobile/Documents`
+- Documents của ControlIOS: `/var/mobile/Documents` (không phải lúc nào cũng
+  được app Tệp hiển thị)
+- Thư mục Documents của app hiện trong **Tệp → Trên iPhone**:
+  `/var/mobile/Containers/Data/Application/<UUID>/Documents` — chọn nhanh
+  **Tệp → thư mục ứng dụng**, mở UUID của app rồi mở `Documents`
 - File hoặc thư mục tùy chọn
 
 Có thể chọn nhiều máy; dữ liệu mỗi máy được lưu trong một thư mục riêng. Việc

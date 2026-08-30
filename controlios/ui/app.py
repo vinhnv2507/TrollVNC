@@ -145,11 +145,24 @@ class IOSFileBrowserDialog(QDialog):
         self.preset_combo.addItem("Chọn vị trí…", "")
         self.preset_combo.addItem("Ảnh & video (DCIM)", "/var/mobile/Media/DCIM")
         self.preset_combo.addItem("Downloads", "/var/mobile/Downloads")
-        self.preset_combo.addItem("Documents", "/var/mobile/Documents")
+        self.preset_combo.addItem("Documents (ControlIOS)", "/var/mobile/Documents")
+        self.preset_combo.addItem(
+            "Tệp → thư mục ứng dụng",
+            "/var/mobile/Containers/Data/Application",
+        )
         self.preset_combo.addItem("Toàn bộ dữ liệu người dùng", "/var/mobile")
         self.preset_combo.currentIndexChanged.connect(self._load_preset)
         presets.addWidget(self.preset_combo, 1)
         layout.addLayout(presets)
+        if directories_only:
+            hint = QLabel(
+                "Muốn file hiện trong app Tệp → Trên iPhone: chọn "
+                "‘Tệp → thư mục ứng dụng’, mở thư mục UUID của app rồi mở "
+                "Documents. Hoặc nhập đường dẫn tuyệt đối bên dưới."
+            )
+            hint.setWordWrap(True)
+            hint.setStyleSheet("color: #687078; font-size: 11px;")
+            layout.addWidget(hint)
 
         path_bar = QHBoxLayout()
         self.path_edit = QLineEdit(self.path)

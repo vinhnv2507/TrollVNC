@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QGridLayout, QRubberBand, QScrollArea, QWidget
 
 from ..config import DeviceSpec
@@ -68,6 +68,9 @@ class DeviceGrid(QScrollArea):
         self._selection_rubber.hide()
 
         self._body = QWidget()
+        # Bắt kéo bắt đầu ở khoảng trống giữa các ô; trước đây chỉ ô thiết bị
+        # phát signal nên kéo từ vùng nền không tạo được rubber-band.
+        self._body.installEventFilter(self)
         self._layout = QGridLayout(self._body)
         self._layout.setSpacing(self.SPACING)
         self._layout.setContentsMargins(self.MARGIN, self.MARGIN, self.MARGIN, self.MARGIN)
@@ -95,6 +98,20 @@ class DeviceGrid(QScrollArea):
         self._monitor_timer = QTimer(self)
         self._monitor_timer.setInterval(650)
         self._monitor_timer.timeout.connect(self._pulse_monitored_tiles)
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched is self._body:
+            if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+                self._begin_selection_drag(
+                    "", event.modifiers(), event.globalPosition().toPoint())
+                return False
+            if event.type() == QEvent.MouseMove and event.buttons() & Qt.LeftButton:
+                self._update_selection_drag(event.globalPosition().toPoint())
+                return False
+            if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+                self._finish_selection_drag(event.globalPosition().toPoint())
+                return False
+        return super().eventFilter(watched, event)
 
     # ---------------------------------------------------------------- contents
 
