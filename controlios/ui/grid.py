@@ -104,13 +104,15 @@ class DeviceGrid(QScrollArea):
             if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
                 self._begin_selection_drag(
                     "", event.modifiers(), event.globalPosition().toPoint())
-                return False
+                self._body.grabMouse()
+                return True
             if event.type() == QEvent.MouseMove and event.buttons() & Qt.LeftButton:
                 self._update_selection_drag(event.globalPosition().toPoint())
-                return False
+                return True
             if event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
                 self._finish_selection_drag(event.globalPosition().toPoint())
-                return False
+                self._body.releaseMouse()
+                return True
         return super().eventFilter(watched, event)
 
     # ---------------------------------------------------------------- contents
