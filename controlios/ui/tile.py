@@ -36,6 +36,11 @@ def device_display_name(spec: DeviceSpec) -> str:
 class DeviceTile(QWidget):
     clicked = Signal(str, object)      # key, modifiers
     activated = Signal(str)            # double click -> open detail
+    # Quét chuột chọn nhiều ô. Toạ độ global giúp DeviceGrid đổi về viewport
+    # ngay cả khi con trỏ đã kéo ra ngoài ô bắt đầu.
+    selection_drag_started = Signal(str, object, object)  # key, modifiers, global pos
+    selection_drag_moved = Signal(object)                 # global pos
+    selection_drag_finished = Signal(object)              # global pos
 
     # Chế độ điều khiển thẳng trên ô: toạ độ đã quy về framebuffer của máy đó.
     pressed_at = Signal(str, int, int, int)     # key, x, y, nút
@@ -60,6 +65,7 @@ class DeviceTile(QWidget):
         self._image_rect = QRect()     # vùng ảnh được vẽ trong ô
         self.control_enabled = False
         self._dragging = False
+        self._selection_dragging = False
         self._apply_size()
         self.setToolTip(spec.key)
 
@@ -146,23 +152,32 @@ class DeviceTile(QWidget):
                 self._dragging = True
                 self.pressed_at.emit(self.spec.key, point[0], point[1], button)
             return
+        if event.button() == Qt.LeftButton:
+            self._selection_dragging = True
+            self.selection_drag_started.emit(
+                self.spec.key, modifiers, event.globalPosition().toPoint())
         self.clicked.emit(self.spec.key, modifiers)
 
     def mouseMoveEvent(self, event) -> None:
-        if not (self.control_enabled and self._dragging):
+        if self.control_enabled and self._dragging:
+            point = self._map(event.position().toPoint())
+            if point:
+                self.moved_at.emit(self.spec.key, point[0], point[1])
             return
-        point = self._map(event.position().toPoint())
-        if point:
-            self.moved_at.emit(self.spec.key, point[0], point[1])
+        if self._selection_dragging and event.buttons() & Qt.LeftButton:
+            self.selection_drag_moved.emit(event.globalPosition().toPoint())
 
     def mouseReleaseEvent(self, event) -> None:
-        if not (self.control_enabled and self._dragging):
+        if self.control_enabled and self._dragging:
+            self._dragging = False
+            button = MOUSE_BUTTONS.get(event.button())
+            point = self._map(event.position().toPoint())
+            if button is not None and point:
+                self.released_at.emit(self.spec.key, point[0], point[1], button)
             return
-        self._dragging = False
-        button = MOUSE_BUTTONS.get(event.button())
-        point = self._map(event.position().toPoint())
-        if button is not None and point:
-            self.released_at.emit(self.spec.key, point[0], point[1], button)
+        if self._selection_dragging and event.button() == Qt.LeftButton:
+            self._selection_dragging = False
+            self.selection_drag_finished.emit(event.globalPosition().toPoint())
 
     def wheelEvent(self, event) -> None:
         if not self.control_enabled:

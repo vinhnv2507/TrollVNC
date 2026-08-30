@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QObject, QSettings, QThread, QTimer, Signal
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -40,6 +40,7 @@ from .ssh_console import SshConsoleDialog
 log = logging.getLogger(__name__)
 
 PAGE_SIZES = [("50 máy", 50), ("100 máy", 100), ("250 máy", 250), ("Tất cả", 0)]
+UNGROUPED_FILTER = "\x00"
 # 0 cột = tự chia theo bề rộng khung.
 COLUMN_CHOICES = [("Cột: tự động", 0), ("4 cột", 4), ("6 cột", 6), ("8 cột", 8),
                   ("10 cột", 10), ("12 cột", 12)]
@@ -2053,7 +2054,7 @@ class MainWindow(QMainWindow):
         navigation_bar.setMovable(False)
         # Nén padding nút cho gọn -> nhiều action vừa một hàng hơn ở màn hẹp.
         navigation_bar.setStyleSheet(
-            "QToolButton { padding: 1px 3px; font-size: 11px; } "
+            "QToolButton { padding: 1px 2px; font-size: 11px; } "
             "QComboBox, QCheckBox, QLabel, QPushButton { font-size: 11px; }")
         self.addToolBar(navigation_bar)
         bar = navigation_bar
@@ -2079,6 +2080,22 @@ class MainWindow(QMainWindow):
         bar.addAction(reconnect)
 
         bar.addSeparator()
+        bar.addWidget(QLabel(" Nhóm: "))
+        self.group_combo = QComboBox()
+        self.group_combo.setObjectName("group-filter-combo")
+        # Keep the navigation row compact on 1366–1900 px screens; the full
+        # group name remains available in the popup/tooltip.
+        self.group_combo.setMinimumContentsLength(8)
+        # A fixed compact width keeps the navigation row usable on 1366–1900px
+        # screens; the popup still shows the complete group names.
+        self.group_combo.setFixedWidth(140)
+        self.group_combo.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.group_combo.setToolTip(
+            "Lọc nhanh theo nhóm; 'Chưa gán nhóm' là các máy chưa được phân nhóm"
+        )
+        self.group_combo.currentIndexChanged.connect(self._on_group_combo_changed)
+        bar.addWidget(self.group_combo)
+
         bar.addWidget(QLabel(" Trang: "))
         self.page_combo = QComboBox()
         for label, size in PAGE_SIZES:
@@ -2109,6 +2126,9 @@ class MainWindow(QMainWindow):
 
         bar.addSeparator()
         select_all = QAction("Chọn tất cả", self)
+        select_all.setShortcut(QKeySequence.SelectAll)
+        select_all.setShortcutContext(Qt.WindowShortcut)
+        select_all.setToolTip("Chọn tất cả máy đang hiển thị (Ctrl+A)")
         select_all.triggered.connect(self.grid.select_all)
         bar.addAction(select_all)
         clear = QAction("Bỏ chọn", self)
@@ -2123,15 +2143,8 @@ class MainWindow(QMainWindow):
         self.grid_control_box.toggled.connect(self.grid.set_control_enabled)
         bar.addWidget(self.grid_control_box)
 
-        # Thao tác tệp (trước ở bảng Ứng dụng) — chia lên hàng này để không hàng
-        # nào bị tràn sau nút ». (Độ sáng nằm ở hàng Thao tác bên dưới.)
-        bar.addSeparator()
-        install_ipa = QAction("Cài .ipa…", self)
-        install_ipa.setToolTip(
-            "Phục vụ file .ipa từ PC rồi nhờ TrollStore trên các máy đang chọn tải về cài")
-        install_ipa.triggered.connect(self._install_ipa)
-        bar.addAction(install_ipa)
-
+        # Các thao tác tệp nằm trong menu File… để hàng điều hướng luôn gọn.
+        # (Độ sáng nằm ở hàng Thao tác bên dưới.)
         file_button = QToolButton()
         file_button.setText("File…")
         file_button.setToolTip("Đẩy file lên iOS hoặc xuất file/ảnh/video về PC")
@@ -2140,22 +2153,17 @@ class MainWindow(QMainWindow):
         file_menu.addAction("Đẩy file lên iOS…").triggered.connect(self._push_file)
         file_menu.addAction("Xuất file/ảnh/video về PC…").triggered.connect(
             self._export_from_ios)
+        file_menu.addSeparator()
+        install_ipa = file_menu.addAction("Cài .ipa…")
+        install_ipa.setToolTip(
+            "Phục vụ file .ipa từ PC rồi nhờ TrollStore trên các máy đang chọn tải về cài")
+        install_ipa.triggered.connect(self._install_ipa)
+        file_menu.addAction("PC → Ảnh iOS").triggered.connect(self._push_photo)
+        # Alias rõ ràng cho việc duyệt và tải dữ liệu từ iOS (giữ nguyên hành vi
+        # cũ của nút iOS → PC nhưng không chiếm thêm chỗ trên thanh chính).
+        file_menu.addAction("iOS → PC").triggered.connect(self._export_from_ios)
         file_button.setMenu(file_menu)
         bar.addWidget(file_button)
-
-        import_media = QAction("PC → Ảnh iOS", self)
-        import_media.setToolTip(
-            "Chọn ảnh/video trên PC và nạp thẳng vào ứng dụng Ảnh của iOS"
-        )
-        import_media.triggered.connect(self._push_photo)
-        bar.addAction(import_media)
-
-        export_ios = QAction("iOS → PC", self)
-        export_ios.setToolTip(
-            "Duyệt ảnh, video và tệp trên iOS rồi lấy về PC, không cần SSH"
-        )
-        export_ios.triggered.connect(self._export_from_ios)
-        bar.addAction(export_ios)
 
         self.addToolBarBreak()
         actions_bar = QToolBar("Thao tác")
@@ -2210,9 +2218,6 @@ class MainWindow(QMainWindow):
         sort_menu.addAction("Đưa máy chọn xuống sau").triggered.connect(
             lambda: self._move_selected_devices(1))
         sort_menu.addSeparator()
-        group_filter_menu = sort_menu.addMenu("Hiển thị nhóm")
-        self.group_filter_menu = group_filter_menu
-        group_filter_menu.aboutToShow.connect(self._rebuild_group_filter_menu)
         sort_menu.addAction("Tạo nhóm mới…").triggered.connect(self._create_group)
         sort_menu.addAction("Đưa máy đã chọn vào nhóm…").triggered.connect(
             self._assign_selected_group)
@@ -2356,8 +2361,11 @@ class MainWindow(QMainWindow):
         return max(1, (count + self.page_size - 1) // self.page_size)
 
     def _filtered_devices(self) -> List[DeviceSpec]:
+        if self.current_group == UNGROUPED_FILTER:
+            return [d for d in self.registry.devices
+                    if d.enabled and not d.group.strip()]
         return [d for d in self.registry.devices
-                if d.enabled and (not self.current_group or d.group == self.current_group)]
+                if d.enabled and (not self.current_group or d.group.strip() == self.current_group)]
 
     def _page_devices(self) -> List[DeviceSpec]:
         devices = self._filtered_devices()
@@ -2376,14 +2384,40 @@ class MainWindow(QMainWindow):
         self.page_label.setText(f" {self.page + 1}/{self._pages()} ")
         self.prev_button.setEnabled(self.page > 0)
         self.next_button.setEnabled(self.page + 1 < self._pages())
+        self._refresh_group_combo()
 
     def _group_names(self) -> List[str]:
         return sorted({d.group.strip() for d in self.registry.devices if d.group.strip()},
                       key=str.casefold)
 
+    def _refresh_group_combo(self) -> None:
+        combo = getattr(self, "group_combo", None)
+        if combo is None:
+            return
+        current = self.current_group
+        combo.blockSignals(True)
+        combo.clear()
+        enabled = [d for d in self.registry.devices if d.enabled]
+        combo.addItem(f"Tất cả máy ({len(enabled)})", "")
+        ungrouped = sum(not d.group.strip() for d in enabled)
+        combo.addItem(f"Chưa gán nhóm ({ungrouped})", UNGROUPED_FILTER)
+        for group in self._group_names():
+            count = sum(d.enabled and d.group.strip() == group for d in self.registry.devices)
+            combo.addItem(f"{group} ({count})", group)
+        index = combo.findData(current)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _on_group_combo_changed(self, index: int) -> None:
+        combo = getattr(self, "group_combo", None)
+        if combo is not None and index >= 0:
+            self._select_group_filter(combo.itemData(index) or "")
+
     def _rebuild_group_filter_menu(self) -> None:
-        self.group_filter_menu.clear()
-        self._add_group_filter_actions(self.group_filter_menu)
+        menu = getattr(self, "group_filter_menu", None)
+        if menu is not None:
+            menu.clear()
+            self._add_group_filter_actions(menu)
 
     def _add_group_filter_actions(self, menu: QMenu) -> None:
         all_action = menu.addAction(
@@ -2391,8 +2425,13 @@ class MainWindow(QMainWindow):
         all_action.setCheckable(True)
         all_action.setChecked(not self.current_group)
         all_action.triggered.connect(lambda: self._select_group_filter(""))
+        ungrouped = sum(d.enabled and not d.group.strip() for d in self.registry.devices)
+        ungrouped_action = menu.addAction(f"Chưa gán nhóm ({ungrouped})")
+        ungrouped_action.setCheckable(True)
+        ungrouped_action.setChecked(self.current_group == UNGROUPED_FILTER)
+        ungrouped_action.triggered.connect(lambda: self._select_group_filter(UNGROUPED_FILTER))
         for group in self._group_names():
-            count = sum(d.enabled and d.group == group for d in self.registry.devices)
+            count = sum(d.enabled and d.group.strip() == group for d in self.registry.devices)
             action = menu.addAction(f"{group} ({count})")
             action.setCheckable(True)
             action.setChecked(self.current_group == group)
@@ -2428,8 +2467,6 @@ class MainWindow(QMainWindow):
             lambda: self._move_selected_devices(-1))
         move_menu.addAction("Đưa xuống sau").triggered.connect(
             lambda: self._move_selected_devices(1))
-        filter_menu = menu.addMenu("Hiển thị nhóm")
-        self._add_group_filter_actions(filter_menu)
         menu.addSeparator()
         menu.addAction("Tạo nhóm mới…").triggered.connect(self._create_group)
         menu.addAction("Đưa vào nhóm…").triggered.connect(self._assign_selected_group)
@@ -2453,10 +2490,13 @@ class MainWindow(QMainWindow):
     def _select_group_filter(self, group: str) -> None:
         self.current_group = group
         self.page = 0
-        self.group_sort_button.setText(f"Nhóm: {group}" if group else "Xếp/Nhóm")
+        self.group_sort_button.setText("Xếp/Nhóm")
         self._apply_page()
+        if hasattr(self, "group_combo"):
+            self.group_combo.setCurrentIndex(max(0, self.group_combo.findData(group)))
+        label = "chưa gán nhóm" if group == UNGROUPED_FILTER else group
         self.statusBar().showMessage(
-            f"Đang hiển thị nhóm {group}" if group else "Đang hiển thị tất cả máy", 4000)
+            f"Đang hiển thị nhóm {label}" if group else "Đang hiển thị tất cả máy", 4000)
 
     def _create_group(self) -> None:
         name, ok = QInputDialog.getText(self, "Tạo nhóm", "Tên nhóm mới:")

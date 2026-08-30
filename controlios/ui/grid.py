@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import QGridLayout, QScrollArea, QWidget
+from PySide6.QtCore import QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtWidgets import QApplication, QGridLayout, QRubberBand, QScrollArea, QWidget
 
 from ..config import DeviceSpec
 from ..vnc.session import Frame, State, Tier
@@ -60,6 +60,12 @@ class DeviceGrid(QScrollArea):
         self._columns = 0            # số cột đang dùng
         self._forced_columns = 0     # 0 = tự động
         self._laying_out = False
+        self._selection_anchor = QPoint()
+        self._selection_base: List[str] = []
+        self._selection_drag_modifiers = Qt.NoModifier
+        self._selection_drag_active = False
+        self._selection_rubber = QRubberBand(QRubberBand.Rectangle, self.viewport())
+        self._selection_rubber.hide()
 
         self._body = QWidget()
         self._layout = QGridLayout(self._body)
@@ -99,6 +105,8 @@ class DeviceGrid(QScrollArea):
         self.tiles.clear()
         self.order = []
         self.selection = []
+        self._selection_drag_active = False
+        self._selection_rubber.hide()
 
         for spec in specs:
             tile = DeviceTile(spec, self.tile_width, self._body)
@@ -110,6 +118,9 @@ class DeviceGrid(QScrollArea):
             tile.moved_at.connect(self.tile_moved)
             tile.released_at.connect(self.tile_released)
             tile.scrolled_at.connect(self._on_tile_scrolled)
+            tile.selection_drag_started.connect(self._begin_selection_drag)
+            tile.selection_drag_moved.connect(self._update_selection_drag)
+            tile.selection_drag_finished.connect(self._finish_selection_drag)
             tile.setContextMenuPolicy(Qt.CustomContextMenu)
             tile.customContextMenuRequested.connect(
                 lambda pos, k=spec.key, t=tile:
@@ -165,37 +176,93 @@ class DeviceGrid(QScrollArea):
 
     # -------------------------------------------------------------- selection
 
+    def _apply_selection(self, keys: List[str]) -> None:
+        """Update highlights only for tiles whose state actually changed."""
+
+        seen = set()
+        ordered = []
+        for key in keys:
+            if key in self.tiles and key not in seen:
+                seen.add(key)
+                ordered.append(key)
+        old = set(self.selection)
+        new = set(ordered)
+        if old == new and self.selection == ordered:
+            return
+        for key in old ^ new:
+            tile = self.tiles.get(key)
+            if tile:
+                tile.set_selected(key in new)
+        self.selection = ordered
+        self.selection_changed.emit(list(self.selection))
+
+    def _begin_selection_drag(self, _key: str, modifiers, global_pos: QPoint) -> None:
+        self._selection_anchor = self.viewport().mapFromGlobal(global_pos)
+        self._selection_base = list(self.selection)
+        self._selection_drag_modifiers = modifiers
+        self._selection_drag_active = False
+
+    def _selection_hits(self, rect: QRect) -> List[str]:
+        hits = []
+        for key in self.order:
+            tile = self.tiles.get(key)
+            if not tile:
+                continue
+            top_left = self.viewport().mapFromGlobal(tile.mapToGlobal(QPoint(0, 0)))
+            if rect.intersects(QRect(top_left, tile.size())):
+                hits.append(key)
+        return hits
+
+    def _update_selection_drag(self, global_pos: QPoint) -> None:
+        current = self.viewport().mapFromGlobal(global_pos)
+        if not self._selection_drag_active:
+            if (current - self._selection_anchor).manhattanLength() < QApplication.startDragDistance():
+                return
+            self._selection_drag_active = True
+            self._selection_rubber.show()
+        rect = QRect(self._selection_anchor, current).normalized()
+        self._selection_rubber.setGeometry(rect.intersected(self.viewport().rect()))
+        hits = set(self._selection_hits(rect))
+        base = set(self._selection_base)
+        if self._selection_drag_modifiers & Qt.ControlModifier:
+            wanted = base ^ hits
+        elif self._selection_drag_modifiers & Qt.ShiftModifier:
+            wanted = base | hits
+        else:
+            wanted = hits
+        self._apply_selection([key for key in self.order if key in wanted])
+
+    def _finish_selection_drag(self, global_pos: QPoint) -> None:
+        if self._selection_drag_active:
+            self._update_selection_drag(global_pos)
+        self._selection_drag_active = False
+        self._selection_rubber.hide()
+        self._selection_base = []
+
     def _on_tile_clicked(self, key: str, modifiers) -> None:
+        selection = list(self.selection)
         if modifiers & Qt.ControlModifier:
-            if key in self.selection:
-                self.selection.remove(key)
+            if key in selection:
+                selection.remove(key)
             else:
-                self.selection.append(key)
-        elif modifiers & Qt.ShiftModifier and self.selection:
-            start = self.order.index(self.selection[-1])
+                selection.append(key)
+        elif modifiers & Qt.ShiftModifier and selection:
+            start = self.order.index(selection[-1])
             end = self.order.index(key)
             lo, hi = sorted((start, end))
             for k in self.order[lo:hi + 1]:
-                if k not in self.selection:
-                    self.selection.append(k)
+                if k not in selection:
+                    selection.append(k)
         else:
-            self.selection = [key]
+            selection = [key]
 
-        for k, tile in self.tiles.items():
-            tile.set_selected(k in self.selection)
-        self.selection_changed.emit(list(self.selection))
+        self._apply_selection(selection)
 
     def select_all(self) -> None:
-        self.selection = list(self.order)
-        for tile in self.tiles.values():
-            tile.set_selected(True)
-        self.selection_changed.emit(list(self.selection))
+        self._apply_selection(list(self.order))
 
     def clear_selection(self) -> None:
-        self.selection = []
-        for tile in self.tiles.values():
-            tile.set_selected(False)
-        self.selection_changed.emit([])
+        self._apply_selection([])
 
     # ------------------------------------------------------------------ layout
 

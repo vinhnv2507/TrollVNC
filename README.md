@@ -195,7 +195,10 @@ khi đóng app và tự dựng lại khi mở lại (máy USB đã lưu trong `d
   - Ô lưới chỉ làm mới 1 hình/giây nên bấm vào mà chờ một giây mới thấy phản
     hồi thì vô dụng. Vì vậy ô vừa thao tác được **tạm nâng lên nhịp cao trong
     4 giây**, rồi tự trả về bình thường.
-- **Chọn nhiều máy**: click, `Ctrl`+click, `Shift`+click, hoặc **Chọn tất cả**.
+- **Chọn nhiều máy**: click, `Ctrl`+click, `Shift`+click, hoặc **quét chuột
+  qua các ô**. `Ctrl+A` chọn tất cả máy đang hiển thị; nhóm đang lọc được chọn
+  nhanh bằng ô **Nhóm** ngay trên thanh công cụ. Ô **Chưa gán nhóm** gom các
+  máy chưa được phân nhóm.
 - **Gửi thao tác tới các máy đã chọn**: bật ô này thì mỗi cú click trên khung
   điều khiển được phát cho toàn bộ máy đang chọn. Toạ độ gửi đi là **tỉ lệ**
   (0..1) chứ không phải pixel, nên máy khác kích thước màn hình vẫn chạm đúng
