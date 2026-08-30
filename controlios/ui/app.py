@@ -1964,7 +1964,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.backup_pc_requested.connect(self._backup_app_to_pc)
         self.apps_panel.restore_requested.connect(self._restore_app)
         # Home / Chuyển app / Khoá đã chuyển xuống dưới khung lớn.
-        # Cài .ipa / Độ sáng / Đẩy file đã chuyển ra thanh công cụ chính.
+        # Thao tác tệp (gồm cài .ipa) mở nhanh từ nút File trên thanh chính.
 
         self._build_toolbar()
         self.setStatusBar(QStatusBar())
