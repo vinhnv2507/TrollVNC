@@ -48,6 +48,13 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Tự động chạm: soạn kịch bản (tap/swipe/wait/home…), gửi xuống daemon và
 /// Bật/Tắt. Vòng lặp chạy TRONG DAEMON nên tiếp tục dù thoát app.
+/// On-device health check for manager/server, VNC, control socket and Keeper.
+@interface TVNCDiagnosticsController : UITableViewController
+
+@property(nonatomic, strong) UIColor *primaryColor;
+
+@end
+
 @interface TVNCAutoClickController : UIViewController
 
 @property(nonatomic, strong) UIColor *primaryColor;

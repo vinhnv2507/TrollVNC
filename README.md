@@ -34,6 +34,17 @@ TrollVNC is a VNC server for iOS devices, allowing remote access and control of 
 trollvncserver -p 5901 -n "My iPhone" [options]
 ```
 
+### On-device connection diagnostics
+
+In the standalone ControlIOS app, open the `…` menu and choose **Connection
+Diagnostics**. The screen checks the manager/server heartbeat, configured VNC
+port, control/file-transfer port, Keeper, LAN address, bind address and control
+token state. It also displays the daemon health report and can restart the VNC
+service, then automatically checks it again. Pull down to refresh.
+
+Control/file-transfer clients are handled concurrently as of v4.9. A slow or
+stalled upload/download therefore no longer blocks later control commands.
+
 ### Options
 
 **Basic**:

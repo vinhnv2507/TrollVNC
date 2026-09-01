@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.9] - 2026-09-01
+
+- Control socket now handles clients concurrently, so a long or stalled file
+  transfer no longer blocks diagnostics and later PC commands.
+- Added an on-device **Connection Diagnostics** screen showing manager/server,
+  VNC, control/file-transfer, Keeper, LAN/config state and daemon health data.
+- Added one-tap service restart and automatic recheck from the diagnostics
+  screen.
+
 ## [4.8] - 2026-08-29
 
 ### Fixed

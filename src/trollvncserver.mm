@@ -3593,6 +3593,21 @@ static void startBonjour(void) {
 
 static int gTvCtlListenFd = -1;
 static dispatch_source_t gTvCtlAcceptSource = NULL;
+static std::atomic<int> gTvCtlActiveConnections{0};
+static std::atomic<int> gTvCtlActiveTransfers{0};
+static std::atomic<unsigned long long> gTvCtlAcceptedTotal{0};
+
+class TVAtomicCounterGuard {
+  public:
+    explicit TVAtomicCounterGuard(std::atomic<int> &counter) : _counter(counter) {
+        _counter.fetch_add(1, std::memory_order_relaxed);
+    }
+    ~TVAtomicCounterGuard() {
+        _counter.fetch_sub(1, std::memory_order_relaxed);
+    }
+  private:
+    std::atomic<int> &_counter;
+};
 
 // Number of connected clients
 static int gClientCount = 0;
@@ -3717,9 +3732,17 @@ static void tvStartControlSocketIfNeeded(void) {
     gTvCtlListenFd = fd;
 
     static dispatch_queue_t sTVCtlQueue = nil;
+    static dispatch_queue_t sTVCtlClientQueue = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         sTVCtlQueue = dispatch_queue_create("com.82flex.trollvnc.control", DISPATCH_QUEUE_SERIAL_WITH_AUTORELEASE_POOL);
+        // File transfers can take minutes. Never run them on the accept queue:
+        // one stalled get/put used to make the control port appear connected
+        // while every later command waited behind that transfer.
+        dispatch_queue_attr_t clientAttr = dispatch_queue_attr_make_with_autorelease_frequency(
+            DISPATCH_QUEUE_CONCURRENT, DISPATCH_AUTORELEASE_FREQUENCY_WORK_ITEM);
+        sTVCtlClientQueue = dispatch_queue_create(
+            "com.82flex.trollvnc.control.clients", clientAttr);
     });
 
     gTvCtlAcceptSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, (uintptr_t)fd, 0, sTVCtlQueue);
@@ -3736,7 +3759,9 @@ static void tvStartControlSocketIfNeeded(void) {
                 TVLog(@"Control socket: accept() error: %s", strerror(errno));
                 break;
             }
-            tvCtlHandleConnection(cfd, caddr);
+            dispatch_async(sTVCtlClientQueue, ^{
+                tvCtlHandleConnection(cfd, caddr);
+            });
         }
     });
 
@@ -5104,6 +5129,13 @@ static NSData *tvCtlDiagnostics(void) {
     }];
 
     NSMutableString *out = [NSMutableString stringWithString:@"OK\n"];
+    [out appendFormat:@"server_version=%s\n", PACKAGE_VERSION];
+    [out appendFormat:@"control_port=%d\ncontrol_bind_lan=%d\ncontrol_token_set=%d\n",
+                      gTvCtlPort, gTvCtlBindAll, gTvCtlToken.length > 0];
+    [out appendFormat:@"control_active=%d\ncontrol_transfers=%d\ncontrol_accepted_total=%llu\n",
+                      gTvCtlActiveConnections.load(std::memory_order_relaxed),
+                      gTvCtlActiveTransfers.load(std::memory_order_relaxed),
+                      gTvCtlAcceptedTotal.load(std::memory_order_relaxed)];
     [out appendFormat:@"uptime=%.0f\n", processInfo.systemUptime];
     [out appendFormat:@"memory_total=%llu\n", processInfo.physicalMemory];
     [out appendFormat:@"disk_total=%llu\n", total];
@@ -6772,6 +6804,8 @@ static NSData *tvCtlSnapshotClear(NSString *bundleId) {
 }
 
 void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
+    TVAtomicCounterGuard connectionGuard(gTvCtlActiveConnections);
+    gTvCtlAcceptedTotal.fetch_add(1, std::memory_order_relaxed);
     // Log peer and set short timeouts
     char ipbuf[INET_ADDRSTRLEN] = {0};
     const char *ip = inet_ntop(AF_INET, &caddr.sin_addr, ipbuf, sizeof(ipbuf));
@@ -6911,9 +6945,11 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlListDirectory([[cmd substringFromIndex:3]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"getfile "]) {
+        TVAtomicCounterGuard transferGuard(gTvCtlActiveTransfers);
         tvCtlSendMobileFile(cfd, [[cmd substringFromIndex:8]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"put "]) {
+        TVAtomicCounterGuard transferGuard(gTvCtlActiveTransfers);
         resp = tvCtlReceiveFile(cfd, [cmd substringFromIndex:4], pending, pendingLength);
     } else if ([cmd hasPrefix:@"clipset "]) {
         resp = tvCtlSetClipboard(cfd, [cmd substringFromIndex:8], pending, pendingLength);

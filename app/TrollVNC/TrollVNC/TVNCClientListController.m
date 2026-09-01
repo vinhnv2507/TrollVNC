@@ -21,6 +21,7 @@
 #import <UIKit/UIKit.h>
 #import <arpa/inet.h>
 #import <errno.h>
+#import <ifaddrs.h>
 #import <netinet/in.h>
 #import <netinet/tcp.h>
 #import <string.h>
@@ -28,6 +29,7 @@
 #import <unistd.h>
 
 #import "Control.h"
+#import "TVNCUtil.h"
 
 #pragma mark - Networking
 
@@ -97,6 +99,64 @@ static int TVNCConnect(void) {
         return -1;
     }
     return fd;
+}
+
+static BOOL TVNCProbeLoopbackPort(int port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+        return NO;
+    struct timeval timeout = {2, 0};
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_len = sizeof(addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons((uint16_t)port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    BOOL ok = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
+    close(fd);
+    return ok;
+}
+
+static NSString *TVNCLocalIPv4Address(void) {
+    struct ifaddrs *interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0 || !interfaces)
+        return @"không xác định";
+    NSString *fallback = nil;
+    for (struct ifaddrs *item = interfaces; item; item = item->ifa_next) {
+        if (!item->ifa_addr || item->ifa_addr->sa_family != AF_INET)
+            continue;
+        char value[INET_ADDRSTRLEN] = {0};
+        struct sockaddr_in *address = (struct sockaddr_in *)item->ifa_addr;
+        if (!inet_ntop(AF_INET, &address->sin_addr, value, sizeof(value)))
+            continue;
+        NSString *ip = [NSString stringWithUTF8String:value];
+        if ([ip hasPrefix:@"127."])
+            continue;
+        if (strcmp(item->ifa_name, "en0") == 0) {
+            freeifaddrs(interfaces);
+            return ip;
+        }
+        if (!fallback)
+            fallback = ip;
+    }
+    freeifaddrs(interfaces);
+    return fallback ?: @"không có IP LAN";
+}
+
+static NSString *TVNCLoopbackCommand(NSString *command) {
+    int fd = TVNCConnect();
+    if (fd < 0)
+        return nil;
+    if (TVNCSendLine(fd, command) != 0) {
+        close(fd);
+        return nil;
+    }
+    NSData *data = TVNCReadAll(fd, 3.0);
+    close(fd);
+    if (!data.length)
+        return @"";
+    return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
 }
 
 #pragma mark - Private Interface
@@ -1049,6 +1109,153 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
             [self presentViewController:done animated:YES completion:nil];
         });
     });
+}
+
+@end
+
+#pragma mark - Connection diagnostics
+
+@interface TVNCDiagnosticsController ()
+@property(nonatomic, copy) NSArray<NSDictionary *> *rows;
+@property(nonatomic, assign) BOOL healthy;
+@end
+
+@implementation TVNCDiagnosticsController
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+    self.title = @"Chẩn đoán kết nối";
+    self.rows = @[@{@"title": @"Đang tự kiểm tra…", @"detail": @""}];
+    self.tableView.rowHeight = UITableViewAutomaticDimension;
+    self.tableView.estimatedRowHeight = 60;
+    UIRefreshControl *refresh = [UIRefreshControl new];
+    [refresh addTarget:self action:@selector(refreshDiagnostics)
+      forControlEvents:UIControlEventValueChanged];
+    self.refreshControl = refresh;
+    self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
+        initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                           target:self
+                           action:@selector(dismissSelf)];
+    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+        initWithTitle:@"Khởi động lại"
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(confirmRestart)];
+    self.navigationItem.rightBarButtonItem.tintColor = self.primaryColor;
+    [self refreshDiagnostics];
+}
+
+- (void)dismissSelf {
+    [self dismissViewControllerAnimated:YES completion:nil];
+}
+
+- (void)refreshDiagnostics {
+    self.navigationItem.rightBarButtonItem.enabled = NO;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+        NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.trollvnc"];
+        BOOL enabled = [defaults objectForKey:@"Enabled"] ? [defaults boolForKey:@"Enabled"] : YES;
+        NSInteger vncPort = [defaults integerForKey:@"Port"];
+        if (vncPort < 1 || vncPort > 65535)
+            vncPort = 5901;
+        NSString *bindHost = [defaults stringForKey:@"BindHost"] ?: @"";
+        NSString *token = [defaults stringForKey:@"CtlToken"] ?: @"";
+
+        BOOL manager = TVNCProbeLoopbackPort(kTvAlivePort);
+        BOOL vnc = TVNCProbeLoopbackPort((int)vncPort);
+        BOOL control = TVNCProbeLoopbackPort(kTvDefaultCtlPort);
+        BOOL keeper = TVNCProbeLoopbackPort(46753);
+        NSString *countReply = control ? TVNCLoopbackCommand(@"count") : nil;
+        BOOL controlReplies = countReply.length > 0 && ![countReply hasPrefix:@"ERR"];
+        NSString *reply = controlReplies ? TVNCLoopbackCommand(@"diagnostics") : nil;
+        BOOL healthy = enabled && manager && vnc && control && controlReplies;
+
+        NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
+        [rows addObject:@{@"title": healthy ? @"✓ Dịch vụ hoạt động" : @"⚠ Có lỗi cần xử lý",
+                          @"detail": [NSString stringWithFormat:@"ControlIOS v%s · %@",
+                                                               PACKAGE_VERSION, [NSDate date]]}];
+        [rows addObject:@{@"title": @"Mạng LAN",
+                          @"detail": [NSString stringWithFormat:@"IP: %@\nBind: %@",
+                                                               TVNCLocalIPv4Address(),
+                                                               bindHost.length ? bindHost : @"mọi giao diện"]}];
+        [rows addObject:@{@"title": @"Cấu hình",
+                          @"detail": [NSString stringWithFormat:@"Enabled: %@\nControl token: %@",
+                                                               enabled ? @"Bật" : @"Tắt",
+                                                               token.length ? @"Đã đặt" : @"CHƯA ĐẶT — PC không truyền file qua LAN"]}];
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Manager/server",
+                                                               manager ? @"✓" : @"✗"],
+                          @"detail": @"Alive socket nội bộ · cổng 46751"}];
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ VNC",
+                                                               vnc ? @"✓" : @"✗"],
+                          @"detail": [NSString stringWithFormat:@"Cổng %ld", (long)vncPort]}];
+        NSString *controlDetail = control
+            ? (controlReplies ? @"Cổng 46752 phản hồi lệnh bình thường"
+                              : @"Cổng 46752 mở nhưng KHÔNG trả lời — có thể lượt truyền cũ đang kẹt")
+            : @"Cổng 46752 không mở";
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Control/truyền file",
+                                                               controlReplies ? @"✓" : @"✗"],
+                          @"detail": controlDetail}];
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Keeper",
+                                                               keeper ? @"✓" : @"○"],
+                          @"detail": keeper ? @"keeperd đang chạy · cổng 46753"
+                                             : @"Keeper chưa cài hoặc keeperd chưa chạy"}];
+        if (reply.length && ![reply hasPrefix:@"ERR"]) {
+            NSString *clean = [reply stringByTrimmingCharactersInSet:
+                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            [rows addObject:@{@"title": @"Báo cáo daemon", @"detail": clean}];
+        }
+        if (!healthy) {
+            [rows addObject:@{@"title": @"Cách khôi phục",
+                              @"detail": @"Bấm Khởi động lại ở góc phải, chờ 3 giây rồi kéo xuống kiểm tra lại. Nếu vẫn đỏ, mở View Logs trong menu Công cụ."}];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            self.rows = rows;
+            self.healthy = healthy;
+            [self.tableView reloadData];
+            [self.refreshControl endRefreshing];
+            self.navigationItem.rightBarButtonItem.enabled = YES;
+        });
+    });
+}
+
+- (void)confirmRestart {
+    UIAlertController *alert = [UIAlertController
+        alertControllerWithTitle:@"Khởi động lại dịch vụ?"
+                         message:@"Dừng trollvncserver hiện tại. Manager sẽ tự chạy lại; kết nối VNC/control ngắt trong vài giây."
+                  preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
+    __weak typeof(self) weakSelf = self;
+    [alert addAction:[UIAlertAction actionWithTitle:@"Khởi động lại"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(UIAlertAction *action) {
+                                                TVNCRestartVNCService();
+                                                weakSelf.rows = @[@{@"title": @"Đang khởi động lại…",
+                                                                   @"detail": @"Tự kiểm tra lại sau 3 giây"}];
+                                                [weakSelf.tableView reloadData];
+                                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC),
+                                                               dispatch_get_main_queue(), ^{
+                                                                   [weakSelf refreshDiagnostics];
+                                                               });
+                                            }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
+    return self.rows.count;
+}
+
+- (UITableViewCell *)tableView:(UITableView *)tableView cellForRowAtIndexPath:(NSIndexPath *)indexPath {
+    static NSString *reuse = @"diagnostic";
+    UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:reuse];
+    if (!cell)
+        cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:reuse];
+    NSDictionary *row = self.rows[indexPath.row];
+    cell.textLabel.text = row[@"title"];
+    cell.textLabel.numberOfLines = 0;
+    cell.detailTextLabel.text = row[@"detail"];
+    cell.detailTextLabel.numberOfLines = 0;
+    cell.detailTextLabel.font = [UIFont monospacedSystemFontOfSize:12 weight:UIFontWeightRegular];
+    cell.selectionStyle = UITableViewCellSelectionStyleNone;
+    return cell;
 }
 
 @end

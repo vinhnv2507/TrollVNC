@@ -299,13 +299,17 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                            image:[UIImage systemImageNamed:@"checkmark.seal"]
                                       identifier:nil
                                          handler:^(__kindof UIAction *a) { [weakSelf showActivation]; }];
+    UIAction *diagnosticsAct = [UIAction actionWithTitle:@"Chẩn đoán kết nối"
+                                                   image:[UIImage systemImageNamed:@"stethoscope"]
+                                              identifier:nil
+                                                 handler:^(__kindof UIAction *a) { [weakSelf showDiagnostics]; }];
     UIAction *rebootAct = [UIAction actionWithTitle:@"Reboot Device"
                                              image:[UIImage systemImageNamed:@"power"]
                                         identifier:nil
                                            handler:^(__kindof UIAction *a) { [weakSelf confirmDeviceReboot]; }];
     rebootAct.attributes = UIMenuElementAttributesDestructive;
-    UIMenu *toolsMenu =
-        [UIMenu menuWithTitle:@"" children:@[ appDataAct, autoAct, actAct, rebootAct ]];
+    UIMenu *toolsMenu = [UIMenu menuWithTitle:@""
+                                      children:@[ diagnosticsAct, appDataAct, autoAct, actAct, rebootAct ]];
     UIBarButtonItem *toolsItem =
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
                                          style:UIBarButtonItemStylePlain
@@ -388,6 +392,14 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
 - (void)showActivation {
     TVNCActivationController *vc =
         [[TVNCActivationController alloc] initWithStyle:UITableViewStyleInsetGrouped];
+    vc.primaryColor = self.primaryColor;
+    UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
+    [self.navigationController presentViewController:navController animated:YES completion:nil];
+}
+
+- (void)showDiagnostics {
+    TVNCDiagnosticsController *vc =
+        [[TVNCDiagnosticsController alloc] initWithStyle:UITableViewStyleInsetGrouped];
     vc.primaryColor = self.primaryColor;
     UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:vc];
     [self.navigationController presentViewController:navController animated:YES completion:nil];
