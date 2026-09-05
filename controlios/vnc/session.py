@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
+import socket
 import time
 from dataclasses import dataclass
 from typing import Callable, Optional
@@ -145,6 +146,11 @@ class VncSession:
         # Ngắt chờ backoff để NỐI LẠI NGAY (sau khi mở lại app trên iOS chẳng hạn).
         self._wake = asyncio.Event()
         self._task: Optional[asyncio.Task] = None
+        # Chỉ gửi vị trí chuột mới nhất trong cùng một vòng lặp event. Qt có
+        # thể phát hàng trăm MouseMove/giây; dồn các điểm trung gian giúp
+        # không xếp hàng gói cũ trước thao tác hiện tại.
+        self._mouse_move_handle: Optional[asyncio.Handle] = None
+        self._mouse_move_pending: Optional[tuple[int, int]] = None
 
     # ---------------------------------------------------------------- control
 
@@ -155,6 +161,7 @@ class VncSession:
 
     async def stop(self) -> None:
         self._stop.set()
+        self._cancel_pending_mouse_move()
         self._tier_changed.set()
         if self._task:
             self._task.cancel()
@@ -250,26 +257,54 @@ class VncSession:
     def tap(self, x: int, y: int, button: int = 0) -> None:
         if not self._client:
             return
-        self._client.mouse.move(int(x), int(y))
-        self._client.mouse.click(button)
+        self._cancel_pending_mouse_move()
+        mouse = self._client.mouse
+        # Giữ packet move riêng trước click: một số daemon dùng event move để
+        # cập nhật hit-test trước khi nhận button press.
+        mouse.move(int(x), int(y))
+        mouse.click(button)
 
     def mouse_down(self, x: int, y: int, button: int = 0) -> None:
         if not self._client:
             return
-        self._client.mouse.move(int(x), int(y))
-        self._client.mouse.buttons |= 1 << button
-        self._client.mouse._write()
+        self._cancel_pending_mouse_move()
+        mouse = self._client.mouse
+        mouse.x, mouse.y = int(x), int(y)
+        mouse.buttons |= 1 << button
+        mouse._write()
 
     def mouse_move(self, x: int, y: int) -> None:
-        if self._client:
-            self._client.mouse.move(int(x), int(y))
+        if not self._client:
+            return
+        self._mouse_move_pending = (int(x), int(y))
+        if self._mouse_move_handle is None:
+            self._mouse_move_handle = asyncio.get_running_loop().call_soon(
+                self._flush_mouse_move)
 
     def mouse_up(self, x: int, y: int, button: int = 0) -> None:
         if not self._client:
             return
-        self._client.mouse.move(int(x), int(y))
-        self._client.mouse.buttons &= ~(1 << button)
-        self._client.mouse._write()
+        self._cancel_pending_mouse_move()
+        mouse = self._client.mouse
+        mouse.x, mouse.y = int(x), int(y)
+        mouse.buttons &= ~(1 << button)
+        mouse._write()
+
+    def _cancel_pending_mouse_move(self) -> None:
+        if self._mouse_move_handle is not None:
+            self._mouse_move_handle.cancel()
+            self._mouse_move_handle = None
+        self._mouse_move_pending = None
+
+    def _flush_mouse_move(self) -> None:
+        self._mouse_move_handle = None
+        pending = self._mouse_move_pending
+        self._mouse_move_pending = None
+        if pending is None or not self._client:
+            return
+        mouse = self._client.mouse
+        mouse.x, mouse.y = pending
+        mouse._write()
 
     async def swipe(self, x1: int, y1: int, x2: int, y2: int, duration: float = 0.25,
                     steps: int = 12, hold: float = 0.0) -> None:
@@ -324,7 +359,17 @@ class VncSession:
         for char in text:
             (supported if char in asyncvnc.key_codes else skipped).append(char)
         if supported:
-            self._client.keyboard.write("".join(supported))
+            # Gộp toàn bộ chuỗi thành một lần ghi socket; vẫn giữ cặp
+            # key-down/key-up cho từng ký tự nhưng tránh hàng chục syscall và
+            # hàng đợi nhỏ trên TCP khi gõ nhanh.
+            payload = bytearray()
+            for char in supported:
+                code = asyncvnc.key_codes[char].to_bytes(4, "big")
+                payload.extend(b"\x04\x01\x00\x00")
+                payload.extend(code)
+                payload.extend(b"\x04\x00\x00\x00")
+                payload.extend(code)
+            self._client.writer.write(bytes(payload))
         return "".join(skipped)
 
     def press_keysym(self, keysym: int, repeat: int = 1) -> None:
@@ -338,9 +383,11 @@ class VncSession:
             return
         data = int(keysym).to_bytes(4, "big")
         writer = self._client.writer
+        payload = bytearray()
         for _ in range(max(1, int(repeat))):
-            writer.write(b"\x04\x01\x00\x00" + data)   # nhấn
-            writer.write(b"\x04\x00\x00\x00" + data)   # nhả
+            payload.extend(b"\x04\x01\x00\x00" + data)   # nhấn
+            payload.extend(b"\x04\x00\x00\x00" + data)   # nhả
+        writer.write(bytes(payload))
 
     def media_key(self, name: str, repeat: int = 1) -> None:
         """Phím đa phương tiện / độ sáng, theo tên trong :data:`MEDIA_KEYSYMS`."""
@@ -360,7 +407,13 @@ class VncSession:
         if unknown:
             log.warning("%s: không có keysym cho %s", self.spec.key, unknown)
             return
-        self._client.keyboard.press(*keys)
+        payload = bytearray()
+        codes = [asyncvnc.key_codes[key].to_bytes(4, "big") for key in keys]
+        for code in codes:
+            payload.extend(b"\x04\x01\x00\x00" + code)
+        for code in reversed(codes):
+            payload.extend(b"\x04\x00\x00\x00" + code)
+        self._client.writer.write(bytes(payload))
 
     # ------------------------------------------------------------------- loop
 
@@ -383,6 +436,7 @@ class VncSession:
                     client = await asyncio.wait_for(cm.__aenter__(), timeout=15)
                 try:
                     self._client = client
+                    self._configure_socket(client)
                     self._set_state(State.ONLINE)
                     delay = self.settings.reconnect_delay
                     await self._session(client)
@@ -419,6 +473,20 @@ class VncSession:
                     delay = min(delay * 2, self.settings.reconnect_max)
 
         self._set_state(State.OFFLINE)
+
+    @staticmethod
+    def _configure_socket(client: asyncvnc.Client) -> None:
+        """Bật TCP_NODELAY/keepalive để gói input nhỏ đi ngay lập tức."""
+        sock = client.writer.get_extra_info("socket")
+        if sock is None:
+            return
+        try:
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        except OSError:
+            # Một số transport/test double không cho chỉnh socket; không làm
+            # hỏng phiên VNC chỉ vì tối ưu tuỳ chọn này thất bại.
+            log.debug("cannot tune VNC socket", exc_info=True)
 
     async def _session(self, client: asyncvnc.Client) -> None:
         """Reader and pacer run concurrently; either failing ends the session."""

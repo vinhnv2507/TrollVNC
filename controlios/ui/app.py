@@ -1825,7 +1825,9 @@ class MainWindow(QMainWindow):
         # máy vẫn thắng giá trị này và có thể chỉnh lại trong màn hình lớn.
         if self.registry.settings.device_scale == 1.0:
             self.registry.settings.device_scale = 0.35
-        self.registry.settings.focus_streaming = False
+        # Tôn trọng lựa chọn "Chỉ truyền máy đang xem" đã lưu. Trước đây
+        # luôn ép False ở mỗi lần khởi động nên người dùng bật chế độ tập
+        # trung để giảm trễ lại bị hoàn tác ngay lần mở PC kế tiếp.
         self.registry.settings.disconnect_offscreen = True
         self.registry.save(self.registry_path)
 
