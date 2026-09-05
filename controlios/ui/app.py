@@ -2925,6 +2925,7 @@ class MainWindow(QMainWindow):
         old_scale = local_settings.device_scale
         old_smooth = (local_settings.device_low_latency,
                       local_settings.device_orientation_sync)
+        old_focus_streaming = self.registry.settings.focus_streaming
         dialog = QualityDialog(local_settings, self, device_only=True)
         if dialog.exec() != QDialog.Accepted:
             return
@@ -2935,8 +2936,13 @@ class MainWindow(QMainWindow):
         device.device_scale = settings.device_scale
         device.device_low_latency = settings.device_low_latency
         device.device_orientation_sync = settings.device_orientation_sync
+        # Chế độ chỉ truyền máy đang xem là tuỳ chọn toàn cục của PC; cho
+        # hiển thị trong dialog máy đang mở và áp dụng ngay cho lưới.
+        self.registry.settings.focus_streaming = settings.focus_streaming
         self.registry.save(self.registry_path)
         self.pool.set_live_quality(key, settings.live_fps, settings.live_long_edge)
+        if settings.focus_streaming != old_focus_streaming:
+            self.grid.set_focus_streaming(settings.focus_streaming)
 
         # Độ mượt (Q/defer/xoay) đi qua control socket — KHÔNG resize nên áp thẳng
         # lên máy online, không nối lại. Chỉ phát khi đổi.

@@ -157,7 +157,6 @@ class QualityDialog(QDialog):
             grid_box.hide()
             self.idle_after.hide()
             idle_form.labelForField(self.idle_after).hide()
-            self.focus_streaming.hide()
             self.natural_scroll.hide()
 
         note = QLabel(
