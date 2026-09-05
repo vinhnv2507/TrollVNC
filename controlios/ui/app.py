@@ -1968,6 +1968,10 @@ class MainWindow(QMainWindow):
         self.apps_dock = QDockWidget("Ứng dụng trên máy", self)
         self.apps_dock.setWidget(self.apps_panel)
         self.apps_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        # Panel ứng dụng là một phần cố định của màn hình điều khiển. Giới hạn
+        # chiều rộng để không làm khung VNC bị bóp khi danh sách/log có dòng dài.
+        self.apps_dock.setMinimumWidth(255)
+        self.apps_dock.setMaximumWidth(330)
         self.addDockWidget(Qt.RightDockWidgetArea, self.apps_dock)
         self.apps_dock.hide()
         self.apps_panel.refresh_requested.connect(self._reload_apps)
@@ -2772,6 +2776,9 @@ class MainWindow(QMainWindow):
 
     def _focus_device(self, key: str) -> None:
         self.detail.set_device(key)
+        # Khi mở một máy, panel ứng dụng luôn xuất hiện và tự nạp danh sách;
+        # không cần người dùng tìm lại nút "Ứng dụng" trên thanh công cụ.
+        self.apps_dock.show()
         self.grid.set_focus_key(key)
         self.detail.setFocus()
         self._update_detail_title(key)
@@ -2783,6 +2790,7 @@ class MainWindow(QMainWindow):
             self.screen_monitor_dialog.refresh_target_count()
         if self.earnapp_traffic_dialog:
             self.earnapp_traffic_dialog.refresh_target_count()
+        self._reload_apps()
 
     def _device_name(self, key: str) -> str:
         for device in self.registry.devices:
