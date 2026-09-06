@@ -505,6 +505,59 @@ class ControlChannel:
         parts = head.split()
         return int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else size
 
+    async def import_snapshot(self, bundle_id: str, name: str,
+                              local: Path | str, progress=None) -> int:
+        """Nạp một thư mục snapshot đã xuất ra PC về đúng kho snapshot trên iOS.
+
+        Snapshot export là một cây thư mục gồm ``Documents``, ``Library``,
+        ``tmp`` và/hoặc ``SystemData``. Daemon đã tự tạo thư mục cha cho lệnh
+        ``put``, nên không cần thêm lệnh mkdir vào giao thức iOS cũ.
+        """
+
+        local = Path(local)
+        if not local.is_dir():
+            raise ControlError(f"Không thấy thư mục snapshot: {local}")
+        if (not bundle_id or any(c.isspace() for c in bundle_id) or
+                "/" in bundle_id or "\\" in bundle_id):
+            raise ControlError("Bundle ID không hợp lệ")
+        if (not name or len(name) > 64 or name.startswith(".") or
+                "/" in name or "\\" in name or ".." in name):
+            raise ControlError("Tên snapshot không hợp lệ")
+
+        files = []
+        allowed_roots = {"Documents", "Library", "tmp", "SystemData"}
+        for root, dirs, names in __import__("os").walk(local, followlinks=False):
+            dirs[:] = [d for d in dirs if not (Path(root) / d).is_symlink()]
+            for filename in names:
+                path = Path(root) / filename
+                if path.is_symlink() or not path.is_file():
+                    continue
+                rel = path.relative_to(local).as_posix()
+                if rel.startswith("../") or rel == "..":
+                    continue
+                files.append((path, rel))
+        if not files:
+            raise ControlError("Thư mục snapshot không có file dữ liệu")
+        if not any(rel.split("/", 1)[0] in allowed_roots for _path, rel in files):
+            raise ControlError("Snapshot phải chứa Documents, Library, tmp hoặc SystemData")
+
+        # Ghi đè an toàn: xoá bản cũ trước khi nạp lại cùng tên.
+        try:
+            await self.delete_snapshot(bundle_id, name)
+        except ControlError as exc:
+            if "không có snapshot" not in str(exc).lower():
+                raise
+        root = f"/var/mobile/controlios-snap/{bundle_id}/{name}"
+        total = 0
+        total_size = sum(path.stat().st_size for path, _ in files)
+        sent = 0
+        for path, rel in files:
+            total += await self.put_file(path, f"{root}/{rel}")
+            sent += path.stat().st_size
+            if progress:
+                progress(sent, total_size)
+        return total
+
     async def container(self, bundle_id: str) -> tuple[str, str]:
         """Trả về (thư mục dữ liệu, thư mục bundle) của một app.
 

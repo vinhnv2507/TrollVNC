@@ -123,6 +123,7 @@ class IOSFileBrowserDialog(QDialog):
     """Duyệt các đường dẫn mà daemon ControlIOS trên iOS nhìn thấy."""
 
     listed = Signal(str, str, object, str)
+    container_loaded = Signal(str, str, str, str)
 
     def __init__(self, pool: DevicePool, key: str, parent=None,
                  directories_only: bool = False) -> None:
@@ -132,11 +133,13 @@ class IOSFileBrowserDialog(QDialog):
         self.directories_only = directories_only
         self.path = "/var/mobile"
         self.entries: list[tuple[str, int, bool]] = []
+        self.selected_app_bundle: str | None = None
         self.setWindowTitle(
             "Chọn thư mục trên iOS" if directories_only else "Lấy tệp từ iOS"
         )
         self.resize(760, 520)
         self.listed.connect(self._on_listed)
+        self.container_loaded.connect(self._on_container_loaded)
 
         layout = QVBoxLayout(self)
         presets = QHBoxLayout()
@@ -146,6 +149,8 @@ class IOSFileBrowserDialog(QDialog):
         self.preset_combo.addItem("Ảnh & video (DCIM)", "/var/mobile/Media/DCIM")
         self.preset_combo.addItem("Downloads", "/var/mobile/Downloads")
         self.preset_combo.addItem("Documents (ControlIOS)", "/var/mobile/Documents")
+        self.preset_combo.addItem("3uTools (Tệp → Trên iPhone)", "@app:notes.3u")
+        self.preset_combo.addItem("Thư mục ngoài iPhone (Downloads)", "/var/mobile/Downloads")
         self.preset_combo.addItem(
             "Tệp → thư mục ứng dụng",
             "/var/mobile/Containers/Data/Application",
@@ -158,7 +163,9 @@ class IOSFileBrowserDialog(QDialog):
             hint = QLabel(
                 "Muốn file hiện trong app Tệp → Trên iPhone: chọn "
                 "‘Tệp → thư mục ứng dụng’, mở thư mục UUID của app rồi mở "
-                "Documents. Hoặc nhập đường dẫn tuyệt đối bên dưới."
+                "Documents. Thư mục ngoài như Downloads nằm cùng cấp dữ liệu "
+                "nhưng iOS không hiển thị thành biểu tượng trong Tệp. Hoặc nhập "
+                "đường dẫn tuyệt đối bên dưới."
             )
             hint.setWordWrap(True)
             hint.setStyleSheet("color: #687078; font-size: 11px;")
@@ -210,8 +217,28 @@ class IOSFileBrowserDialog(QDialog):
 
     def _load_preset(self, index: int) -> None:
         path = self.preset_combo.itemData(index)
+        if isinstance(path, str) and path.startswith("@app:"):
+            bundle_id = path[5:]
+            self.selected_app_bundle = bundle_id
+            self.status.setText(f"Đang tìm thư mục dữ liệu của {bundle_id}…")
+            self.pool.app_container(
+                self.key, bundle_id,
+                lambda k, data, _bundle, err:
+                self.container_loaded.emit(k, data, bundle_id, err or ""),
+            )
+            return
         if path:
+            self.selected_app_bundle = None
             self.load_path(path)
+
+    def _on_container_loaded(self, key: str, data: str, bundle_id: str, error: str) -> None:
+        if key != self.key:
+            return
+        if error:
+            self.status.setText(f"Lỗi: {error}")
+            return
+        self.selected_app_bundle = bundle_id
+        self.load_path(data.rstrip("/") + "/Documents")
 
     def _emit_listed(self, key: str, path: str, entries: list[tuple], error: str | None) -> None:
         self.listed.emit(key, path, entries, error or "")
@@ -601,6 +628,7 @@ class SnapshotDialog(QDialog):
         self.new_button = row.addButton("Lưu bản mới…", QDialogButtonBox.ActionRole)
         self.restore_button = row.addButton("Khôi phục", QDialogButtonBox.AcceptRole)
         self.export_button = row.addButton("Xuất ra PC…", QDialogButtonBox.ActionRole)
+        self.import_button = row.addButton("Nhập từ PC…", QDialogButtonBox.ActionRole)
         self.delete_button = row.addButton("Xoá bản này", QDialogButtonBox.DestructiveRole)
         self.clear_button = row.addButton("Xoá tất cả", QDialogButtonBox.DestructiveRole)
         row.addButton(QDialogButtonBox.Close)
@@ -609,12 +637,14 @@ class SnapshotDialog(QDialog):
         self.new_button.clicked.connect(self._save_new)
         self.restore_button.clicked.connect(self._restore_selected)
         self.export_button.clicked.connect(self._export_selected)
+        self.import_button.clicked.connect(self._import_from_pc)
         self.delete_button.clicked.connect(self._delete_selected)
         self.clear_button.clicked.connect(self._clear_all)
         row.rejected.connect(self.close)
 
         self.restore_button.setEnabled(False)
         self.export_button.setEnabled(False)
+        self.import_button.setEnabled(True)
         self.delete_button.setEnabled(False)
         self.list.itemSelectionChanged.connect(self._on_selection)
 
@@ -715,6 +745,40 @@ class SnapshotDialog(QDialog):
             on_done=lambda d, okc, fails: self.window.bridge.bulk_done.emit(
                 d, okc, fails))
         self.status.setText(f"Đang xuất “{name}” ra PC…")
+
+    def _import_from_pc(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục snapshot đã sao lưu trên PC", str(Path.home()))
+        if not folder:
+            return
+        local = Path(folder)
+        default_name = local.name.strip() or "imported"
+        name, ok = QInputDialog.getText(
+            self, "Nhập snapshot từ PC",
+            "Tên bản snapshot (không dùng '/', '..' hoặc bắt đầu bằng '.'):" ,
+            QLineEdit.Normal, default_name)
+        if not ok:
+            return
+        name = name.strip()
+        if not name or "/" in name or "\\" in name or ".." in name or name.startswith("."):
+            QMessageBox.warning(self, "Tên không hợp lệ", "Tên snapshot không hợp lệ.")
+            return
+        answer = QMessageBox.question(
+            self, "Nhập snapshot",
+            f"Nạp dữ liệu từ thư mục <b>{local}</b> vào snapshot <b>{name}</b> "
+            f"trên <b>{len(self.targets)} máy</b>?<br><br>"
+            "Nếu trùng tên, bản snapshot cũ sẽ bị ghi đè.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self.status.setText(f"Đang nạp snapshot “{name}”…")
+        self.window.pool.import_snapshot(
+            self.targets, self.bundle_id, name, local,
+            on_event=lambda k, m: self.window.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, okc, fails: (
+                self.window.bridge.bulk_done.emit(d, okc, fails),
+                self.reload()),
+        )
 
     def _delete_selected(self) -> None:
         name = self._selected_name()
@@ -3043,10 +3107,13 @@ class MainWindow(QMainWindow):
         remote_dir = browser.selected_path()
         remote = remote_dir.rstrip("/") + "/" + Path(path).name
 
-        self.pool.push_file(
-            targets, Path(path), remote.strip(),
-            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-        )
+        event = lambda k, m: self.bridge.message.emit(f"[{k}] {m}")
+        app_bundle = getattr(browser, "selected_app_bundle", None)
+        if isinstance(app_bundle, str) and app_bundle:
+            self.pool.push_file_to_app(targets, Path(path), app_bundle,
+                                       on_event=event)
+        else:
+            self.pool.push_file(targets, Path(path), remote.strip(), on_event=event)
         self.statusBar().showMessage(
             f"Đang đẩy {Path(path).name} tới {len(targets)} máy", 6000
         )

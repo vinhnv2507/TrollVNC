@@ -675,6 +675,18 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def app_container(self, key: str, bundle_id: str, on_done) -> None:
+        """Resolve an app data container on the network thread."""
+
+        async def run() -> None:
+            try:
+                data, bundle = await self._channel(key).container(bundle_id)
+                on_done(key, data, bundle, None)
+            except Exception as exc:
+                on_done(key, "", "", str(exc))
+
+        self._call_coro(run())
+
     def measure_app_traffic(self, keys: Iterable[str], bundle_id: str,
                             concurrency: int = 10, sample_seconds: int = 10,
                             min_rx_bytes: int = 32 * 1024, on_event=None,
@@ -1257,6 +1269,61 @@ class DevicePool:
                         on_event(key, f"LỖI {exc}")
 
             await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
+    def push_file_to_app(self, keys: Iterable[str], local: Path | str,
+                         bundle_id: str, on_event=None) -> None:
+        """Đẩy file vào Documents của app, tự resolve UUID riêng từng máy."""
+
+        key_list = list(keys)
+        local = Path(local)
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                try:
+                    channel = self._channel(key)
+                    data, _bundle = await channel.container(bundle_id)
+                    remote = f"{data}/Documents/{local.name}"
+                    written = await channel.put_file(local, remote)
+                    if on_event:
+                        on_event(key, f"đã ghi {written} byte vào {remote}")
+                except Exception as exc:
+                    if on_event:
+                        on_event(key, f"LỖI: {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
+    def import_snapshot(self, keys: Iterable[str], bundle_id: str, name: str,
+                        local: Path | str, on_event=None, on_done=None) -> None:
+        """Nạp cây snapshot từ PC vào từng máy, sau đó có thể khôi phục ngay."""
+
+        key_list = list(keys)
+        local = Path(local)
+        succeeded: List[str] = []
+        failures: List[tuple] = []
+
+        async def run() -> None:
+            slots = asyncio.Semaphore(4)
+
+            async def one(key: str) -> None:
+                try:
+                    async with slots:
+                        channel = self._channel(key)
+                        await channel.import_snapshot(bundle_id, name, local)
+                    succeeded.append(key)
+                    if on_event:
+                        on_event(key, f"đã nạp snapshot “{name}”")
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI nạp snapshot: {exc}")
+
+            await asyncio.gather(*(one(key) for key in key_list), return_exceptions=True)
+            if on_done:
+                on_done(f"Nạp snapshot {bundle_id} ({name})", len(succeeded), failures)
 
         self._call_coro(run())
 

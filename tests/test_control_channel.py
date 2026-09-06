@@ -94,6 +94,22 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((Path(folder) / "backup/Library/prefs.plist").read_bytes(),
                              b"plist")
 
+    async def test_import_snapshot_tree_puts_files_under_snapshot_root(self) -> None:
+        import tempfile
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder) / "backup"
+            (root / "Documents").mkdir(parents=True)
+            (root / "Library" / "Prefs").mkdir(parents=True)
+            (root / "Documents" / "state.dat").write_bytes(b"state")
+            (root / "Library" / "Prefs" / "settings.plist").write_bytes(b"prefs")
+
+            total = await self.channel.import_snapshot("com.golike.app", "from-pc", root)
+
+        self.assertEqual(total, 10)
+        base = "/var/mobile/controlios-snap/com.golike.app/from-pc"
+        self.assertEqual(self.server.received[base + "/Documents/state.dat"], b"state")
+        self.assertEqual(self.server.received[base + "/Library/Prefs/settings.plist"], b"prefs")
+
     async def test_download_photo_from_mobile_without_ssh(self) -> None:
         import tempfile
         remote = "/var/mobile/Media/DCIM/100APPLE/IMG_0001.JPG"
