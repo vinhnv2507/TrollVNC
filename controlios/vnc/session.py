@@ -284,8 +284,16 @@ class VncSession:
     def mouse_up(self, x: int, y: int, button: int = 0) -> None:
         if not self._client:
             return
-        self._cancel_pending_mouse_move()
         mouse = self._client.mouse
+        # Qt may enqueue all move callbacks before asyncio gets a turn.  In
+        # that case one coalesced point is still pending here; cancelling it
+        # would turn the drag into an immediate click.  Send that point while
+        # the button is held, then emit the release packet.
+        pending = self._mouse_move_pending
+        self._cancel_pending_mouse_move()
+        if pending is not None:
+            mouse.x, mouse.y = pending
+            mouse._write()
         mouse.x, mouse.y = int(x), int(y)
         mouse.buttons &= ~(1 << button)
         mouse._write()

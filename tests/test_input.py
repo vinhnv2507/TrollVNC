@@ -90,6 +90,24 @@ class SessionInputTest(unittest.IsolatedAsyncioTestCase):
                 lambda: any(e[0] == mask for e in self.server.pointer_events)),
                 f"nút {button} không tới được server: {self.server.pointer_events}")
 
+    async def test_coalesced_drag_flushes_before_release(self) -> None:
+        """A fast drag must not collapse into a press immediately followed by release."""
+
+        self.server.pointer_events.clear()
+        # Queue the gesture before yielding to asyncio: this is the failure
+        # mode caused by mouse_move coalescing in the PC event bridge.
+        self.session.mouse_down(20, 200)
+        for y in (180, 160, 140, 120):
+            self.session.mouse_move(20, y)
+        self.session.mouse_up(20, 120)
+
+        self.assertTrue(await self.drain(lambda: len(self.server.pointer_events) >= 3))
+        events = self.server.pointer_events
+        self.assertTrue(any(buttons == 1 and (x, y) == (20, 120)
+                            for buttons, x, y in events),
+                        f"coalesced drag was not flushed before release: {events}")
+        self.assertEqual(events[-1][0], 0, f"gesture did not end with release: {events}")
+
     async def test_vietnamese_text_is_typed_not_dropped(self) -> None:
         self.server.key_events.clear()
         skipped = self.session.type_text("Xin chào bạn")
