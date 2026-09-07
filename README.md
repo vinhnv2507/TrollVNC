@@ -494,26 +494,17 @@ button power          # = chuột giữa
 button left 0.5 0.9   # chuột trái tại toạ độ chỉ định
 ```
 
-### Kiểm tra EarnApp có chia sẻ băng thông
+### Canh EarnApp
 
-Mở **Kịch bản → Kiểm tra lưu lượng EarnApp…**. Đây là chức năng riêng, không
-liên quan tới **Canh EarnApp…** cũ. Mỗi lượt Control IOS sẽ:
+Mở **Kịch bản → Canh EarnApp…** để theo dõi trạng thái bằng OCR. ControlIOS
+mở đúng app, chụp framebuffer, tìm các dòng lỗi, chờ xác nhận rồi mới khởi động
+lại nếu lỗi vẫn còn. Bộ đo RX/TX/lưu lượng EarnApp đã được bỏ khỏi giao diện vì
+không phản ánh ổn định việc chia sẻ băng thông trên iOS.
 
-1. đọc PID, số socket Internet và bộ đếm RX/TX hai lần cách nhau theo số giây
-   đã chọn;
-2. báo **ĐANG CHIA SẺ BĂNG THÔNG** khi EarnApp vẫn cùng PID, còn socket mạng và
-   RX tăng qua ngưỡng; log kèm RX, TX, KB/s và số socket;
-3. không mở app, không OCR, không đóng hay khởi động lại EarnApp.
-
-**Canh EarnApp…** vẫn giữ đúng hành vi cũ: mở EarnApp để OCR
-`Not connected`/`Connecting`, chờ 10 giây xác nhận rồi mới khởi động lại nếu
-trạng thái lỗi còn tồn tại.
-
-RX/TX là lưu lượng Wi-Fi/cellular của thiết bị trong cửa sổ lấy mẫu; PID và
-socket là của EarnApp và các extension mạng nằm trong bundle EarnApp (từ iOS
-ControlIOS 4.7). Đây là phép ước lượng thực dụng vì iOS không cung cấp bộ đếm
-byte ổn định theo từng app. Đặt ngưỡng RX đủ lớn (mặc định 32 KB/10 giây) để
-loại lưu lượng nhỏ của kênh điều khiển.
+Trong hộp canh, bấm **Mã canh EarnApp…** để xem và chỉnh cấu hình:
+`BUNDLE_ID`, `ERROR_TEXTS`, `CONFIRM_SECONDS`, `RESTART_DELAY_MIN` và
+`RESTART_DELAY_MAX`. Cấu hình được lưu riêng trên PC và áp dụng cho các lượt
+kiểm tra tiếp theo.
 
 ### Truyền ảnh, video và tệp hai chiều
 

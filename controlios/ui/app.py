@@ -7,6 +7,7 @@ import copy
 import logging
 import os
 import posixpath
+import re
 import time
 from pathlib import Path
 from typing import List, Optional
@@ -314,6 +315,7 @@ class Bridge(QObject):
     ssh_done = Signal(int, object)
     monitor_event = Signal(str, str)
     monitor_done = Signal(int, int, object)
+    # Kept for API compatibility; no traffic dialog/action uses these anymore.
     traffic_event = Signal(str, str)
     traffic_done = Signal(int, object, object)
 
@@ -1223,6 +1225,105 @@ class JsAutoClickDialog(QDialog):
         self.status.setText("Đang dừng…")
 
 
+class EarnAppMonitorCodeDialog(QDialog):
+    """Chỉnh các tham số của bộ canh EarnApp bằng một đoạn mã dễ đọc.
+
+    Đây là cấu hình an toàn, không thực thi Python tuỳ ý trên máy. Chỉ các
+    dòng khai báo bên dưới được đọc khi bấm Lưu.
+    """
+
+    def __init__(self, monitor: "ScreenTextMonitorDialog") -> None:
+        super().__init__(monitor)
+        self.setWindowTitle("Mã canh EarnApp")
+        self.resize(700, 430)
+        self.editor = QPlainTextEdit(self)
+        self.editor.setPlainText(
+            f'# Chỉ chỉnh các giá trị trong đoạn cấu hình này.\n'
+            f'BUNDLE_ID = {monitor.bundle_id!r}\n'
+            f'ERROR_TEXTS = {tuple(monitor.needles)!r}\n'
+            f'CONFIRM_SECONDS = {monitor.confirm_seconds}\n'
+            f'RESTART_DELAY_MIN = {monitor.restart_min}\n'
+            f'RESTART_DELAY_MAX = {monitor.restart_max}\n\n'
+            '# Khi chạy: mở đúng app → chụp/OCR → chờ xác nhận →\n'
+            '# chỉ khởi động lại nếu chữ lỗi vẫn còn.\n'
+        )
+        self.editor.setTabChangesFocus(False)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, parent=self)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Không chạy Python tuỳ ý. Hãy giữ đúng tên biến và kiểu giá trị; "
+            "ERROR_TEXTS là tuple chuỗi, ví dụ ('Not connected', 'Connecting')."
+        ))
+        layout.addWidget(self.editor, 1)
+        layout.addWidget(buttons)
+
+    def values(self) -> dict:
+        text = self.editor.toPlainText()
+
+        def string_value(name: str) -> str:
+            match = re.search(rf"^\s*{name}\s*=\s*(['\"])(.*?)\1\s*$", text, re.MULTILINE)
+            if not match or not match.group(2).strip():
+                raise ValueError(f"{name} không hợp lệ")
+            return match.group(2).strip()
+
+        def int_value(name: str, minimum: int = 0) -> int:
+            match = re.search(rf"^\s*{name}\s*=\s*(-?\d+)\s*$", text, re.MULTILINE)
+            if not match or int(match.group(1)) < minimum:
+                raise ValueError(f"{name} không hợp lệ")
+            return int(match.group(1))
+
+        bundle_id = string_value("BUNDLE_ID")
+        match = re.search(r"^\s*ERROR_TEXTS\s*=\s*\((.*?)\)\s*$", text, re.MULTILINE)
+        if not match:
+            raise ValueError("ERROR_TEXTS không hợp lệ")
+        needles = re.findall(r"(['\"])(.*?)\1", match.group(1))
+        needles = [value.strip() for _quote, value in needles if value.strip()]
+        if not needles:
+            raise ValueError("ERROR_TEXTS phải có ít nhất một chuỗi")
+        confirm = int_value("CONFIRM_SECONDS", 1)
+        restart_min = int_value("RESTART_DELAY_MIN", 0)
+        restart_max = int_value("RESTART_DELAY_MAX", restart_min)
+        if restart_max < restart_min:
+            raise ValueError("RESTART_DELAY_MAX phải lớn hơn hoặc bằng MIN")
+        return {"bundle_id": bundle_id, "needles": needles,
+                "confirm_seconds": confirm, "restart_min": restart_min,
+                "restart_max": restart_max}
+
+    def accept(self) -> None:
+        try:
+            self._values = self.values()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Mã không hợp lệ", str(exc))
+            return
+        super().accept()
+
+
+class EarnAppTrafficDialog(QDialog):
+    """Compatibility shim for plugins that imported the removed traffic UI.
+
+    Traffic checking is intentionally no longer exposed from the main menu.
+    Keeping this tiny object avoids breaking third-party extensions during the
+    transition; it does not start a timer, query a device, or measure traffic.
+    """
+
+    def __init__(self, window: "MainWindow") -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Kiểm tra lưu lượng EarnApp")
+        self.resize(520, 180)
+        self.timer = QTimer(self)
+        self.min_rx_kb = QSpinBox(self)
+        self.min_rx_kb.setRange(0, 102_400)
+        self.min_rx_kb.setValue(32)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Tính năng kiểm tra lưu lượng đã được gỡ khỏi ControlIOS. "
+            "Hãy dùng Canh EarnApp để OCR và tự khởi động lại app."
+        ))
+
+
 class ScreenTextMonitorDialog(QDialog):
     """Canh OCR EarnApp theo chu kỳ, giữ nguyên chức năng tự mở lại app cũ."""
 
@@ -1232,6 +1333,12 @@ class ScreenTextMonitorDialog(QDialog):
         self.setWindowTitle("Canh trạng thái EarnApp")
         self.resize(620, 430)
         self.settings = QSettings("ControlIOS", "ScreenTextMonitor")
+        self.bundle_id = str(self.settings.value("bundle_id", "com.brd.earnapp"))
+        self.needles = [s for s in str(self.settings.value(
+            "error_texts", "Not connected|Connecting")).split("|") if s] or ["Not connected", "Connecting"]
+        self.confirm_seconds = max(1, int(self.settings.value("confirm_seconds", 10)))
+        self.restart_min = max(0, int(self.settings.value("restart_min", 3)))
+        self.restart_max = max(self.restart_min, int(self.settings.value("restart_max", 5)))
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.run_once)
         self.running = False
@@ -1241,10 +1348,10 @@ class ScreenTextMonitorDialog(QDialog):
 
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            'ControlIOS kiểm tra app foreground và tự mở EarnApp nếu cần, sau đó '
-            'OCR trực tiếp framebuffer. Nếu thấy “Not connected” hoặc “Connecting”, '
-            'hệ thống chờ 10 giây và kiểm tra lại; chỉ khi trạng thái vẫn còn mới '
-            'khởi động lại com.brd.earnapp.'
+            'ControlIOS kiểm tra app foreground và tự mở app nếu cần, sau đó OCR '
+            'trực tiếp framebuffer. Nếu thấy chữ lỗi, hệ thống chờ thời gian xác nhận '
+            'và chỉ khởi động lại khi trạng thái vẫn còn. Bấm “Mã canh EarnApp…” '
+            'để chỉnh bundle ID, chữ cần tìm và thời gian.'
         ))
         row = QHBoxLayout()
         row.addWidget(QLabel("Phạm vi:"))
@@ -1293,6 +1400,10 @@ class ScreenTextMonitorDialog(QDialog):
         once = QPushButton("Kiểm tra ngay")
         once.clicked.connect(self.run_once)
         buttons.addWidget(once)
+        edit_code = QPushButton("Mã canh EarnApp…")
+        edit_code.setToolTip("Xem và chỉnh bundle ID, chữ lỗi, thời gian xác nhận và thời gian chờ khởi động lại")
+        edit_code.clicked.connect(self.edit_monitor_code)
+        buttons.addWidget(edit_code)
         buttons.addStretch(1)
         layout.addLayout(buttons)
         self.refresh_target_count()
@@ -1369,10 +1480,28 @@ class ScreenTextMonitorDialog(QDialog):
         self.log.appendPlainText(f"[{stamp}] Bắt đầu kiểm tra {len(keys)} máy")
 
         self.window.pool.monitor_text_and_restart(
-            keys, ("Not connected", "Connecting"), "com.brd.earnapp",
-            self.concurrency.value(),
+            keys, tuple(self.needles), self.bundle_id,
+            self.concurrency.value(), confirm_seconds=self.confirm_seconds,
+            restart_delay=(self.restart_min, self.restart_max),
             on_event=self.window.bridge.monitor_event.emit,
             on_done=self.window.bridge.monitor_done.emit)
+
+    def edit_monitor_code(self) -> None:
+        dialog = EarnAppMonitorCodeDialog(self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        values = dialog.values()
+        self.bundle_id = values["bundle_id"]
+        self.needles = values["needles"]
+        self.confirm_seconds = values["confirm_seconds"]
+        self.restart_min = values["restart_min"]
+        self.restart_max = values["restart_max"]
+        self.settings.setValue("bundle_id", self.bundle_id)
+        self.settings.setValue("error_texts", "|".join(self.needles))
+        self.settings.setValue("confirm_seconds", self.confirm_seconds)
+        self.settings.setValue("restart_min", self.restart_min)
+        self.settings.setValue("restart_max", self.restart_max)
+        self.log.appendPlainText("Đã lưu mã canh EarnApp tuỳ chỉnh.")
 
     def _on_event(self, key: str, message: str) -> None:
         self.window.bridge.message.emit(f"[{key}] {message}")
@@ -1386,171 +1515,6 @@ class ScreenTextMonitorDialog(QDialog):
             self.refresh_target_count()
         else:
             self.status.setText(result)
-
-
-class EarnAppTrafficDialog(QDialog):
-    """Đo mạng EarnApp độc lập, tuyệt đối không OCR hay restart app."""
-
-    def __init__(self, window: "MainWindow") -> None:
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("Kiểm tra lưu lượng EarnApp")
-        self.resize(700, 480)
-        self.settings = QSettings("ControlIOS", "EarnAppTraffic")
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.run_once)
-        self.running = False
-        window.bridge.traffic_event.connect(self._on_event)
-        window.bridge.traffic_done.connect(self._on_done)
-
-        layout = QVBoxLayout(self)
-        note = QLabel(
-            "Chức năng này chỉ đọc PID, socket và hai mẫu RX/TX của EarnApp. "
-            "Nó không mở app, không OCR và không khởi động lại EarnApp. "
-            "ControlIOS iOS 4.7 trở lên sẽ tính cả socket của extension EarnApp."
-        )
-        note.setWordWrap(True)
-        layout.addWidget(note)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Phạm vi:"))
-        self.scope = QComboBox()
-        self.scope.addItem("Máy đang chọn", "selected")
-        self.scope.addItem("Máy đang mở (khung lớn)", "opened")
-        self.scope.addItem("Máy đang online", "online")
-        self.scope.addItem("Tất cả máy", "all")
-        saved_scope = str(self.settings.value("scope", "selected"))
-        index = self.scope.findData(saved_scope)
-        self.scope.setCurrentIndex(index if index >= 0 else 0)
-        self.scope.currentIndexChanged.connect(self.refresh_target_count)
-        row.addWidget(self.scope, 1)
-        layout.addLayout(row)
-
-        self.target_count = QLabel()
-        layout.addWidget(self.target_count)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Lấy mẫu:"))
-        self.sample_seconds = QSpinBox()
-        self.sample_seconds.setRange(3, 120)
-        self.sample_seconds.setValue(int(self.settings.value("sample_seconds", 10)))
-        self.sample_seconds.setSuffix(" giây")
-        row.addWidget(self.sample_seconds)
-        row.addWidget(QLabel("Ngưỡng RX:"))
-        self.min_rx_kb = QSpinBox()
-        self.min_rx_kb.setRange(0, 102_400)
-        self.min_rx_kb.setValue(int(self.settings.value("min_rx_kb", 32)))
-        self.min_rx_kb.setSuffix(" KB")
-        row.addWidget(self.min_rx_kb)
-        row.addWidget(QLabel("Song song:"))
-        self.concurrency = QSpinBox()
-        self.concurrency.setRange(1, 100)
-        self.concurrency.setValue(int(self.settings.value("concurrency", 10)))
-        self.concurrency.setSuffix(" máy")
-        row.addWidget(self.concurrency)
-        layout.addLayout(row)
-
-        row = QHBoxLayout()
-        row.addWidget(QLabel("Đo định kỳ mỗi:"))
-        self.minutes = QSpinBox()
-        self.minutes.setRange(1, 1440)
-        self.minutes.setValue(int(self.settings.value("minutes", 5)))
-        self.minutes.setSuffix(" phút")
-        row.addWidget(self.minutes)
-        row.addStretch(1)
-        layout.addLayout(row)
-
-        self.status = QLabel("Sẵn sàng")
-        layout.addWidget(self.status)
-        self.log = QPlainTextEdit()
-        self.log.setReadOnly(True)
-        layout.addWidget(self.log, 1)
-
-        buttons = QHBoxLayout()
-        self.once_button = QPushButton("Kiểm tra ngay")
-        self.once_button.clicked.connect(self.run_once)
-        buttons.addWidget(self.once_button)
-        self.start_button = QPushButton("Bật đo định kỳ")
-        self.start_button.clicked.connect(self.start_monitor)
-        buttons.addWidget(self.start_button)
-        self.stop_button = QPushButton("Dừng đo định kỳ")
-        self.stop_button.clicked.connect(self.stop_monitor)
-        self.stop_button.setEnabled(False)
-        buttons.addWidget(self.stop_button)
-        buttons.addStretch(1)
-        layout.addLayout(buttons)
-        self.refresh_target_count()
-
-    def target_keys(self) -> List[str]:
-        scope = self.scope.currentData()
-        if scope == "selected":
-            return list(self.window.grid.selection)
-        if scope == "opened":
-            return [self.window.detail.key] if self.window.detail.key else []
-        if scope == "online":
-            return self.window.pool.online_keys()
-        return [device.key for device in self.window.registry.devices if device.enabled]
-
-    def refresh_target_count(self, *_args) -> None:
-        self.target_count.setText(
-            f"Sẽ đo {len(self.target_keys())} máy; không ảnh hưởng Canh EarnApp cũ."
-        )
-
-    def _save_settings(self) -> None:
-        self.settings.setValue("scope", self.scope.currentData())
-        self.settings.setValue("sample_seconds", self.sample_seconds.value())
-        self.settings.setValue("min_rx_kb", self.min_rx_kb.value())
-        self.settings.setValue("concurrency", self.concurrency.value())
-        self.settings.setValue("minutes", self.minutes.value())
-
-    def start_monitor(self) -> None:
-        self._save_settings()
-        self.timer.start(self.minutes.value() * 60 * 1000)
-        self.start_button.setEnabled(False)
-        self.stop_button.setEnabled(True)
-        self.run_once()
-
-    def stop_monitor(self) -> None:
-        self.timer.stop()
-        self.start_button.setEnabled(True)
-        self.stop_button.setEnabled(False)
-        self.status.setText("Đã dừng đo định kỳ")
-
-    def run_once(self) -> None:
-        if self.running:
-            return
-        self._save_settings()
-        keys = self.target_keys()
-        if not keys:
-            self.status.setText("Phạm vi đã chọn không có máy để đo.")
-            return
-        self.running = True
-        self.once_button.setEnabled(False)
-        self.status.setText(f"Đang lấy hai mẫu trên {len(keys)} máy…")
-        stamp = time.strftime("%H:%M:%S")
-        self.log.appendPlainText(f"[{stamp}] Bắt đầu đo {len(keys)} máy")
-        self.window.pool.measure_app_traffic(
-            keys, "com.brd.earnapp", self.concurrency.value(),
-            sample_seconds=self.sample_seconds.value(),
-            min_rx_bytes=self.min_rx_kb.value() * 1024,
-            on_event=self.window.bridge.traffic_event.emit,
-            on_done=self.window.bridge.traffic_done.emit,
-        )
-
-    def _on_event(self, key: str, message: str) -> None:
-        self.window.bridge.message.emit(f"[{key}] {message}")
-        self.log.appendPlainText(f"{key}: {message}")
-
-    def _on_done(self, total: int, summary: dict, failures: list) -> None:
-        self.running = False
-        self.once_button.setEnabled(True)
-        result = (
-            f"Xong {total} máy: đang chia sẻ {summary.get('active', 0)}, "
-            f"chưa thấy chia sẻ {summary.get('inactive', 0)}, "
-            f"chưa hỗ trợ {summary.get('unsupported', 0)}, lỗi {len(failures)}"
-        )
-        self.log.appendPlainText(result)
-        self.status.setText(result)
 
 
 class ScriptDialog(QDialog):
@@ -1901,7 +1865,6 @@ class MainWindow(QMainWindow):
         self.broadcast = False
         self.script_dialog: ScriptDialog | None = None
         self.screen_monitor_dialog: ScreenTextMonitorDialog | None = None
-        self.earnapp_traffic_dialog: EarnAppTrafficDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
@@ -2423,10 +2386,6 @@ class MainWindow(QMainWindow):
         monitor.setToolTip(
             'OCR hai lần; nếu vẫn "Not connected"/"Connecting" thì mở lại EarnApp')
         monitor.triggered.connect(self._open_screen_monitor)
-        traffic = script_menu.addAction("Kiểm tra lưu lượng EarnApp…")
-        traffic.setToolTip(
-            "Chỉ đo RX/TX + PID/socket; không OCR, không mở hay khởi động lại EarnApp")
-        traffic.triggered.connect(self._open_earnapp_traffic)
         script_button.setMenu(script_menu)
         bar.addWidget(script_button)
 
@@ -2852,8 +2811,6 @@ class MainWindow(QMainWindow):
         self._fit_detail_pane()
         if self.screen_monitor_dialog:
             self.screen_monitor_dialog.refresh_target_count()
-        if self.earnapp_traffic_dialog:
-            self.earnapp_traffic_dialog.refresh_target_count()
         self._reload_apps()
 
     def _device_name(self, key: str) -> str:
@@ -2907,8 +2864,6 @@ class MainWindow(QMainWindow):
             self.script_dialog.refresh_targets()
         if self.screen_monitor_dialog:
             self.screen_monitor_dialog.refresh_target_count()
-        if self.earnapp_traffic_dialog:
-            self.earnapp_traffic_dialog.refresh_target_count()
         # Nhãn "thao tác áp cho N máy" phải theo kịp, nếu không nó đứng ở con số
         # lúc nạp danh sách và người dùng tưởng đang thao tác một máy.
         self.apps_panel.set_targets(len(self.action_targets()))
@@ -3577,13 +3532,6 @@ class MainWindow(QMainWindow):
         self.screen_monitor_dialog.refresh_target_count()
         self.screen_monitor_dialog.show()
         self.screen_monitor_dialog.raise_()
-
-    def _open_earnapp_traffic(self) -> None:
-        if self.earnapp_traffic_dialog is None:
-            self.earnapp_traffic_dialog = EarnAppTrafficDialog(self)
-        self.earnapp_traffic_dialog.refresh_target_count()
-        self.earnapp_traffic_dialog.show()
-        self.earnapp_traffic_dialog.raise_()
 
     def _open_js_autoclick(self) -> None:
         if getattr(self, "js_autoclick_dialog", None) is None:

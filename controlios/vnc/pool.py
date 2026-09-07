@@ -606,11 +606,15 @@ class DevicePool:
                               on_event, on_done)
 
     def monitor_text_and_restart(self, keys: Iterable[str], needles: Sequence[str], bundle_id: str,
-                                 concurrency: int = 5, on_event=None,
+                                 concurrency: int = 5, confirm_seconds: int = 10,
+                                 restart_delay: tuple[float, float] = (3.0, 5.0), on_event=None,
                                  on_done=None) -> None:
         """OCR hai lần cách 10 giây; chỉ restart khi trạng thái lỗi còn tồn tại."""
         key_list = list(keys)
         watched_texts = tuple(needles)
+        confirm_seconds = max(1, int(confirm_seconds))
+        delay_min = max(0.0, float(restart_delay[0]))
+        delay_max = max(delay_min, float(restart_delay[1]))
 
         async def run() -> None:
             semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -648,8 +652,8 @@ class DevicePool:
                         if first_state is None:
                             return
                         if on_event:
-                            on_event(key, f'thấy "{first_state}"; chờ 10 giây để xác nhận lại')
-                        await asyncio.sleep(10.0)
+                            on_event(key, f'thấy "{first_state}"; chờ {confirm_seconds} giây để xác nhận lại')
+                        await asyncio.sleep(confirm_seconds)
                         await session.request_capture()
                         second_state = await detect_state()
                         if second_state is None:
@@ -660,7 +664,7 @@ class DevicePool:
                         if on_event:
                             on_event(key, f'vẫn thấy "{second_state}"; đang khởi động lại {bundle_id}')
                         await channel.terminate(bundle_id)
-                        await asyncio.sleep(random.uniform(3.0, 5.0))
+                        await asyncio.sleep(random.uniform(delay_min, delay_max))
                         await channel.launch(bundle_id)
                         if on_event:
                             on_event(key, f"đã khởi động lại {bundle_id}")
