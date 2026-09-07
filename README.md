@@ -522,6 +522,13 @@ cũng ghi app foreground thực tế (`frontmost`) để biết máy đang mở 
 `x/y` là tỷ lệ 0..1, màu dùng mã `RRGGBB`, sai số là 0..255. Cấu hình được lưu
 riêng trên PC và áp dụng cho các lượt kiểm tra tiếp theo.
 
+### Xác nhận khi chọn tất cả
+
+Khi toàn bộ máy trên lưới/trang hiện tại đang được chọn (ví dụ bằng `Ctrl+A`),
+ControlIOS hỏi lại trước khi gửi thao tác hàng loạt. Nút **Không** hủy ngay và
+không gửi lệnh tới thiết bị. Chế độ **Phát đa máy** cũng hỏi riêng trước khi cho
+phép chạm, vuốt hoặc cuộn đồng thời trên toàn bộ máy.
+
 ### Truyền ảnh, video và tệp hai chiều
 
 Các nút dễ thấy trên toolbar:

@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from PySide6.QtCore import QPoint, QPointF, Qt          # noqa: E402
 from PySide6.QtGui import QMouseEvent, QWheelEvent      # noqa: E402
-from PySide6.QtWidgets import QApplication              # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox # noqa: E402
 
 from controlios.config import DeviceSpec, Registry      # noqa: E402
 from controlios.ui.grid import DeviceGrid               # noqa: E402
@@ -223,6 +223,10 @@ class WindowGridControlTest(unittest.TestCase):
         registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
         registry.save(self.path)
         self.window = MainWindow(self.path)
+        self.question_patcher = unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.question", return_value=QMessageBox.Yes)
+        self.question_patcher.start()
+        self.addCleanup(self.question_patcher.stop)
         self.key = "10.0.0.1:5901"
         self.window.grid.tiles[self.key].set_frame(frame(self.key))
 

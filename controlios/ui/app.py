@@ -1178,6 +1178,8 @@ class JsAutoClickDialog(QDialog):
         targets = self.window.action_targets()
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+        elif not self.window._confirm_all_action(targets, "thao tác Auto-click JS"):
+            return []
         return targets
 
     def _push_run(self) -> None:
@@ -1504,6 +1506,8 @@ class ScreenTextMonitorDialog(QDialog):
         if not keys:
             self.status.setText("Phạm vi đã chọn không có máy để bật canh.")
             return
+        if not self.window._confirm_all_action(keys, "bật canh EarnApp"):
+            return
         added = set(keys) - self.monitored_keys
         self.monitored_keys.update(keys)
         self.window.grid.set_monitored_keys(self.monitored_keys)
@@ -1828,6 +1832,8 @@ class ScriptDialog(QDialog):
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy",
                                     "Hãy chọn ít nhất một máy ở lưới.")
+            return
+        if not self.window._confirm_all_action(targets, "chạy kịch bản"):
             return
         self.log.clear()
         self.append(f"Chạy trên {len(targets)} máy…")
@@ -2928,6 +2934,8 @@ class MainWindow(QMainWindow):
 
     def _on_selection(self, keys: List[str]) -> None:
         self.statusBar().showMessage(f"Đã chọn {len(keys)} máy", 3000)
+        if self.broadcast and self._is_all_enabled_devices(keys):
+            self._set_broadcast(True)
         if self.script_dialog:
             self.script_dialog.refresh_targets()
         if self.screen_monitor_dialog:
@@ -2937,6 +2945,19 @@ class MainWindow(QMainWindow):
         self.apps_panel.set_targets(len(self.action_targets()))
 
     def _set_broadcast(self, on: bool) -> None:
+        if on and self._is_all_enabled_devices(list(self.grid.selection)):
+            answer = QMessageBox.question(
+                self, "Xác nhận phát toàn bộ",
+                f"Bạn đang chọn TẤT CẢ {len(self.grid.selection)} thiết bị.\n\n"
+                "Bật Phát đa máy để mọi cú chạm, vuốt và cuộn áp dụng cho tất cả?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                self.broadcast_box.blockSignals(True)
+                self.broadcast_box.setChecked(False)
+                self.broadcast_box.blockSignals(False)
+                self.broadcast = False
+                return
         self.broadcast = on
 
     # ------------------------------------------- chụp ảnh / ghi hình / kịch bản
@@ -2945,8 +2966,38 @@ class MainWindow(QMainWindow):
         """Máy để chạy hàng loạt: đang chọn, không thì máy đang mở full."""
 
         if self.grid.selection:
-            return list(self.grid.selection)
-        return [self.detail.key] if self.detail.key else []
+            targets = list(self.grid.selection)
+        else:
+            targets = [self.detail.key] if self.detail.key else []
+        return targets
+
+    def _confirmed_action_targets(self, label: str) -> Optional[List[str]]:
+        """Trả danh sách đích; ``None`` nếu người dùng hủy xác nhận toàn bộ."""
+
+        targets = self.action_targets()
+        if targets and not self._confirm_all_action(targets, label):
+            return None
+        return targets
+
+    def _confirm_all_action(self, targets: List[str], label: str) -> bool:
+        if not self._is_all_enabled_devices(targets):
+            return True
+        answer = QMessageBox.question(
+            self, "Xác nhận thao tác toàn bộ",
+            f"Bạn đang chọn TẤT CẢ {len(targets)} thiết bị.\n\n"
+            f"Có thực hiện '{label}' trên tất cả không?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            self.statusBar().showMessage("Đã hủy thao tác trên tất cả thiết bị", 4000)
+            return False
+        return True
+
+    def _is_all_enabled_devices(self, targets: List[str]) -> bool:
+        # Ctrl+A chọn toàn bộ lưới/trang đang hiển thị (có thể đang lọc theo
+        # nhóm), không nhất thiết là mọi thiết bị trong registry.
+        visible_keys = set(self.grid.order)
+        return len(targets) > 1 and bool(visible_keys) and set(targets) == visible_keys
 
     def _needs_control_token(self, keys) -> bool:
         """Có máy WiFi trong nhóm không? Máy USB (loopback) không cần token."""
@@ -2955,7 +3006,9 @@ class MainWindow(QMainWindow):
         return any(key not in usb_keys for key in keys)
 
     def _capture_selected(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("chụp ảnh")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy",
                                     "Hãy chọn máy ở lưới rồi bấm Chụp ảnh.")
@@ -2972,7 +3025,10 @@ class MainWindow(QMainWindow):
 
     def _toggle_recording(self, on: bool) -> None:
         if on:
-            targets = self.action_targets()
+            targets = self._confirmed_action_targets("ghi hình")
+            if targets is None:
+                self.record_action.setChecked(False)
+                return
             if not targets:
                 self.record_action.setChecked(False)
                 QMessageBox.information(self, "Chưa chọn máy",
@@ -3072,7 +3128,9 @@ class MainWindow(QMainWindow):
     def _send_media_key(self, name: str, repeat: int) -> None:
         """Độ sáng/âm lượng — đi qua VNC nên máy chưa vá cũng dùng được."""
 
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"{name} độ sáng/âm lượng")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3083,7 +3141,9 @@ class MainWindow(QMainWindow):
         )
 
     def _install_ipa(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("cài app")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3113,7 +3173,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Đang cài {ipa.name} lên {len(targets)} máy", 8000)
 
     def _push_file(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("đẩy file")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3142,7 +3204,9 @@ class MainWindow(QMainWindow):
         )
 
     def _export_from_ios(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("xuất file")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3165,7 +3229,9 @@ class MainWindow(QMainWindow):
             f"Đang xuất dữ liệu từ {len(targets)} máy", 6000)
 
     def _push_photo(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("đẩy ảnh/video")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3196,7 +3262,9 @@ class MainWindow(QMainWindow):
         )
 
     def _respring_selected(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("respring")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3217,7 +3285,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Đang respring {len(targets)} máy", 5000)
 
     def _reboot_selected(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("reboot")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3238,7 +3308,9 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Đang reboot {len(targets)} thiết bị", 5000)
 
     def _shutdown_selected(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("tắt máy")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3270,7 +3342,9 @@ class MainWindow(QMainWindow):
         self._run_quick_action(labels.get(gesture, gesture), gesture, False)
 
     def _open_control_center_selected(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("mở Trung tâm điều khiển")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3280,7 +3354,9 @@ class MainWindow(QMainWindow):
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
     def _set_rotation_lock(self, state: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("đổi khóa xoay")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3290,7 +3366,9 @@ class MainWindow(QMainWindow):
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
     def _set_touch_lock(self, state: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("đổi khóa cảm ứng")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3300,7 +3378,9 @@ class MainWindow(QMainWindow):
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails))
 
     def _show_home_audit(self, clear: bool) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("xóa/đọc nhật ký Home" if clear else "đọc nhật ký Home")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3309,7 +3389,9 @@ class MainWindow(QMainWindow):
         self.pool.home_audit(targets, clear, dialog.on_event, dialog.on_done)
 
     def _show_device_diagnostics(self) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("chạy chẩn đoán")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3318,7 +3400,9 @@ class MainWindow(QMainWindow):
         self.pool.diagnostics(targets, dialog.on_event, dialog.on_done)
 
     def _set_assistive_touch(self, state: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("đổi AssistiveTouch")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3330,7 +3414,10 @@ class MainWindow(QMainWindow):
     def _ensure_keeper(self, keys: Optional[List[str]] = None) -> None:
         """Soát Keeper trên các máy đã chọn (hoặc danh sách truyền vào)."""
 
-        targets = list(keys) if keys is not None else self.action_targets()
+        targets = (list(keys) if keys is not None
+                   else self._confirmed_action_targets("kiểm tra Keeper"))
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
             return
@@ -3368,7 +3455,9 @@ class MainWindow(QMainWindow):
                                           if fails else None))
 
     def _run_quick_action(self, label: str, source: str, needs_name: bool) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(label)
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy",
                                     "Hãy chọn máy ở lưới trước khi chạy thao tác.")
@@ -3433,7 +3522,9 @@ class MainWindow(QMainWindow):
     def _launch_app(self, bundle_id: str) -> None:
         # Dùng máy đang CHỌN, không phải _targets() vốn chỉ trả về gì đó khi
         # bật chế độ phát thao tác.
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"mở {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3445,7 +3536,9 @@ class MainWindow(QMainWindow):
         )
 
     def _terminate_app(self, bundle_id: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"đóng {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             return
         self.apps_panel.set_busy(f"Đang đóng {bundle_id} trên {len(targets)} máy…")
@@ -3456,7 +3549,9 @@ class MainWindow(QMainWindow):
         )
 
     def _restart_app(self, bundle_id: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"khởi động lại {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3470,7 +3565,9 @@ class MainWindow(QMainWindow):
         )
 
     def _wipe_app(self, bundle_id: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"xóa dữ liệu {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3492,7 +3589,9 @@ class MainWindow(QMainWindow):
         )
 
     def _snapshot_app(self, bundle_id: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"snapshot {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3511,7 +3610,9 @@ class MainWindow(QMainWindow):
         )
 
     def _backup_app_to_pc(self, bundle_id: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"sao lưu {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn các máy ở lưới.")
             return
@@ -3532,7 +3633,9 @@ class MainWindow(QMainWindow):
         """Mở trình quản lý snapshot: liệt kê các bản (từ máy đầu tiên) rồi chọn
         bản để khôi phục/xoá trên tất cả máy đang chọn."""
 
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets(f"khôi phục {bundle_id}")
+        if targets is None:
+            return
         if not targets:
             QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
             return
@@ -3568,7 +3671,9 @@ class MainWindow(QMainWindow):
         self.ssh_console.raise_()
 
     def _run_ssh(self, command: str) -> None:
-        targets = self.action_targets()
+        targets = self._confirmed_action_targets("chạy lệnh SSH")
+        if targets is None:
+            return
         if not targets:
             return
         self.pool.run_ssh(

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import asyncvnc                                             # noqa: E402
 from PySide6.QtCore import QPoint, QPointF, Qt              # noqa: E402
 from PySide6.QtGui import QKeyEvent, QMouseEvent, QWheelEvent  # noqa: E402
-from PySide6.QtWidgets import QApplication                  # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox    # noqa: E402
 
 from controlios.config import DeviceSpec, Settings          # noqa: E402
 from controlios.ui.detail import DetailView                 # noqa: E402
@@ -290,6 +290,10 @@ class BroadcastInputTest(unittest.TestCase):
         registry.save(self.registry_path)
 
         self.window = MainWindow(self.registry_path)
+        self.question_patcher = unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.question", return_value=QMessageBox.Yes)
+        self.question_patcher.start()
+        self.addCleanup(self.question_patcher.stop)
         self.window.detail.set_device("10.0.0.1:5901")
         self.window.detail.on_frame(Frame(key="10.0.0.1:5901", width=100, height=200,
                                           data=bytes(100 * 200 * 3),

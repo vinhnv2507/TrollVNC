@@ -14,7 +14,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from PySide6.QtWidgets import QApplication              # noqa: E402
+from PySide6.QtWidgets import QApplication, QMessageBox # noqa: E402
 
 from controlios.config import Registry, Settings        # noqa: E402
 from controlios.ui.ssh_console import PRESETS, SshConsoleDialog   # noqa: E402
@@ -185,6 +185,10 @@ class WindowSshTest(unittest.TestCase):
         registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
         registry.save(self.path)
         self.window = MainWindow(self.path)
+        self.question_patcher = unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.question", return_value=QMessageBox.Yes)
+        self.question_patcher.start()
+        self.addCleanup(self.question_patcher.stop)
 
     def tearDown(self) -> None:
         self.window.close()

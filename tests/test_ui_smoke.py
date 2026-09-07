@@ -367,6 +367,10 @@ class ScriptDialogTest(unittest.TestCase):
         registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
         registry.save(self.registry_path)
         self.window = MainWindow(self.registry_path)
+        self.question_patcher = unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.question", return_value=QMessageBox.Yes)
+        self.question_patcher.start()
+        self.addCleanup(self.question_patcher.stop)
 
     def tearDown(self) -> None:
         self.window.close()

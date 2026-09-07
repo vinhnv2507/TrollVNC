@@ -181,6 +181,10 @@ class WindowIntegrationTest(unittest.TestCase):
         registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
         registry.save(self.path)
         self.window = MainWindow(self.path)
+        self.question_patcher = unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.question", return_value=QMessageBox.Yes)
+        self.question_patcher.start()
+        self.addCleanup(self.question_patcher.stop)
 
     def tearDown(self) -> None:
         self.window.close()
@@ -244,6 +248,16 @@ class WindowIntegrationTest(unittest.TestCase):
         keys, bundle = sent[0]
         self.assertEqual(len(keys), 2)
         self.assertEqual(bundle, "com.golike.app")
+
+    def test_all_devices_are_not_touched_when_confirmation_is_refused(self) -> None:
+        sent = []
+        self.window.pool.launch_app = lambda *args, **kwargs: sent.append(args)
+        self.window.grid.select_all()
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.question",
+                                 return_value=QMessageBox.No) as question:
+            self.window._launch_app("com.golike.app")
+        question.assert_called_once()
+        self.assertFalse(sent)
 
     def test_terminate_goes_to_every_selected_device(self) -> None:
         sent = []
