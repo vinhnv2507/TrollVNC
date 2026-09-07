@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import copy
 import logging
 import os
@@ -1241,6 +1242,8 @@ class EarnAppMonitorCodeDialog(QDialog):
             f'# Chỉ chỉnh các giá trị trong đoạn cấu hình này.\n'
             f'BUNDLE_ID = {monitor.bundle_id!r}\n'
             f'ERROR_TEXTS = {tuple(monitor.needles)!r}\n'
+            f'COLOR_MATCHES = {tuple(monitor.color_matches)!r}\n'
+            f'SCREEN_TEXTS = {tuple(monitor.screen_texts)!r}\n'
             f'CONFIRM_SECONDS = {monitor.confirm_seconds}\n'
             f'RESTART_DELAY_MIN = {monitor.restart_min}\n'
             f'RESTART_DELAY_MAX = {monitor.restart_max}\n\n'
@@ -1282,12 +1285,44 @@ class EarnAppMonitorCodeDialog(QDialog):
         needles = [value.strip() for _quote, value in needles if value.strip()]
         if not needles:
             raise ValueError("ERROR_TEXTS phải có ít nhất một chuỗi")
+        screen_match = re.search(r"^\s*SCREEN_TEXTS\s*=\s*\((.*?)\)\s*$", text, re.MULTILINE)
+        screen_texts = ([value.strip() for _quote, value in re.findall(r"(['\"])(.*?)\1", screen_match.group(1))
+                         if value.strip()] if screen_match else [])
+        color_match = re.search(r"^\s*COLOR_MATCHES\s*=\s*(.*?)\s*$", text, re.MULTILINE)
+        color_source = color_match.group(1) if color_match else "()"
+        function_colors = re.findall(
+            r"matchColor\(\s*([0-9]*\.?[0-9]+)\s*,\s*([0-9]*\.?[0-9]+)\s*,\s*['\"]([0-9A-Fa-f]{6})['\"]\s*,\s*([0-9]*\.?[0-9]+)\s*\)",
+            color_source, re.IGNORECASE)
+        if function_colors:
+            raw_colors = [(float(x), float(y), hexv, float(tol))
+                          for x, y, hexv, tol in function_colors]
+        else:
+            try:
+                raw_colors = ast.literal_eval(color_source)
+            except (SyntaxError, ValueError) as exc:
+                raise ValueError("COLOR_MATCHES không hợp lệ") from exc
+        if raw_colors is None:
+            raw_colors = ()
+        if not isinstance(raw_colors, (tuple, list)):
+            raise ValueError("COLOR_MATCHES phải là tuple/list các điều kiện")
+        colors = []
+        for item in raw_colors:
+            if not isinstance(item, (tuple, list)) or len(item) != 4:
+                raise ValueError("Mỗi màu cần dạng (x, y, 'RRGGBB', tolerance)")
+            rx, ry, hexv, tolerance = item
+            if (not isinstance(rx, (int, float)) or not 0 <= float(rx) <= 1 or
+                    not isinstance(ry, (int, float)) or not 0 <= float(ry) <= 1 or
+                    not isinstance(hexv, str) or not re.fullmatch(r"[0-9A-Fa-f]{6}", hexv) or
+                    not isinstance(tolerance, (int, float)) or not 0 <= float(tolerance) <= 255):
+                raise ValueError("Màu cần dạng (x, y, 'RRGGBB', tolerance), tọa độ 0..1")
+            colors.append((float(rx), float(ry), hexv.upper(), float(tolerance)))
         confirm = int_value("CONFIRM_SECONDS", 1)
         restart_min = int_value("RESTART_DELAY_MIN", 0)
         restart_max = int_value("RESTART_DELAY_MAX", restart_min)
         if restart_max < restart_min:
             raise ValueError("RESTART_DELAY_MAX phải lớn hơn hoặc bằng MIN")
-        return {"bundle_id": bundle_id, "needles": needles,
+        return {"bundle_id": bundle_id, "needles": needles, "color_matches": colors,
+                "screen_texts": screen_texts,
                 "confirm_seconds": confirm, "restart_min": restart_min,
                 "restart_max": restart_max}
 
@@ -1336,6 +1371,8 @@ class ScreenTextMonitorDialog(QDialog):
         self.bundle_id = str(self.settings.value("bundle_id", "com.brd.earnapp"))
         self.needles = [s for s in str(self.settings.value(
             "error_texts", "Not connected|Connecting")).split("|") if s] or ["Not connected", "Connecting"]
+        self.color_matches = self._load_color_matches()
+        self.screen_texts = self._load_text_setting("screen_texts")
         self.confirm_seconds = max(1, int(self.settings.value("confirm_seconds", 10)))
         self.restart_min = max(0, int(self.settings.value("restart_min", 3)))
         self.restart_max = max(self.restart_min, int(self.settings.value("restart_max", 5)))
@@ -1418,6 +1455,31 @@ class ScreenTextMonitorDialog(QDialog):
             return self.window.pool.online_keys()
         return [device.key for device in self.window.registry.devices if device.enabled]
 
+    def _load_color_matches(self) -> list[tuple[float, float, str, float]]:
+        raw = str(self.settings.value("color_matches", "()"))
+        try:
+            value = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            return []
+        result = []
+        for item in value if isinstance(value, (tuple, list)) else ():
+            if (isinstance(item, (tuple, list)) and len(item) == 4 and
+                    isinstance(item[0], (int, float)) and 0 <= float(item[0]) <= 1 and
+                    isinstance(item[1], (int, float)) and 0 <= float(item[1]) <= 1 and
+                    isinstance(item[2], str) and re.fullmatch(r"[0-9A-Fa-f]{6}", item[2]) and
+                    isinstance(item[3], (int, float)) and 0 <= float(item[3]) <= 255):
+                result.append((float(item[0]), float(item[1]), item[2].upper(), float(item[3])))
+        return result
+
+    def _load_text_setting(self, name: str) -> list[str]:
+        try:
+            value = ast.literal_eval(str(self.settings.value(name, "()")))
+        except (SyntaxError, ValueError):
+            return []
+        if not isinstance(value, (tuple, list)):
+            return []
+        return [item.strip() for item in value if isinstance(item, str) and item.strip()]
+
     def refresh_target_count(self, *_args) -> None:
         targets = set(self.target_keys())
         count = len(targets)
@@ -1483,6 +1545,8 @@ class ScreenTextMonitorDialog(QDialog):
             keys, tuple(self.needles), self.bundle_id,
             self.concurrency.value(), confirm_seconds=self.confirm_seconds,
             restart_delay=(self.restart_min, self.restart_max),
+            color_matches=tuple(self.color_matches),
+            screen_texts=tuple(self.screen_texts),
             on_event=self.window.bridge.monitor_event.emit,
             on_done=self.window.bridge.monitor_done.emit)
 
@@ -1496,8 +1560,12 @@ class ScreenTextMonitorDialog(QDialog):
         self.confirm_seconds = values["confirm_seconds"]
         self.restart_min = values["restart_min"]
         self.restart_max = values["restart_max"]
+        self.color_matches = values["color_matches"]
+        self.screen_texts = values["screen_texts"]
         self.settings.setValue("bundle_id", self.bundle_id)
         self.settings.setValue("error_texts", "|".join(self.needles))
+        self.settings.setValue("color_matches", repr(tuple(self.color_matches)))
+        self.settings.setValue("screen_texts", repr(tuple(self.screen_texts)))
         self.settings.setValue("confirm_seconds", self.confirm_seconds)
         self.settings.setValue("restart_min", self.restart_min)
         self.settings.setValue("restart_max", self.restart_max)

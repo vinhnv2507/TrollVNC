@@ -607,7 +607,10 @@ class DevicePool:
 
     def monitor_text_and_restart(self, keys: Iterable[str], needles: Sequence[str], bundle_id: str,
                                  concurrency: int = 5, confirm_seconds: int = 10,
-                                 restart_delay: tuple[float, float] = (3.0, 5.0), on_event=None,
+                                 restart_delay: tuple[float, float] = (3.0, 5.0),
+                                 color_matches: Sequence[tuple[float, float, str, float]] = (),
+                                 screen_texts: Sequence[str] = (),
+                                 on_event=None,
                                  on_done=None) -> None:
         """OCR hai lần cách 10 giây; chỉ restart khi trạng thái lỗi còn tồn tại."""
         key_list = list(keys)
@@ -615,6 +618,16 @@ class DevicePool:
         confirm_seconds = max(1, int(confirm_seconds))
         delay_min = max(0.0, float(restart_delay[0]))
         delay_max = max(delay_min, float(restart_delay[1]))
+        color_conditions = tuple(color_matches)
+        required_screen_texts = tuple(screen_texts)
+
+        def color_matches_hex(actual: str, expected: str, tolerance: float) -> bool:
+            try:
+                a = tuple(int(actual[index:index + 2], 16) for index in (0, 2, 4))
+                e = tuple(int(expected[index:index + 2], 16) for index in (0, 2, 4))
+            except ValueError:
+                return False
+            return max(abs(x - y) for x, y in zip(a, e)) <= tolerance
 
         async def run() -> None:
             semaphore = asyncio.Semaphore(max(1, concurrency))
@@ -634,6 +647,8 @@ class DevicePool:
                         channel = self._channel(key)
 
                         foreground = await channel.frontmost_app()
+                        if on_event:
+                            on_event(key, f"app foreground: {foreground or 'màn hình hệ thống'}")
                         if foreground != bundle_id:
                             if on_event:
                                 on_event(key, f"app đang mở là {foreground or 'màn hình hệ thống'}; "
@@ -643,11 +658,28 @@ class DevicePool:
                             await session.request_capture()
 
                         async def detect_state() -> Optional[str]:
+                            for rx, ry, expected, tolerance in color_conditions:
+                                actual = await channel.get_color(rx, ry)
+                                if actual and color_matches_hex(actual, expected, tolerance):
+                                    return (f"màu {expected} tại ({rx:.3f}, {ry:.3f}) "
+                                            f"±{tolerance:g}")
                             for text in watched_texts:
                                 if await channel.find_text(text):
                                     return text
                             return None
 
+                        async def screen_is_expected() -> bool:
+                            if not required_screen_texts:
+                                return True
+                            for text in required_screen_texts:
+                                if await channel.find_text(text):
+                                    return True
+                            return False
+
+                        if not await screen_is_expected():
+                            if on_event:
+                                on_event(key, "đúng app nhưng chưa ở màn hình yêu cầu; không restart")
+                            return
                         first_state = await detect_state()
                         if first_state is None:
                             return
@@ -655,6 +687,10 @@ class DevicePool:
                             on_event(key, f'thấy "{first_state}"; chờ {confirm_seconds} giây để xác nhận lại')
                         await asyncio.sleep(confirm_seconds)
                         await session.request_capture()
+                        if not await screen_is_expected():
+                            if on_event:
+                                on_event(key, "màn hình đã thay đổi; bỏ qua restart")
+                            return
                         second_state = await detect_state()
                         if second_state is None:
                             if on_event:

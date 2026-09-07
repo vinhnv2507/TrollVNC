@@ -502,9 +502,25 @@ lại nếu lỗi vẫn còn. Bộ đo RX/TX/lưu lượng EarnApp đã được
 không phản ánh ổn định việc chia sẻ băng thông trên iOS.
 
 Trong hộp canh, bấm **Mã canh EarnApp…** để xem và chỉnh cấu hình:
-`BUNDLE_ID`, `ERROR_TEXTS`, `CONFIRM_SECONDS`, `RESTART_DELAY_MIN` và
-`RESTART_DELAY_MAX`. Cấu hình được lưu riêng trên PC và áp dụng cho các lượt
-kiểm tra tiếp theo.
+`BUNDLE_ID`, `ERROR_TEXTS`, `COLOR_MATCHES`, `SCREEN_TEXTS`,
+`CONFIRM_SECONDS`, `RESTART_DELAY_MIN` và `RESTART_DELAY_MAX`. Ví dụ:
+
+```python
+BUNDLE_ID = 'com.brd.earnapp'
+ERROR_TEXTS = ('Not connected', 'Connecting')
+COLOR_MATCHES = (matchColor(0.492, 0.447, "E3E5E7", 15),)
+SCREEN_TEXTS = ('Sharing',)
+CONFIRM_SECONDS = 10
+RESTART_DELAY_MIN = 3
+RESTART_DELAY_MAX = 5
+```
+
+`ERROR_TEXTS` và `COLOR_MATCHES` là điều kiện lỗi, chỉ cần một điều kiện khớp.
+`SCREEN_TEXTS` là điều kiện nhận diện màn hình hiện tại; nếu đã đúng app nhưng
+không thấy chữ màn hình yêu cầu thì ControlIOS ghi log và không restart. Mỗi lượt
+cũng ghi app foreground thực tế (`frontmost`) để biết máy đang mở app nào. Tọa độ
+`x/y` là tỷ lệ 0..1, màu dùng mã `RRGGBB`, sai số là 0..255. Cấu hình được lưu
+riêng trên PC và áp dụng cho các lượt kiểm tra tiếp theo.
 
 ### Truyền ảnh, video và tệp hai chiều
 
