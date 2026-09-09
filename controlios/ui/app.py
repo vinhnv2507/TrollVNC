@@ -26,8 +26,10 @@ from PySide6.QtWidgets import (
 
 from .. import script as script_lang
 from ..config import (
-    DEFAULT_PORT, DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
-    DeviceSpec, Registry, load_named_scripts, save_named_scripts,
+    DEFAULT_EARNAPP_MONITOR, DEFAULT_PORT,
+    DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
+    DeviceSpec, Registry, load_earnapp_monitor_code, load_named_scripts,
+    save_earnapp_monitor_code, save_named_scripts,
 )
 from ..control_channel import ControlChannel, ControlError
 from ..scan import arp_hosts, discover_bonjour, probe_hosts
@@ -1240,26 +1242,37 @@ class EarnAppMonitorCodeDialog(QDialog):
         self.setWindowTitle("Mã canh EarnApp")
         self.resize(700, 430)
         self.editor = QPlainTextEdit(self)
-        self.editor.setPlainText(
-            f'# Chỉ chỉnh các giá trị trong đoạn cấu hình này.\n'
-            f'BUNDLE_ID = {monitor.bundle_id!r}\n'
-            f'ENSURE_APP_OPEN = {monitor.ensure_app_open!r}\n'
-            f'ERROR_TEXTS = {tuple(monitor.needles)!r}\n'
-            f'COLOR_MATCHES = {tuple(monitor.color_matches)!r}\n'
-            f'SCREEN_TEXTS = {tuple(monitor.screen_texts)!r}\n'
-            f'CONFIRM_SECONDS = {monitor.confirm_seconds}\n'
-            f'RESTART_DELAY_MIN = {monitor.restart_min}\n'
-            f'RESTART_DELAY_MAX = {monitor.restart_max}\n\n'
-            '# Khi chạy: mở đúng app → chụp/OCR → chờ xác nhận →\n'
-            '# chỉ khởi động lại nếu chữ lỗi vẫn còn.\n'
-        )
+        # Đây là file cấu hình SCRIPT nằm ngoài EXE. Nếu người dùng sửa file
+        # trực tiếp, lần mở hộp thoại tiếp theo sẽ đọc nội dung mới ngay.
+        code_path = Path(DEFAULT_EARNAPP_MONITOR)
+        if code_path.exists():
+            self.editor.setPlainText(load_earnapp_monitor_code(code_path))
+        else:
+            self.editor.setPlainText(
+                f'# Chỉ chỉnh các giá trị trong đoạn cấu hình này.\n'
+                f'BUNDLE_ID = {monitor.bundle_id!r}\n'
+                f'ENSURE_APP_OPEN = {monitor.ensure_app_open!r}\n'
+                f'ERROR_TEXTS = {tuple(monitor.needles)!r}\n'
+                f'COLOR_MATCHES = {tuple(monitor.color_matches)!r}\n'
+                f'SCREEN_TEXTS = {tuple(monitor.screen_texts)!r}\n'
+                f'CONFIRM_SECONDS = {monitor.confirm_seconds}\n'
+                f'RESTART_DELAY_MIN = {monitor.restart_min}\n'
+                f'RESTART_DELAY_MAX = {monitor.restart_max}\n\n'
+                '# Khi chạy: mở đúng app → chụp/OCR → chờ xác nhận →\n'
+                '# chỉ khởi động lại nếu chữ lỗi vẫn còn.\n'
+            )
+            try:
+                save_earnapp_monitor_code(self.editor.toPlainText(), code_path)
+            except OSError:
+                pass
         self.editor.setTabChangesFocus(False)
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel(
-            "Không chạy Python tuỳ ý. Hãy giữ đúng tên biến và kiểu giá trị; "
+            "Mã này được lưu ngoài EXE tại config/earnapp_monitor.py. "
+            "Chỉ chỉnh giá trị cấu hình; không chạy Python tuỳ ý. "
             "ERROR_TEXTS là tuple chuỗi, ví dụ ('Not connected', 'Connecting')."
         ))
         layout.addWidget(self.editor, 1)
@@ -1342,6 +1355,11 @@ class EarnAppMonitorCodeDialog(QDialog):
             self._values = self.values()
         except ValueError as exc:
             QMessageBox.warning(self, "Mã không hợp lệ", str(exc))
+            return
+        try:
+            save_earnapp_monitor_code(self.editor.toPlainText(), DEFAULT_EARNAPP_MONITOR)
+        except OSError as exc:
+            QMessageBox.warning(self, "Lỗi lưu mã", str(exc))
             return
         super().accept()
 
@@ -1492,6 +1510,31 @@ class ScreenTextMonitorDialog(QDialog):
             return []
         return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
+    def _reload_external_code(self) -> bool:
+        """Nạp lại earnapp_monitor.py trước mỗi lượt canh.
+
+        File được đọc ngoài EXE nên người dùng có thể chỉnh bằng Notepad hoặc
+        ngay trong hộp mã; không cần build/cài lại bản PC chỉ để đổi điều kiện.
+        """
+
+        dialog = EarnAppMonitorCodeDialog(self)
+        try:
+            values = dialog.values()
+        except ValueError as exc:
+            self.log.appendPlainText(f"Mã canh EarnApp không hợp lệ: {exc}")
+            return False
+        finally:
+            dialog.deleteLater()
+        self.bundle_id = values["bundle_id"]
+        self.ensure_app_open = values["ensure_app_open"]
+        self.needles = values["needles"]
+        self.confirm_seconds = values["confirm_seconds"]
+        self.restart_min = values["restart_min"]
+        self.restart_max = values["restart_max"]
+        self.color_matches = values["color_matches"]
+        self.screen_texts = values["screen_texts"]
+        return True
+
     def refresh_target_count(self, *_args) -> None:
         targets = set(self.target_keys())
         count = len(targets)
@@ -1550,6 +1593,9 @@ class ScreenTextMonitorDialog(QDialog):
         if not keys:
             self.refresh_target_count()
             self.log.appendPlainText("Phạm vi đã chọn hiện không có máy để kiểm tra.")
+            return
+        if not self._reload_external_code():
+            self.status.setText("Mã canh EarnApp lỗi — chưa chạy lượt này.")
             return
         self.running = True
         self.status.setText(f"Đang OCR {len(keys)} máy…")
@@ -2088,7 +2134,9 @@ class MainWindow(QMainWindow):
         self.apps_dock.setMinimumWidth(255)
         self.apps_dock.setMaximumWidth(330)
         self.addDockWidget(Qt.RightDockWidgetArea, self.apps_dock)
-        self.apps_dock.hide()
+        # Luôn để sẵn bảng ứng dụng từ lúc mở PC, kể cả khi chưa chọn device.
+        # Khi chưa có máy, bảng chỉ hiện hướng dẫn; chọn máy xong sẽ tự nạp lại.
+        self.apps_dock.show()
         self.apps_panel.refresh_requested.connect(self._reload_apps)
         self.apps_panel.launch_requested.connect(self._launch_app)
         self.apps_panel.terminate_requested.connect(self._terminate_app)
@@ -2142,6 +2190,7 @@ class MainWindow(QMainWindow):
         self.bridge.clipboard_pulled.connect(self._on_clipboard_pulled)
 
         self.pool.start()
+        self._reload_apps()
 
         # Chế độ USB: dựng lại relay cho các máy USB đã lưu (mở lại app là chạy).
         from ..usb import UsbRelayManager
@@ -2957,6 +3006,10 @@ class MainWindow(QMainWindow):
         # Nhãn "thao tác áp cho N máy" phải theo kịp, nếu không nó đứng ở con số
         # lúc nạp danh sách và người dùng tưởng đang thao tác một máy.
         self.apps_panel.set_targets(len(self.action_targets()))
+        # Bảng ứng dụng luôn mở: khi người dùng chọn ô đầu tiên (chưa mở khung
+        # lớn), tự nạp danh sách của máy đó thay vì bắt bấm "Nạp danh sách".
+        if keys and self.apps_dock.isVisible() and not self.detail.key:
+            self._reload_apps()
 
     def _set_broadcast(self, on: bool) -> None:
         if on and self._is_all_enabled_devices(list(self.grid.selection)):

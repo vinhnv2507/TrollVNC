@@ -501,8 +501,12 @@ mở đúng app, chụp framebuffer, tìm các dòng lỗi, chờ xác nhận r�
 lại nếu lỗi vẫn còn. Bộ đo RX/TX/lưu lượng EarnApp đã được bỏ khỏi giao diện vì
 không phản ánh ổn định việc chia sẻ băng thông trên iOS.
 
-Trong hộp canh, bấm **Mã canh EarnApp…** để xem và chỉnh cấu hình:
-`BUNDLE_ID`, `ERROR_TEXTS`, `COLOR_MATCHES`, `SCREEN_TEXTS`,
+Trong hộp canh, bấm **Mã canh EarnApp…** để xem và chỉnh cấu hình. Mã được lưu
+ngoài file EXE tại `config/earnapp_monitor.py` (bản đóng gói dùng
+`%APPDATA%\\ControlIOS PC\\config\\earnapp_monitor.py`), nên có thể mở bằng
+Notepad/chỉnh trực tiếp; mỗi lượt kiểm tra sẽ tự đọc lại file và không cần build
+lại PC. Chương trình chỉ đọc các biến cấu hình an toàn, không thực thi Python tuỳ ý:
+`BUNDLE_ID`, `ENSURE_APP_OPEN`, `ERROR_TEXTS`, `COLOR_MATCHES`, `SCREEN_TEXTS`,
 `CONFIRM_SECONDS`, `RESTART_DELAY_MIN` và `RESTART_DELAY_MAX`. Ví dụ:
 
 ```python

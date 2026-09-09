@@ -33,6 +33,22 @@ DEFAULT_REGISTRY = PROJECT_ROOT / "config" / "devices.json"
 DEFAULT_SCRIPTS = PROJECT_ROOT / "config" / "scripts.json"
 # Thư viện kịch bản auto-click JavaScript (chạy TRÊN MÁY qua daemon).
 DEFAULT_JS_SCRIPTS = PROJECT_ROOT / "config" / "autoclick_js.json"
+# Mã cấu hình bộ canh EarnApp nằm ngoài EXE. Người dùng có thể sửa trực tiếp
+# file này (hoặc qua hộp "Mã canh EarnApp…"); lượt kiểm tra kế tiếp sẽ nạp lại.
+DEFAULT_EARNAPP_MONITOR = PROJECT_ROOT / "config" / "earnapp_monitor.py"
+DEFAULT_EARNAPP_MONITOR_CODE = '''# Chỉ chỉnh các giá trị trong đoạn cấu hình này.
+BUNDLE_ID = 'com.brd.earnapp'
+ENSURE_APP_OPEN = True
+ERROR_TEXTS = ('Not connected', 'Connecting')
+COLOR_MATCHES = (matchColor(0.492, 0.447, "E3E5E7", 15),)
+SCREEN_TEXTS = ()
+CONFIRM_SECONDS = 10
+RESTART_DELAY_MIN = 5
+RESTART_DELAY_MAX = 10
+
+# Khi chạy: mở đúng app → chụp/OCR → chờ xác nhận →
+# chỉ khởi động lại nếu chữ lỗi vẫn còn.
+'''
 
 
 def _migrate_legacy_frozen_data() -> None:
@@ -89,6 +105,41 @@ def save_named_scripts(scripts: dict, path: Path | str | None = None) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def load_earnapp_monitor_code(path: Path | str | None = None) -> str:
+    """Đọc mã canh EarnApp nằm ngoài EXE, tạo mẫu mặc định nếu chưa có."""
+
+    target = Path(path) if path is not None else DEFAULT_EARNAPP_MONITOR
+    try:
+        if not target.exists():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(DEFAULT_EARNAPP_MONITOR_CODE, encoding="utf-8")
+        return target.read_text(encoding="utf-8")
+    except OSError:
+        # Không chặn khởi động nếu thư mục cấu hình bị khóa/quyền hạn chế.
+        return DEFAULT_EARNAPP_MONITOR_CODE
+
+
+def save_earnapp_monitor_code(code: str, path: Path | str | None = None) -> None:
+    """Lưu mã canh EarnApp nguyên văn bằng replace nguyên tử."""
+
+    target = Path(path) if path is not None else DEFAULT_EARNAPP_MONITOR
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp",
+                                     dir=target.parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(code)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, target)
     except BaseException:
         try:
             os.unlink(temporary)

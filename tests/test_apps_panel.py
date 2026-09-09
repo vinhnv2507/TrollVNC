@@ -190,8 +190,8 @@ class WindowIntegrationTest(unittest.TestCase):
         self.window.close()
         self.path.unlink(missing_ok=True)
 
-    def test_panel_is_hidden_until_asked_for(self) -> None:
-        self.assertFalse(self.window.apps_dock.isVisible())
+    def test_panel_is_visible_from_start(self) -> None:
+        self.assertFalse(self.window.apps_dock.isHidden())
 
     def test_opening_apps_panel_automatically_loads_apps(self) -> None:
         self.window.registry.settings.control_token = "token"
