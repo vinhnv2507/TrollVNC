@@ -507,6 +507,7 @@ Trong hộp canh, bấm **Mã canh EarnApp…** để xem và chỉnh cấu hìn
 
 ```python
 BUNDLE_ID = 'com.brd.earnapp'
+ENSURE_APP_OPEN = True
 ERROR_TEXTS = ('Not connected', 'Connecting')
 COLOR_MATCHES = (matchColor(0.492, 0.447, "E3E5E7", 15),)
 SCREEN_TEXTS = ('Sharing',)
@@ -521,6 +522,10 @@ không thấy chữ màn hình yêu cầu thì ControlIOS ghi log và không res
 cũng ghi app foreground thực tế (`frontmost`) để biết máy đang mở app nào. Tọa độ
 `x/y` là tỷ lệ 0..1, màu dùng mã `RRGGBB`, sai số là 0..255. Cấu hình được lưu
 riêng trên PC và áp dụng cho các lượt kiểm tra tiếp theo.
+
+`ENSURE_APP_OPEN = True` sẽ tự mở `BUNDLE_ID` khi foreground đang là app khác,
+màn hình hệ thống hoặc không có app foreground. Đặt `False` nếu chỉ muốn kiểm tra
+đúng app đang mở mà không tự chuyển app.
 
 ### Xác nhận khi chọn tất cả
 

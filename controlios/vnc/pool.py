@@ -610,6 +610,7 @@ class DevicePool:
                                  restart_delay: tuple[float, float] = (3.0, 5.0),
                                  color_matches: Sequence[tuple[float, float, str, float]] = (),
                                  screen_texts: Sequence[str] = (),
+                                 ensure_app_open: bool = True,
                                  on_event=None,
                                  on_done=None) -> None:
         """OCR hai lần cách 10 giây; chỉ restart khi trạng thái lỗi còn tồn tại."""
@@ -649,13 +650,17 @@ class DevicePool:
                         foreground = await channel.frontmost_app()
                         if on_event:
                             on_event(key, f"app foreground: {foreground or 'màn hình hệ thống'}")
-                        if foreground != bundle_id:
+                        if foreground != bundle_id and ensure_app_open:
                             if on_event:
                                 on_event(key, f"app đang mở là {foreground or 'màn hình hệ thống'}; "
                                               f"đang mở {bundle_id}")
                             await channel.launch(bundle_id)
                             await asyncio.sleep(2.0)
                             await session.request_capture()
+                        elif foreground != bundle_id:
+                            if on_event:
+                                on_event(key, f"không mở {bundle_id} theo ENSURE_APP_OPEN=False; bỏ qua máy")
+                            return
 
                         async def detect_state() -> Optional[str]:
                             for rx, ry, expected, tolerance in color_conditions:

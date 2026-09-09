@@ -1243,6 +1243,7 @@ class EarnAppMonitorCodeDialog(QDialog):
         self.editor.setPlainText(
             f'# Chỉ chỉnh các giá trị trong đoạn cấu hình này.\n'
             f'BUNDLE_ID = {monitor.bundle_id!r}\n'
+            f'ENSURE_APP_OPEN = {monitor.ensure_app_open!r}\n'
             f'ERROR_TEXTS = {tuple(monitor.needles)!r}\n'
             f'COLOR_MATCHES = {tuple(monitor.color_matches)!r}\n'
             f'SCREEN_TEXTS = {tuple(monitor.screen_texts)!r}\n'
@@ -1279,7 +1280,14 @@ class EarnAppMonitorCodeDialog(QDialog):
                 raise ValueError(f"{name} không hợp lệ")
             return int(match.group(1))
 
+        def bool_value(name: str) -> bool:
+            match = re.search(rf"^\s*{name}\s*=\s*(True|False)\s*$", text, re.MULTILINE)
+            if not match:
+                raise ValueError(f"{name} phải là True hoặc False")
+            return match.group(1) == "True"
+
         bundle_id = string_value("BUNDLE_ID")
+        ensure_app_open = bool_value("ENSURE_APP_OPEN")
         match = re.search(r"^\s*ERROR_TEXTS\s*=\s*\((.*?)\)\s*$", text, re.MULTILINE)
         if not match:
             raise ValueError("ERROR_TEXTS không hợp lệ")
@@ -1323,7 +1331,8 @@ class EarnAppMonitorCodeDialog(QDialog):
         restart_max = int_value("RESTART_DELAY_MAX", restart_min)
         if restart_max < restart_min:
             raise ValueError("RESTART_DELAY_MAX phải lớn hơn hoặc bằng MIN")
-        return {"bundle_id": bundle_id, "needles": needles, "color_matches": colors,
+        return {"bundle_id": bundle_id, "ensure_app_open": ensure_app_open,
+                "needles": needles, "color_matches": colors,
                 "screen_texts": screen_texts,
                 "confirm_seconds": confirm, "restart_min": restart_min,
                 "restart_max": restart_max}
@@ -1371,6 +1380,7 @@ class ScreenTextMonitorDialog(QDialog):
         self.resize(620, 430)
         self.settings = QSettings("ControlIOS", "ScreenTextMonitor")
         self.bundle_id = str(self.settings.value("bundle_id", "com.brd.earnapp"))
+        self.ensure_app_open = str(self.settings.value("ensure_app_open", "true")).lower() in ("1", "true", "yes", "on")
         self.needles = [s for s in str(self.settings.value(
             "error_texts", "Not connected|Connecting")).split("|") if s] or ["Not connected", "Connecting"]
         self.color_matches = self._load_color_matches()
@@ -1506,7 +1516,8 @@ class ScreenTextMonitorDialog(QDialog):
         if not keys:
             self.status.setText("Phạm vi đã chọn không có máy để bật canh.")
             return
-        if not self.window._confirm_all_action(keys, "bật canh EarnApp"):
+        confirm_all = getattr(self.window, "_confirm_all_action", lambda _keys, _label: True)
+        if not confirm_all(keys, "bật canh EarnApp"):
             return
         added = set(keys) - self.monitored_keys
         self.monitored_keys.update(keys)
@@ -1551,6 +1562,7 @@ class ScreenTextMonitorDialog(QDialog):
             restart_delay=(self.restart_min, self.restart_max),
             color_matches=tuple(self.color_matches),
             screen_texts=tuple(self.screen_texts),
+            ensure_app_open=self.ensure_app_open,
             on_event=self.window.bridge.monitor_event.emit,
             on_done=self.window.bridge.monitor_done.emit)
 
@@ -1560,6 +1572,7 @@ class ScreenTextMonitorDialog(QDialog):
             return
         values = dialog.values()
         self.bundle_id = values["bundle_id"]
+        self.ensure_app_open = values["ensure_app_open"]
         self.needles = values["needles"]
         self.confirm_seconds = values["confirm_seconds"]
         self.restart_min = values["restart_min"]
@@ -1567,6 +1580,7 @@ class ScreenTextMonitorDialog(QDialog):
         self.color_matches = values["color_matches"]
         self.screen_texts = values["screen_texts"]
         self.settings.setValue("bundle_id", self.bundle_id)
+        self.settings.setValue("ensure_app_open", self.ensure_app_open)
         self.settings.setValue("error_texts", "|".join(self.needles))
         self.settings.setValue("color_matches", repr(tuple(self.color_matches)))
         self.settings.setValue("screen_texts", repr(tuple(self.screen_texts)))
