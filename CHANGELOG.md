@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.11] - 2026-09-11
+
+- Skip the capture defer window while a pointer is held, so slider captchas
+  and other drags flush frames immediately instead of waiting 8-15ms per
+  update.
+
 ## [4.10] - 2026-09-10
 
 - Added **Free RAM** (`freeram` / `killallapps`, JS `freeRAM()`): terminate running

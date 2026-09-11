@@ -169,6 +169,7 @@ static int gFpsMin = 0;
 static int gFpsPref = 0;
 static int gFpsMax = 0;
 static double gDeferWindowSec = 0.015;      // Coalescing window; 0 disables deferral
+static std::atomic<bool> gPointerActive{false}; // left-button down: flush immediately
 static int gMaxInflightUpdates = 2;         // Max concurrent client encodes; drop frames if >= this
 static int gTileSize = 32;                  // Tile size for dirty detection (pixels)
 static int gFullscreenThresholdPercent = 0; // If changed tiles exceed this %, update full screen
@@ -2759,7 +2760,9 @@ static void handleFramebuffer(CMSampleBufferRef sampleBuffer) {
     // Decide whether to flush now
     BOOL shouldFlush = YES;
     static CFAbsoluteTime sDeferStartTime = 0;
-    if (gDeferWindowSec > 0) {
+    // While the pointer is down, skip the 8-15ms coalescing window so slider
+    // captchas and other drags paint on the next captured frame.
+    if (gDeferWindowSec > 0 && !gPointerActive.load(std::memory_order_relaxed)) {
         if (!gHasPending) {
             gHasPending = YES;
             sDeferStartTime = CFAbsoluteTimeGetCurrent();
@@ -3350,8 +3353,10 @@ static void ptrAddEvent(int buttonMask, int x, int y, rfbClientPtr cl) {
     bool leftNow = (buttonMask & 1) != 0;
     bool leftPrev = (lastMask & 1) != 0;
     if (leftNow && !leftPrev) {
+        gPointerActive.store(true, std::memory_order_relaxed);
         [gen touchDownAtPoints:&pt touchCount:1];
     } else if (!leftNow && leftPrev) {
+        gPointerActive.store(false, std::memory_order_relaxed);
         [gen liftUpAtPoints:&pt touchCount:1];
     } else if (leftNow) {
         CGPoint p = pt;
