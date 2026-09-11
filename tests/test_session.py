@@ -171,14 +171,48 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
         self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2))
 
-        self.assertAlmostEqual(session._effective_fps(Tier.LIVE), 12.0)
+        self.assertGreaterEqual(session._effective_fps(Tier.LIVE), 30.0)
         session.mouse_move(10, 10)
-        self.assertAlmostEqual(session._effective_fps(Tier.LIVE), 12.0,
-                               msg="hover must not boost fps")
+        self.assertGreaterEqual(session._effective_fps(Tier.LIVE), 30.0)
         session.mouse_down(10, 10)
         self.assertGreaterEqual(session._effective_fps(Tier.LIVE), 30.0)
         self.assertTrue(session._interact.is_set())
         await session.stop()
+
+
+    async def test_live_pipelines_two_framebuffer_requests(self) -> None:
+        session = self.make_session(fast_settings(live_fps=12.0))
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 1))
+        self.assertGreaterEqual(
+            self.server.update_requests, 2,
+            "LIVE must keep a second FBUR in flight to hide RTT",
+        )
+        self.assertTrue(any(7 in enc for enc in self.server.encodings),
+                        f"client did not ask for Tight: {self.server.encodings}")
+        await session.stop()
+
+    async def test_idle_still_sends_one_request(self) -> None:
+        session = self.make_session()
+        session.set_tier(Tier.IDLE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 1))
+        requests = self.server.update_requests
+        await asyncio.sleep(0.4)
+        self.assertEqual(self.server.update_requests, requests)
+        self.assertEqual(requests, 1)
+        await session.stop()
+
+    async def test_grid_does_not_pipeline(self) -> None:
+        session = self.make_session(fast_settings(grid_fps=20.0))
+        session.set_tier(Tier.GRID)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 4))
+        # One in-flight at a time: requests stay within one of the frame count.
+        self.assertLessEqual(self.server.update_requests, len(self.frames) + 1)
+        await session.stop()
+
 
 
 class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
@@ -193,11 +227,16 @@ class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
 
     def test_effective_fps_boosts_during_pointer_activity(self) -> None:
         session = self._session(live_fps=12.0, grid_fps=5.0)
-        self.assertEqual(session._effective_fps(Tier.LIVE), 12.0)
+        self.assertEqual(session._effective_fps(Tier.LIVE), 30.0)
         self.assertEqual(session._effective_fps(Tier.GRID), 5.0)
         session._note_pointer_activity()
         self.assertEqual(session._effective_fps(Tier.LIVE), 30.0)
         self.assertEqual(session._effective_fps(Tier.GRID), 30.0)
+
+    def test_live_fps_floor_does_not_raise_grid(self) -> None:
+        session = self._session(live_fps=8.0, grid_fps=1.0)
+        self.assertEqual(session._effective_fps(Tier.LIVE), 30.0)
+        self.assertEqual(session._effective_fps(Tier.GRID), 1.0)
 
     def test_boost_does_not_lower_high_live_fps(self) -> None:
         session = self._session(live_fps=40.0)

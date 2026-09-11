@@ -18,7 +18,7 @@ class SettingsValidationTest(unittest.TestCase):
         settings.validate()
         self.assertEqual(settings.device_scale, 0.35)
         self.assertTrue(settings.disconnect_offscreen)
-        self.assertFalse(settings.focus_streaming)
+        self.assertTrue(settings.focus_streaming)
 
     def test_rejects_zero_fps(self) -> None:
         with self.assertRaisesRegex(ValueError, "grid_fps"):

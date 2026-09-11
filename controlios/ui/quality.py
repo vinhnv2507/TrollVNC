@@ -26,7 +26,7 @@ from ..config import Settings
 # (nhãn, live_fps, live_long_edge, grid_fps, thumb_long_edge)
 PRESETS = [
     ("Mượt — nhẹ máy nhất", 8.0, 640, 0.5, 240),
-    ("Cân bằng", 12.0, 900, 1.0, 320),
+    ("Cân bằng", 30.0, 900, 1.0, 320),
     # Ít trễ nhất: fps cao + khung NHỎ (720px) → mỗi khung truyền nhanh nên màn
     # PC bám sát iPhone. Ưu tiên độ trễ thấp hơn độ nét.
     ("Nhanh — ít trễ (30fps)", 30.0, 720, 1.0, 320),
@@ -138,9 +138,10 @@ class QualityDialog(QDialog):
         smooth_form.addRow("", self.orient_sync)
         self.focus_streaming = QCheckBox("Chỉ truyền máy đang xem (tắt lưới khi điều khiển)")
         self.focus_streaming.setToolTip(
-            "BẬT (khuyên cho farm đông): khi mở 1 máy xem/điều khiển, tạm NGƯNG "
-            "stream các ô lưới -> dồn hết băng thông WiFi cho máy đó -> giảm trễ "
-            "mạnh. Lưới sẽ đứng hình khi đang điều khiển; đóng máy ra là lưới chạy lại."
+            "Từ 0.2.14 PC luôn tạm NGƯNG stream lưới khi mở/điều khiển 1 máy "
+            "(không phụ thuộc ô này, vì bản lưu cũ thường đang TẮT nên farm vẫn "
+            "tranh băng thông). Lưới đứng hình lúc đang điều khiển; đóng máy ra "
+            "thì lưới chạy lại."
         )
         smooth_form.addRow("", self.focus_streaming)
         layout.addWidget(smooth_box)

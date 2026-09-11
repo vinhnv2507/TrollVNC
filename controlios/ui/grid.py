@@ -384,7 +384,7 @@ class DeviceGrid(QScrollArea):
         last = (last_row + 1) * columns
 
         live_key = self._control_key or self._focus_key
-        if self._focus_streaming and live_key in self.tiles:
+        if live_key in self.tiles:
             # Tập trung: chỉ máy đang xem chạy LIVE, tất cả còn lại NGƯNG stream ->
             # máy đó chiếm trọn băng thông -> trễ giảm mạnh trên farm đông máy.
             tiers = {key: Tier.IDLE for key in self.order}

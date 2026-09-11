@@ -27,6 +27,7 @@ class FakeVncServer:
 
     pointer_events: List[Tuple[int, int, int]] = field(default_factory=list)
     key_events: List[Tuple[int, int]] = field(default_factory=list)
+    encodings: List[List[int]] = field(default_factory=list)
     update_requests: int = 0
     connections: int = 0
 
@@ -89,7 +90,8 @@ class FakeVncServer:
                 elif kind == 2:                    # SetEncodings
                     await reader.readexactly(1)
                     count = struct.unpack(">H", await reader.readexactly(2))[0]
-                    await reader.readexactly(4 * count)
+                    raw = await reader.readexactly(4 * count)
+                    self.encodings.append(list(struct.unpack(">%di" % count, raw)))
                 elif kind == 3:                    # FramebufferUpdateRequest
                     await reader.readexactly(9)
                     self.update_requests += 1

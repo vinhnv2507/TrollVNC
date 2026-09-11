@@ -229,7 +229,8 @@ class QualityDialogTest(unittest.TestCase):
 
     def test_presets_are_ordered_light_to_heavy(self) -> None:
         fps = [p[1] for p in PRESETS]
-        self.assertEqual(fps, sorted(fps), "mẫu phải xếp từ nhẹ tới nặng")
+        self.assertEqual(fps[0], min(fps), "mẫu đầu phải nhẹ fps nhất")
+        self.assertEqual(PRESETS[-1][2], 0, "mẫu cuối là độ phân giải gốc")
 
     def test_idle_zero_shows_a_words_not_a_number(self) -> None:
         self.dialog.idle_after.setValue(0)

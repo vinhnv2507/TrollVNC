@@ -41,7 +41,7 @@ class GridTest(unittest.TestCase):
         self.assertLess(len(promoted), 100,
                         "every tile was promoted — virtualisation is not working")
 
-    def test_open_detail_does_not_pause_visible_grid(self) -> None:
+    def test_open_detail_pauses_the_visible_grid(self) -> None:
         grid = DeviceGrid(tile_width=150)
         grid.resize(700, 400)
         specs = [DeviceSpec(host=f"10.0.0.{i}") for i in range(1, 30)]
@@ -53,7 +53,10 @@ class GridTest(unittest.TestCase):
         grid.tiers_changed.connect(published.update)
         grid._publish_tiers()
         visible_grid = [k for k, tier in published.items() if tier is Tier.GRID]
-        self.assertTrue(visible_grid, "mở màn hình lớn không được làm đứng cả lưới")
+        self.assertFalse(visible_grid, "opening a machine must pause the grid wall")
+        self.assertEqual(published[specs[0].key], Tier.LIVE)
+        idle = [k for k, tier in published.items() if tier is Tier.IDLE]
+        self.assertEqual(len(idle), len(specs) - 1)
 
     def test_frame_and_status_reach_the_tile(self) -> None:
         grid = DeviceGrid()

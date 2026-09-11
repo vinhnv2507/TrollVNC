@@ -2,14 +2,31 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
-## Trễ ~1s trên farm đông máy? → BẬT "Chỉ truyền máy đang xem"
+## PC 0.2.14: Tight JPEG + 30fps + tạm dừng lưới khi mở máy
+Giật khi kéo captcha Shopee trên farm WiFi **không phải vì hết RAM**. Đo trên
+máy nội bộ: ping ~180ms, client cũ chỉ xin ZLib-raw, LIVE 12fps kiểu gửi-rồi-chờ
+→ trần khoảng 5 khung/giây nên thanh captcha kéo rất khó.
+
+PC 0.2.14 (không cần cài lại iOS 4.11):
+
+- Xin Tight JPEG (encoding 7, QualityLevel 6). Khung Shopee đầy màu nhẹ hơn nhiều
+  so với zlib-raw 32bpp. Daemon TrollVNC đã link turbojpeg sẵn.
+- LIVE luôn sàn 30fps và gửi **2 FramebufferUpdateRequest chồng nhau** để giấu
+  một RTT (~180ms) thay vì request-then-wait.
+- Khi mở/điều khiển 1 máy, **luôn tạm dừng stream lưới** — không phụ thuộc
+  checkbox cũ, vì bản lưu trước đó thường đang TẮT nên farm vẫn tranh băng thông.
+
+Đóng bản 0.2.13 đang chạy rồi mở 0.2.14. WiFi farm đông máy vẫn là trần vật lý;
+tắt lưới khi mở máy là đòn bẩy lớn nhất phía PC.
+
+## Trễ ~1s trên farm đông máy? → lưới phải dừng khi đang điều khiển
 Nguyên nhân số 1 gây trễ trên farm WiFi: mở 1 máy điều khiển nhưng **các ô lưới
 vẫn đang stream** → 249 máy kia tranh băng thông của máy bạn đang bấm.
 
-**Chất lượng → "Chỉ truyền máy đang xem (tắt lưới khi điều khiển)"** (mặc định
-BẬT): khi mở 1 máy, tạm NGƯNG stream toàn bộ lưới → dồn trọn băng thông cho máy
-đó → trễ giảm mạnh. Lưới đứng hình lúc đang điều khiển; đóng máy ra thì lưới chạy
-lại. Đây là đòn bẩy trễ lớn nhất, **có ngay trên PC không cần cài lại máy**.
+Từ 0.2.14 PC **luôn** tạm NGƯNG stream toàn bộ lưới khi có máy đang mở/điều
+khiển → dồn trọn băng thông cho máy đó. Lưới đứng hình lúc đang điều khiển;
+đóng máy ra thì lưới chạy lại. Checkbox "Chỉ truyền máy đang xem" vẫn còn
+trên dialog nhưng hành vi này không còn bị bản config cũ (mặc định TẮT) làm hỏng.
 
 ## Chỉnh NGAY trên PC (không cần cài lại) — **Chất lượng**
 Menu **Chất lượng** trên thanh công cụ, nhóm **"Độ mượt (áp thẳng lên máy)"**:

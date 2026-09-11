@@ -191,7 +191,7 @@ class Settings:
 
     # Frames per second requested per tier.
     grid_fps: float = 1.0
-    live_fps: float = 12.0
+    live_fps: float = 30.0
 
     # Long edge of a grid thumbnail, in pixels. Framebuffers are downscaled
     # inside the network thread so the UI never holds 250 full-size images.
@@ -258,9 +258,9 @@ class Settings:
     device_orientation_sync: bool = False
 
     # Tập trung băng thông: khi đang xem/điều khiển 1 máy thì TẮT stream lưới, dồn
-    # băng thông cho máy đó -> giảm trễ mạnh trên farm WiFi đông máy. Tắt nếu muốn
-    # lưới vẫn cập nhật lúc điều khiển.
-    focus_streaming: bool = False
+    # băng thông cho máy đó -> giảm trễ mạnh trên farm WiFi đông máy. PC luôn tạm
+    # dừng lưới khi có máy đang mở, không phụ thuộc checkbox cũ (mặc định False).
+    focus_streaming: bool = True
 
     # Cuộn "thuận iOS": lăn bánh xe lên -> nội dung đi như vuốt trên iPhone. Bật
     # (mặc định) đảo chiều lăn cho khớp cảm giác cuộn của iOS; tắt để giữ chiều

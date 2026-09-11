@@ -21,6 +21,7 @@ import asyncvnc
 import numpy as np
 
 from ..config import DeviceSpec, Settings
+from .tight import enable_tight
 
 log = logging.getLogger(__name__)
 
@@ -40,10 +41,14 @@ MEDIA_KEYSYMS = {
 # iOS chia độ sáng thành 16 nấc, nên bấy nhiêu lần là chạm đáy hoặc chạm đỉnh.
 BRIGHTNESS_STEPS = 16
 
-# Farm giữ live_fps thấp (12). Khi đang kéo/chạm, tạm nâng tối thiểu 30fps
-# và đánh thức pacer để slider captcha không phải chờ hết chu kỳ 83ms.
+# Farm từng để live_fps=12. LIVE luôn sàn 30fps; khi đang kéo/chạm thì đánh
+# thức pacer để slider captcha không phải chờ hết chu kỳ chậm của GRID.
+LIVE_MIN_FPS = 30.0
 INTERACT_BOOST_FPS = 30.0
 INTERACT_HOLD_SEC = 0.8
+# Hai FramebufferUpdateRequest chồng nhau khi LIVE: giấu một RTT (~180ms trên
+# WiFi farm) thay vì request-then-wait (trần ~5fps). GRID/IDLE giữ 1 request.
+LIVE_PIPELINE = 2
 
 
 class Tier(enum.IntEnum):
@@ -158,6 +163,7 @@ class VncSession:
         self._mouse_move_pending: Optional[tuple[int, int]] = None
         self._interact = asyncio.Event()
         self._interact_until = 0.0
+        self._inflight = 0
 
     # ---------------------------------------------------------------- control
 
@@ -279,6 +285,8 @@ class VncSession:
     def _effective_fps(self, tier: Tier) -> float:
         fps = ((self.live_fps_override or self.settings.live_fps)
                if tier is Tier.LIVE else self.settings.grid_fps)
+        if tier is Tier.LIVE:
+            fps = max(fps, LIVE_MIN_FPS)
         if time.monotonic() < self._interact_until:
             fps = max(fps, INTERACT_BOOST_FPS)
         return fps
@@ -373,6 +381,7 @@ class VncSession:
 
         if not self._client:
             return
+        self._note_pointer_activity()
         # Cuộn "thuận iOS": lăn bánh xe lên phải làm nội dung dịch như vuốt trên
         # iPhone. Không đảo thì cảm giác ngược chiều cuộn của iOS.
         if getattr(self.settings, "natural_scroll", True):
@@ -531,6 +540,9 @@ class VncSession:
     async def _session(self, client: asyncvnc.Client) -> None:
         """Reader and pacer run concurrently; either failing ends the session."""
 
+        self._inflight = 0
+        enable_tight(client)
+        await client.drain()
         reader = asyncio.create_task(self._read_loop(client))
         pacer = asyncio.create_task(self._pace_loop(client))
         # Cũng thức dậy khi có yêu cầu nối lại (đổi scale) để bắt tay lại lấy cỡ mới.
@@ -555,6 +567,7 @@ class VncSession:
         while not self._stop.is_set():
             update = await client.read()
             if update is asyncvnc.UpdateType.VIDEO:
+                self._inflight = max(0, self._inflight - 1)
                 self.last_frame_at = time.monotonic()
                 self.frame_count += 1
                 self._emit(client)
@@ -566,6 +579,8 @@ class VncSession:
         while not self._stop.is_set():
             if self._capture_waiters:
                 first = False
+                while self._inflight > 0:
+                    await self._wait_frame(self.frame_count, interruptible=False)
                 await self._serve_capture(client)
                 continue
 
@@ -588,10 +603,19 @@ class VncSession:
             first = False
             self._promote.clear()
             started = loop.time()
-            incremental = client.video.data is not None and not self._force_full
-            self._force_full = False
-            await self._request(client, incremental=incremental, interruptible=True)
-            fps = self._effective_fps(tier)
+            depth = LIVE_PIPELINE if tier is Tier.LIVE else 1
+            before = self.frame_count
+            while self._inflight < depth:
+                incremental = not self._force_full
+                if not incremental:
+                    client.video.data = None
+                self._force_full = False
+                self._write_fb_request(client, incremental)
+            await client.drain()
+            await self._wait_frame(before, interruptible=True)
+            if self._promote.is_set():
+                continue
+            fps = self._effective_fps(self.tier)
             # Nhịp theo thời gian thực: chỉ ngủ phần còn thiếu để chạm fps mục
             # tiêu, không cộng cả chu kỳ lên trên thời gian chờ frame. Nhờ vậy
             # đường nhanh (USB) chạy sát fps thay vì bị hãm còn phân nửa.
@@ -604,19 +628,27 @@ class VncSession:
                 else:
                     await self._await_pace_gap(remaining)
 
-    async def _request(self, client: asyncvnc.Client, incremental: bool,
-                       interruptible: bool = False) -> None:
-        if not incremental:
-            client.video.data = None
-        self._frame_ready.clear()
-        client.video.refresh()
-        await client.drain()
-        # Wait for the answer instead of pipelining requests: a phone that
-        # stops painting must not accumulate an unbounded request queue.
+    def _write_fb_request(self, client: asyncvnc.Client, incremental: bool) -> None:
+        """Gửi FramebufferUpdateRequest, không phụ thuộc video.data như refresh()."""
+
+        video = client.video
+        client.writer.write(
+            b"\x03"
+            + (1 if incremental else 0).to_bytes(1, "big")
+            + (0).to_bytes(2, "big")
+            + (0).to_bytes(2, "big")
+            + int(video.width).to_bytes(2, "big")
+            + int(video.height).to_bytes(2, "big")
+        )
+        self._inflight += 1
+
+    async def _wait_frame(self, before: int, interruptible: bool = False) -> None:
+        if self.frame_count > before:
+            return
         if not interruptible:
             try:
                 await asyncio.wait_for(
-                    self._frame_ready.wait(), timeout=self.settings.stall_timeout
+                    self._wait_until_frame(before), timeout=self.settings.stall_timeout
                 )
             except asyncio.TimeoutError:
                 raise TimeoutError("no framebuffer update")
@@ -625,7 +657,7 @@ class VncSession:
         # Chỉ luồng pacer mới ngắt được: bừng dậy nếu vừa đổi tier (mở khung lớn),
         # vì incremental request trên màn hình tĩnh có thể treo tới stall_timeout
         # và chặn việc hiện khung lớn ngay. Chụp ảnh thì KHÔNG ngắt (cần đủ frame).
-        frame_wait = asyncio.ensure_future(self._frame_ready.wait())
+        frame_wait = asyncio.ensure_future(self._wait_until_frame(before))
         promote_wait = asyncio.ensure_future(self._promote.wait())
         try:
             done, _pending = await asyncio.wait(
@@ -639,6 +671,23 @@ class VncSession:
                     task.cancel()
         if not done:
             raise TimeoutError("no framebuffer update")
+
+    async def _wait_until_frame(self, before: int) -> None:
+        while self.frame_count <= before:
+            self._frame_ready.clear()
+            if self.frame_count > before:
+                return
+            await self._frame_ready.wait()
+
+    async def _request(self, client: asyncvnc.Client, incremental: bool,
+                       interruptible: bool = False) -> None:
+        if not incremental:
+            client.video.data = None
+        before = self.frame_count
+        self._write_fb_request(client, incremental)
+        await client.drain()
+        # Capture/IDLE: đợi đúng một câu trả lời, không chồng request.
+        await self._wait_frame(before, interruptible=interruptible)
 
     def _emit(self, client: asyncvnc.Client) -> None:
         video = client.video
