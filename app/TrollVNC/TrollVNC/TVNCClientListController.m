@@ -709,6 +709,64 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
     return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
 }
 
+NSString *TVNCSendControlCommand(NSString *command, NSTimeInterval timeout) {
+    return TVNCRunCommand(command, timeout);
+}
+
+static NSString *TVNCFormatFreeRAMReply(NSString *reply) {
+    if (reply.length == 0)
+        return @"Không nối được dịch vụ ControlIOS. Hãy bật ControlIOS rồi thử lại.";
+    NSString *clean = [reply stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (![clean hasPrefix:@"OK"])
+        return clean;
+    NSMutableDictionary<NSString *, NSString *> *values = [NSMutableDictionary dictionary];
+    for (NSString *part in [clean componentsSeparatedByCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]) {
+        NSRange eq = [part rangeOfString:@"="];
+        if (eq.location == NSNotFound)
+            continue;
+        values[[part substringToIndex:eq.location]] = [part substringFromIndex:eq.location + 1];
+    }
+    long killed = values[@"killed"].integerValue;
+    long skipped = values[@"skipped"].integerValue;
+    unsigned long long before = (unsigned long long)values[@"mem_before"].longLongValue;
+    unsigned long long after = (unsigned long long)values[@"mem_after"].longLongValue;
+    return [NSString stringWithFormat:
+                @"Đã đóng %ld app, giữ %ld tiến trình hệ thống.\nRAM khả dụng: %.0f MB → %.0f MB.",
+                killed, skipped, before / (1024.0 * 1024.0), after / (1024.0 * 1024.0)];
+}
+
+void TVNCConfirmFreeRAM(UIViewController *presenter) {
+    if (!presenter)
+        return;
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:@"Giải phóng RAM?"
+                                            message:@"Đóng tất cả app đang chạy trừ ControlIOS, TrollStore và tiến trình hệ thống. EarnApp, Golike và các app khác cũng sẽ bị đóng để remote mượt hơn."
+                                     preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ"
+                                              style:UIAlertActionStyleCancel
+                                            handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Giải phóng"
+                                              style:UIAlertActionStyleDestructive
+                                            handler:^(__unused UIAlertAction *action) {
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSString *reply = TVNCSendControlCommand(@"freeram", 20.0);
+            NSString *message = TVNCFormatFreeRAMReply(reply);
+            dispatch_async(dispatch_get_main_queue(), ^{
+                UIAlertController *result =
+                    [UIAlertController alertControllerWithTitle:@"Giải phóng RAM"
+                                                        message:message
+                                                 preferredStyle:UIAlertControllerStyleAlert];
+                [result addAction:[UIAlertAction actionWithTitle:@"OK"
+                                                           style:UIAlertActionStyleCancel
+                                                         handler:nil]];
+                [presenter presentViewController:result animated:YES completion:nil];
+            });
+        });
+    }]];
+    [presenter presentViewController:alert animated:YES completion:nil];
+}
+
+
 // Màn danh sách snapshot của một app: chọn bản để khôi phục / xoá, lưu bản mới,
 // hoặc xoá dữ liệu app. Đẩy ra từ TVNCAppDataController khi chạm một app.
 @interface TVNCSnapshotListController : UITableViewController
@@ -1136,12 +1194,19 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
         initWithBarButtonSystemItem:UIBarButtonSystemItemDone
                            target:self
                            action:@selector(dismissSelf)];
-    self.navigationItem.rightBarButtonItem = [[UIBarButtonItem alloc]
+    UIBarButtonItem *restartItem = [[UIBarButtonItem alloc]
         initWithTitle:@"Khởi động lại"
                 style:UIBarButtonItemStylePlain
                target:self
                action:@selector(confirmRestart)];
-    self.navigationItem.rightBarButtonItem.tintColor = self.primaryColor;
+    restartItem.tintColor = self.primaryColor;
+    UIBarButtonItem *ramItem = [[UIBarButtonItem alloc]
+        initWithTitle:@"RAM"
+                style:UIBarButtonItemStylePlain
+               target:self
+               action:@selector(confirmFreeRAM)];
+    ramItem.tintColor = self.primaryColor;
+    self.navigationItem.rightBarButtonItems = @[ restartItem, ramItem ];
     [self refreshDiagnostics];
 }
 
@@ -1150,7 +1215,8 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
 }
 
 - (void)refreshDiagnostics {
-    self.navigationItem.rightBarButtonItem.enabled = NO;
+    for (UIBarButtonItem *item in self.navigationItem.rightBarButtonItems)
+        item.enabled = NO;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
         NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.82flex.trollvnc"];
         BOOL enabled = [defaults objectForKey:@"Enabled"] ? [defaults boolForKey:@"Enabled"] : YES;
@@ -1212,7 +1278,8 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
             self.healthy = healthy;
             [self.tableView reloadData];
             [self.refreshControl endRefreshing];
-            self.navigationItem.rightBarButtonItem.enabled = YES;
+            for (UIBarButtonItem *item in self.navigationItem.rightBarButtonItems)
+                item.enabled = YES;
         });
     });
 }
@@ -1237,6 +1304,10 @@ static NSString *TVNCRunCommand(NSString *line, double timeoutSec) {
                                                                });
                                             }]];
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)confirmFreeRAM {
+    TVNCConfirmFreeRAM(self);
 }
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {

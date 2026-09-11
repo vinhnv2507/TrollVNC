@@ -53,6 +53,9 @@
 #import <time.h>
 #import <sys/sysctl.h>
 #import <unistd.h>
+#import <mach/mach.h>
+#import <mach/mach_host.h>
+#import <malloc/malloc.h>
 #import <vector>
 
 #import <Photos/Photos.h>
@@ -4264,6 +4267,218 @@ static NSData *tvCtlTerminateApp(NSString *bundleId) {
     return [NSData dataWithBytes:raw length:strlen(raw)];
 }
 
+
+#pragma mark - Free RAM
+
+static uint64_t tvAvailableMemoryBytes(void) {
+    vm_statistics64_data_t vmstat;
+    mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+    if (host_statistics64(mach_host_self(), HOST_VM_INFO64,
+                          (host_info64_t)&vmstat, &count) != KERN_SUCCESS)
+        return 0;
+    vm_size_t page = 0;
+    host_page_size(mach_host_self(), &page);
+    if (page == 0)
+        page = vm_kernel_page_size;
+    return (uint64_t)page * ((uint64_t)vmstat.free_count
+                             + (uint64_t)vmstat.external_page_count
+                             + (uint64_t)vmstat.purgeable_count);
+}
+
+static BOOL tvShouldKeepAliveBundle(NSString *bundleId) {
+    if (bundleId.length == 0)
+        return YES;
+    NSString *lower = bundleId.lowercaseString;
+    if ([lower containsString:@"controlios"] ||
+        [lower containsString:@"trollvnc"] ||
+        [lower containsString:@"trollstore"])
+        return YES;
+    if ([bundleId isEqualToString:@"com.apple.springboard"])
+        return YES;
+
+    static NSSet<NSString *> *killableApple = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        killableApple = [NSSet setWithArray:@[
+            @"com.apple.mobilesafari",
+            @"com.apple.SafariViewService",
+            @"com.apple.MobileSMS",
+            @"com.apple.mobilemail",
+            @"com.apple.Music",
+            @"com.apple.mobileipod",
+            @"com.apple.mobileslideshow",
+            @"com.apple.camera",
+            @"com.apple.Maps",
+            @"com.apple.AppStore",
+            @"com.apple.news",
+            @"com.apple.tv",
+            @"com.apple.podcasts",
+            @"com.apple.iBooks",
+            @"com.apple.DocumentsApp",
+            @"com.apple.Passbook",
+            @"com.apple.weather",
+            @"com.apple.mobilecal",
+            @"com.apple.mobiletimer",
+            @"com.apple.mobilenotes",
+            @"com.apple.reminders",
+            @"com.apple.Health",
+            @"com.apple.Home",
+            @"com.apple.shortcuts",
+            @"com.apple.facetime",
+            @"com.apple.MobileAddressBook",
+            @"com.apple.findmy",
+            @"com.apple.Bridge",
+            @"com.apple.Fitness",
+            @"com.apple.Translate",
+            @"com.apple.measure",
+            @"com.apple.compass",
+            @"com.apple.calculator",
+            @"com.apple.tips",
+            @"com.apple.VoiceMemos",
+            @"com.apple.clips",
+            @"com.apple.freeform",
+            @"com.apple.journal",
+        ]];
+    });
+    if ([bundleId hasPrefix:@"com.apple."])
+        return ![killableApple containsObject:bundleId];
+    return NO;
+}
+
+static void tvFBSTerminateBundle(NSString *bundleId) {
+    if (bundleId.length == 0)
+        return;
+    static id service = nil;
+    static SEL terminateSel = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        dlopen("/System/Library/PrivateFrameworks/FrontBoardServices.framework/"
+               "FrontBoardServices",
+               RTLD_LAZY);
+        Class serviceClass = NSClassFromString(@"FBSSystemService");
+        SEL sharedSelector = NSSelectorFromString(@"sharedService");
+        terminateSel = NSSelectorFromString(
+            @"terminateApplication:forReason:andReport:withDescription:");
+        if (serviceClass && [serviceClass respondsToSelector:sharedSelector])
+            service = ((id (*)(id, SEL))objc_msgSend)((id)serviceClass, sharedSelector);
+    });
+    if (!service || !terminateSel || ![service respondsToSelector:terminateSel])
+        return;
+    ((void (*)(id, SEL, NSString *, long long, BOOL, NSString *))objc_msgSend)(
+        service, terminateSel, bundleId, 1LL, NO, @"ControlIOS FreeRAM");
+}
+
+#if !TARGET_OS_SIMULATOR
+static int tvKillRelatedProcesses(NSString *bundleId, pid_t mainPID) {
+    NSString *bundlePath = nil;
+    for (LSApplicationProxy *app in [tvAppWorkspace() allApplications]) {
+        if ([app.applicationIdentifier isEqualToString:bundleId]) {
+            bundlePath = tvNormalizedProcessPath(app.bundleURL.path ?: @"");
+            break;
+        }
+    }
+    int killed = 0;
+    pid_t selfPid = getpid();
+    if (bundlePath.length == 0) {
+        if (mainPID > 0 && mainPID != selfPid) {
+            if (kill(mainPID, SIGKILL) == 0)
+                killed++;
+        }
+        return killed;
+    }
+    int needed = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+    if (needed <= 0)
+        return killed;
+    std::vector<pid_t> allPids((size_t)needed / sizeof(pid_t) + 64);
+    int bytes = proc_listpids(PROC_ALL_PIDS, 0, allPids.data(),
+                              (int)(allPids.size() * sizeof(pid_t)));
+    int count = MAX(0, bytes) / (int)sizeof(pid_t);
+    NSString *bundlePrefix = [bundlePath stringByAppendingString:@"/"];
+    for (int index = 0; index < count; index++) {
+        pid_t candidate = allPids[(size_t)index];
+        if (candidate <= 0 || candidate == selfPid)
+            continue;
+        char rawPath[PROC_PIDPATHINFO_MAXSIZE] = {};
+        if (proc_pidpath(candidate, rawPath, sizeof(rawPath)) <= 0)
+            continue;
+        NSString *processPath = tvNormalizedProcessPath(
+            [NSString stringWithUTF8String:rawPath] ?: @"");
+        if ([processPath hasPrefix:bundlePrefix] ||
+            [processPath isEqualToString:bundlePath]) {
+            if (kill(candidate, SIGKILL) == 0)
+                killed++;
+        }
+    }
+    return killed;
+}
+#endif
+
+static NSArray<NSString *> *tvRunningBundleIDs(void) {
+    NSMutableSet<NSString *> *ids = [NSMutableSet set];
+    void *handle = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
+                          "SpringBoardServices",
+                          RTLD_LAZY);
+    if (handle) {
+        CFArrayRef (*copyIds)(Boolean, Boolean) =
+            (CFArrayRef (*)(Boolean, Boolean))dlsym(
+                handle, "SBSCopyApplicationDisplayIdentifiers");
+        if (copyIds) {
+            CFArrayRef array = copyIds(false, false);
+            if (array) {
+                for (id bundleId in (__bridge NSArray *)array) {
+                    if ([bundleId isKindOfClass:[NSString class]] &&
+                        [(NSString *)bundleId length] > 0)
+                        [ids addObject:bundleId];
+                }
+                CFRelease(array);
+            }
+        }
+    }
+    for (LSApplicationProxy *app in [tvAppWorkspace() allApplications]) {
+        NSString *bundleId = app.applicationIdentifier;
+        if (bundleId.length > 0)
+            [ids addObject:bundleId];
+    }
+    NSMutableArray<NSString *> *running = [NSMutableArray array];
+    for (NSString *bundleId in ids) {
+        if (tvPIDForBundleIdentifier(bundleId) > 0)
+            [running addObject:bundleId];
+    }
+    [running sortUsingSelector:@selector(compare:)];
+    return running;
+}
+
+static NSData *tvCtlFreeRAM(void) {
+    uint64_t before = tvAvailableMemoryBytes();
+    NSArray<NSString *> *bundles = tvRunningBundleIDs();
+    int killed = 0;
+    int skipped = 0;
+    for (NSString *bundleId in bundles) {
+        if (tvShouldKeepAliveBundle(bundleId)) {
+            skipped++;
+            continue;
+        }
+        pid_t pid = tvPIDForBundleIdentifier(bundleId);
+        tvFBSTerminateBundle(bundleId);
+#if !TARGET_OS_SIMULATOR
+        tvKillRelatedProcesses(bundleId, pid);
+#else
+        if (pid > 0)
+            kill(pid, SIGKILL);
+#endif
+        killed++;
+    }
+    malloc_zone_pressure_relief(NULL, 0);
+    usleep(200 * 1000);
+    uint64_t after = tvAvailableMemoryBytes();
+    TVLog(@"Control socket: freeram killed=%d skipped=%d mem_before=%llu mem_after=%llu",
+          killed, skipped, before, after);
+    NSString *msg = [NSString stringWithFormat:
+                         @"OK killed=%d skipped=%d mem_before=%llu mem_after=%llu\n",
+                         killed, skipped, before, after];
+    return [msg dataUsingEncoding:NSUTF8StringEncoding];
+}
+
 #pragma mark - Clipboard
 
 // `clipset <size>` — đọc đúng `size` byte payload (đã gồm phần bị vòng đọc dòng
@@ -5138,6 +5353,7 @@ static NSData *tvCtlDiagnostics(void) {
                       gTvCtlAcceptedTotal.load(std::memory_order_relaxed)];
     [out appendFormat:@"uptime=%.0f\n", processInfo.systemUptime];
     [out appendFormat:@"memory_total=%llu\n", processInfo.physicalMemory];
+    [out appendFormat:@"memory_avail=%llu\n", tvAvailableMemoryBytes()];
     [out appendFormat:@"disk_total=%llu\n", total];
     [out appendFormat:@"disk_free=%llu\n", free];
     [out appendFormat:@"load=%.2f %.2f %.2f\n", loads[0], loads[1], loads[2]];
@@ -6273,6 +6489,11 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     // App / URL (đóng-mở app theo bundle id, mở URL).
     ctx[@"launchApp"] = ^(NSString *b) { tvTrace([@"launchApp " stringByAppendingString:(b ?: @"")]); tvCtlLaunchApp(b); };
     ctx[@"killApp"] = ^(NSString *b) { tvTrace([@"killApp " stringByAppendingString:(b ?: @"")]); tvCtlTerminateApp(b); };
+    ctx[@"freeRAM"] = ^NSString *(void) {
+        tvTrace(@"freeRAM");
+        NSData *data = tvCtlFreeRAM();
+        return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] ?: @"";
+    };
     ctx[@"openURL"] = ^(NSString *u) { tvTrace([@"openURL " stringByAppendingString:(u ?: @"")]); tvCtlOpenURL(u); };
     ctx[@"openURLIn"] = ^(NSString *b, NSString *u) { tvTrace([@"openURLIn " stringByAppendingString:(b ?: @"")]); tvCtlOpenURLInApp(b, u); };
 
@@ -7007,6 +7228,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     } else if ([cmd hasPrefix:@"openurl "]) {
         resp = tvCtlOpenURL([[cmd substringFromIndex:8]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
+    } else if ([cmd isEqualToString:@"freeram"] || [cmd isEqualToString:@"killallapps"]) {
+        resp = tvCtlFreeRAM();
     } else if ([cmd hasPrefix:@"terminate "]) {
         resp = tvCtlTerminateApp([[cmd substringFromIndex:10]
             stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);

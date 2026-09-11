@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.10] - 2026-09-10
+
+- Added **Free RAM** (`freeram` / `killallapps`, JS `freeRAM()`): terminate running
+  user apps except ControlIOS, TrollStore and essential system processes, then report
+  available memory before/after. EarnApp/Golike are closed when the user confirms.
+- Diagnostics now include `memory_avail`.
+- App UI: **RAM** on the diagnostics screen and **Giải phóng RAM** in Tools.
+
 ## [4.9] - 2026-09-01
 
 - Control socket now handles clients concurrently, so a long or stalled file

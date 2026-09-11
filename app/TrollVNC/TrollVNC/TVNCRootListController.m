@@ -303,13 +303,17 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                                    image:[UIImage systemImageNamed:@"stethoscope"]
                                               identifier:nil
                                                  handler:^(__kindof UIAction *a) { [weakSelf showDiagnostics]; }];
+    UIAction *freeRAMAct = [UIAction actionWithTitle:@"Giải phóng RAM"
+                                               image:[UIImage systemImageNamed:@"memorychip"]
+                                          identifier:nil
+                                             handler:^(__kindof UIAction *a) { [weakSelf confirmFreeRAM]; }];
     UIAction *rebootAct = [UIAction actionWithTitle:@"Reboot Device"
                                              image:[UIImage systemImageNamed:@"power"]
                                         identifier:nil
                                            handler:^(__kindof UIAction *a) { [weakSelf confirmDeviceReboot]; }];
     rebootAct.attributes = UIMenuElementAttributesDestructive;
     UIMenu *toolsMenu = [UIMenu menuWithTitle:@""
-                                      children:@[ diagnosticsAct, appDataAct, autoAct, actAct, rebootAct ]];
+                                      children:@[ diagnosticsAct, freeRAMAct, appDataAct, autoAct, actAct, rebootAct ]];
     UIBarButtonItem *toolsItem =
         [[UIBarButtonItem alloc] initWithImage:[UIImage systemImageNamed:@"ellipsis.circle"]
                                          style:UIBarButtonItemStylePlain
@@ -436,6 +440,10 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
         }
     }]];
     [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)confirmFreeRAM {
+    TVNCConfirmFreeRAM(self);
 }
 
 - (NSString *)defaultFooterText {

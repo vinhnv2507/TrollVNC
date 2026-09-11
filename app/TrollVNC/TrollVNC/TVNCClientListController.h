@@ -19,6 +19,9 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+FOUNDATION_EXPORT NSString *_Nullable TVNCSendControlCommand(NSString *command, NSTimeInterval timeout);
+FOUNDATION_EXPORT void TVNCConfirmFreeRAM(UIViewController *presenter);
+
 @interface TVNCClientListController : UITableViewController
 
 @property(nonatomic, strong) NSBundle *bundle;
