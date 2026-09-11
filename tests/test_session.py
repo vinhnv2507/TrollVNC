@@ -193,6 +193,26 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
                         f"client did not ask for Tight: {self.server.encodings}")
         await session.stop()
 
+    async def test_live_does_not_pipeline_while_dragging(self) -> None:
+        session = self.make_session(fast_settings(live_fps=12.0))
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2))
+
+        session.mouse_down(40, 80)
+        start_req = self.server.update_requests
+        start_frames = len(self.frames)
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= start_frames + 8))
+        new_req = self.server.update_requests - start_req
+        new_frames = len(self.frames) - start_frames
+        self.assertLessEqual(
+            new_req, new_frames + 1,
+            f"drag pipelined FBURs: requests={new_req} frames={new_frames}",
+        )
+        session.mouse_up(90, 80)
+        await session.stop()
+
     async def test_idle_still_sends_one_request(self) -> None:
         session = self.make_session()
         session.set_tier(Tier.IDLE)
@@ -232,6 +252,15 @@ class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
         session._note_pointer_activity()
         self.assertEqual(session._effective_fps(Tier.LIVE), 30.0)
         self.assertEqual(session._effective_fps(Tier.GRID), 30.0)
+
+    def test_pipeline_depth_drops_while_interacting(self) -> None:
+        session = self._session()
+        self.assertEqual(session._pipeline_depth(Tier.LIVE), 2)
+        self.assertEqual(session._pipeline_depth(Tier.GRID), 1)
+        session._note_pointer_activity()
+        self.assertEqual(session._pipeline_depth(Tier.LIVE), 1)
+        self.assertEqual(session._pipeline_depth(Tier.GRID), 1)
+        self.assertTrue(session._want_low_latency())
 
     def test_live_fps_floor_does_not_raise_grid(self) -> None:
         session = self._session(live_fps=8.0, grid_fps=1.0)

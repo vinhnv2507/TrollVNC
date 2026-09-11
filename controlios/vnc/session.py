@@ -41,13 +41,14 @@ MEDIA_KEYSYMS = {
 # iOS chia độ sáng thành 16 nấc, nên bấy nhiêu lần là chạm đáy hoặc chạm đỉnh.
 BRIGHTNESS_STEPS = 16
 
-# Farm từng để live_fps=12. LIVE luôn sàn 30fps; khi đang kéo/chạm thì đánh
-# thức pacer để slider captcha không phải chờ hết chu kỳ chậm của GRID.
+# Farm từng để live_fps=12. LIVE luôn sàn 30fps khi đang xem. Lúc kéo captcha
+# thì không sleep theo fps và không pipeline — ảnh phải tươi trong 1 RTT.
 LIVE_MIN_FPS = 30.0
 INTERACT_BOOST_FPS = 30.0
 INTERACT_HOLD_SEC = 0.8
-# Hai FramebufferUpdateRequest chồng nhau khi LIVE: giấu một RTT (~180ms trên
-# WiFi farm) thay vì request-then-wait (trần ~5fps). GRID/IDLE giữ 1 request.
+# Hai FBUR chồng khi LIVE đang *xem* (giấu RTT, ~11fps trên WiFi 180ms).
+# Lúc pointer đang giữ / vừa thao tác: depth=1. Pipeline=2 biến thành ~360ms
+# ảnh cũ nên thanh captcha Shopee kéo không kịp tay.
 LIVE_PIPELINE = 2
 
 
@@ -290,6 +291,19 @@ class VncSession:
         if time.monotonic() < self._interact_until:
             fps = max(fps, INTERACT_BOOST_FPS)
         return fps
+
+    def _want_low_latency(self) -> bool:
+        """Kéo/chạm: một RTT glass-to-glass, không xếp thêm khung cũ."""
+        if time.monotonic() < self._interact_until:
+            return True
+        client = self._client
+        mouse = getattr(client, "mouse", None) if client is not None else None
+        return bool(mouse is not None and mouse.buttons)
+
+    def _pipeline_depth(self, tier: Tier) -> int:
+        if tier is Tier.LIVE and not self._want_low_latency():
+            return LIVE_PIPELINE
+        return 1
 
     async def _await_pace_gap(self, remaining: float) -> None:
         if remaining <= 0:
@@ -603,7 +617,7 @@ class VncSession:
             first = False
             self._promote.clear()
             started = loop.time()
-            depth = LIVE_PIPELINE if tier is Tier.LIVE else 1
+            depth = self._pipeline_depth(tier)
             before = self.frame_count
             while self._inflight < depth:
                 incremental = not self._force_full
@@ -616,17 +630,11 @@ class VncSession:
             if self._promote.is_set():
                 continue
             fps = self._effective_fps(self.tier)
-            # Nhịp theo thời gian thực: chỉ ngủ phần còn thiếu để chạm fps mục
-            # tiêu, không cộng cả chu kỳ lên trên thời gian chờ frame. Nhờ vậy
-            # đường nhanh (USB) chạy sát fps thay vì bị hãm còn phân nửa.
-            # Khi đang kéo thì giữ đúng 30fps; khi đang ngủ nhịp chậm (12fps)
-            # thì đánh thức ngay nếu user bắt đầu kéo, không chờ hết 83ms.
+            # Nhịp xem: chỉ ngủ phần còn thiếu để chạm fps. Đang kéo thì request
+            # ngay khi khung về (trần = RTT), không sleep 30fps / asyncio.sleep.
             remaining = (1.0 / max(fps, 0.05)) - (loop.time() - started)
-            if remaining > 0:
-                if time.monotonic() < self._interact_until:
-                    await asyncio.sleep(remaining)
-                else:
-                    await self._await_pace_gap(remaining)
+            if remaining > 0 and not self._want_low_latency():
+                await self._await_pace_gap(remaining)
 
     def _write_fb_request(self, client: asyncvnc.Client, incremental: bool) -> None:
         """Gửi FramebufferUpdateRequest, không phụ thuộc video.data như refresh()."""

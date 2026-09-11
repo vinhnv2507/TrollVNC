@@ -2,6 +2,22 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## PC 0.2.15: lúc kéo captcha thì 1 request, không xếp khung cũ
+0.2.14 xin Tight JPEG + tạm dừng lưới (giữ nguyên) nhưng **pipeline 2 khung
+LIVE lúc đang kéo** làm ảnh trễ thêm ~1 RTT. Ping farm ~180ms → user nhìn
+thanh captcha cũ ~360ms, kéo Shopee rất khó / không kéo được.
+
+PC 0.2.15 (không cần cài lại iOS 4.11):
+
+- Tight JPEG + luôn tạm dừng lưới khi mở máy: như 0.2.14.
+- LIVE khi **đang xem**: vẫn 2 FBUR chồng, sàn 30fps, giấu RTT.
+- LIVE khi **đang kéo/chạm**: chỉ 1 FBUR, request ngay khi khung về. Ảnh tươi
+  trong ~1 RTT (~180ms WiFi), không xếp thêm khung cũ. Trần fps lúc kéo = 1/RTT
+  (khoảng 5 khung/giây trên farm) nhưng bám tay hơn 11 khung/giây ảnh cũ.
+
+Đóng bản 0.2.13/0.2.14 đang chạy rồi mở 0.2.15. Ping ~180ms vẫn là trần vật lý
+của LAN farm; không có cách nào kéo captcha nhanh hơn 1 RTT nếu không đổi mạng.
+
 ## PC 0.2.14: Tight JPEG + 30fps + tạm dừng lưới khi mở máy
 Giật khi kéo captcha Shopee trên farm WiFi **không phải vì hết RAM**. Đo trên
 máy nội bộ: ping ~180ms, client cũ chỉ xin ZLib-raw, LIVE 12fps kiểu gửi-rồi-chờ
@@ -12,11 +28,11 @@ PC 0.2.14 (không cần cài lại iOS 4.11):
 - Xin Tight JPEG (encoding 7, QualityLevel 6). Khung Shopee đầy màu nhẹ hơn nhiều
   so với zlib-raw 32bpp. Daemon TrollVNC đã link turbojpeg sẵn.
 - LIVE luôn sàn 30fps và gửi **2 FramebufferUpdateRequest chồng nhau** để giấu
-  một RTT (~180ms) thay vì request-then-wait.
+  một RTT (~180ms) thay vì request-then-wait. (0.2.15 tắt pipeline này lúc kéo.)
 - Khi mở/điều khiển 1 máy, **luôn tạm dừng stream lưới** — không phụ thuộc
   checkbox cũ, vì bản lưu trước đó thường đang TẮT nên farm vẫn tranh băng thông.
 
-Đóng bản 0.2.13 đang chạy rồi mở 0.2.14. WiFi farm đông máy vẫn là trần vật lý;
+Đóng bản 0.2.13 đang chạy rồi mở bản mới. WiFi farm đông máy vẫn là trần vật lý;
 tắt lưới khi mở máy là đòn bẩy lớn nhất phía PC.
 
 ## Trễ ~1s trên farm đông máy? → lưới phải dừng khi đang điều khiển
