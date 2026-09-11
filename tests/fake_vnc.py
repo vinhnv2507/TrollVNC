@@ -30,6 +30,10 @@ class FakeVncServer:
     encodings: List[List[int]] = field(default_factory=list)
     update_requests: int = 0
     connections: int = 0
+    # 0 = reply to every FBUR immediately (legacy tests). 1 mimics TrollVNC
+    # Q=1: extra FBURs that arrive while an encode is busy are dropped.
+    max_inflight: int = 0
+    encode_delay: float = 0.0
 
     _server: asyncio.AbstractServer | None = None
     _writers: set = field(default_factory=set)
@@ -61,6 +65,8 @@ class FakeVncServer:
         self._writers.add(writer)
         compressor = zlib.compressobj()
         frame_index = 0
+        encoding = 0
+        encode_tasks: set[asyncio.Task] = set()
         try:
             writer.write(b"RFB 003.008\n")
             await writer.drain()
@@ -95,9 +101,31 @@ class FakeVncServer:
                 elif kind == 3:                    # FramebufferUpdateRequest
                     await reader.readexactly(9)
                     self.update_requests += 1
+                    if self.max_inflight and encoding >= self.max_inflight:
+                        # Drop extra encode like TrollVNC gMaxInflightUpdates=1.
+                        continue
+                    encoding += 1
                     frame_index += 1
-                    writer.write(self._frame(compressor, frame_index))
-                    await writer.drain()
+                    payload = self._frame(compressor, frame_index)
+                    if self.max_inflight:
+                        async def _send(data: bytes = payload) -> None:
+                            nonlocal encoding
+                            try:
+                                if self.encode_delay:
+                                    await asyncio.sleep(self.encode_delay)
+                                writer.write(data)
+                                await writer.drain()
+                            finally:
+                                encoding -= 1
+                        task = asyncio.create_task(_send())
+                        encode_tasks.add(task)
+                        task.add_done_callback(encode_tasks.discard)
+                    else:
+                        try:
+                            writer.write(payload)
+                            await writer.drain()
+                        finally:
+                            encoding -= 1
                 elif kind == 4:                    # KeyEvent
                     payload = await reader.readexactly(7)
                     down, _, keysym = struct.unpack(">BHI", payload)

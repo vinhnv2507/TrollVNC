@@ -213,6 +213,31 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         session.mouse_up(90, 80)
         await session.stop()
 
+    async def test_live_keeps_frames_when_drag_starts_on_q1_device(self) -> None:
+        """0.2.15 froze video for stall_timeout after mouse_down on Q=1.
+
+        Extra pipelined FBURs are dropped while an encode is busy. After
+        depth drops to 1 the leftover inflight is a ghost; the pacer must
+        send a fresh FBUR instead of waiting 20s.
+        """
+        self.server.max_inflight = 1
+        self.server.encode_delay = 0.05
+        session = self.make_session(fast_settings(live_fps=12.0, stall_timeout=5.0))
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2))
+
+        session.mouse_down(40, 80)
+        start_frames = len(self.frames)
+        self.assertTrue(
+            await self.wait_for(lambda: len(self.frames) >= start_frames + 4, timeout=2.0),
+            f"video stalled after drag: got {len(self.frames) - start_frames} "
+            f"frames inflight={session._inflight}",
+        )
+        session.mouse_up(90, 80)
+        await session.stop()
+
     async def test_idle_still_sends_one_request(self) -> None:
         session = self.make_session()
         session.set_tier(Tier.IDLE)
@@ -261,6 +286,21 @@ class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(session._pipeline_depth(Tier.LIVE), 1)
         self.assertEqual(session._pipeline_depth(Tier.GRID), 1)
         self.assertTrue(session._want_low_latency())
+
+    def test_discard_dropped_inflight_on_drag(self) -> None:
+        session = self._session()
+        session._inflight = 2
+        session._discard_dropped_inflight(session._pipeline_depth(Tier.LIVE))
+        self.assertEqual(session._inflight, 2)
+
+        session._note_pointer_activity()
+        session._inflight = 2
+        session._discard_dropped_inflight(session._pipeline_depth(Tier.LIVE))
+        self.assertEqual(session._inflight, 0)
+
+        session._inflight = 1
+        session._discard_dropped_inflight(session._pipeline_depth(Tier.LIVE))
+        self.assertEqual(session._inflight, 0)
 
     def test_live_fps_floor_does_not_raise_grid(self) -> None:
         session = self._session(live_fps=8.0, grid_fps=1.0)

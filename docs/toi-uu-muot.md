@@ -2,6 +2,22 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## PC 0.2.16: hết đóng băng hình khi kéo (lỗi 0.2.15)
+
+0.2.15 tắt pipeline lúc kéo captcha nhưng **chờ khung** của request pipeline
+cũ. Máy Q=1 (ưu tiên độ trễ thấp) nuốt encode thừa nên client ngồi chờ tới
+stall_timeout (~20s) mới có 1 khung; iOS vẫn nhận vuốt vì socket pointer
+còn sống.
+
+PC 0.2.16 (không cần cài lại iOS 4.11):
+
+- Không chờ khung nếu không còn request thật. Quên FBUR ma khi chuyển sang
+  kéo/chạm, rồi xin khung mới ngay.
+- LIVE lúc **đang xem**: vẫn 2 FBUR chồng, Tight JPEG, sàn 30fps.
+- LIVE lúc **đang kéo**: vẫn 1 FBUR, request ngay khi khung về.
+
+Đóng 0.2.15 đang chạy rồi mở 0.2.16. Ping farm ~180ms vẫn là trần vật lý.
+
 ## PC 0.2.15: lúc kéo captcha thì 1 request, không xếp khung cũ
 0.2.14 xin Tight JPEG + tạm dừng lưới (giữ nguyên) nhưng **pipeline 2 khung
 LIVE lúc đang kéo** làm ảnh trễ thêm ~1 RTT. Ping farm ~180ms → user nhìn

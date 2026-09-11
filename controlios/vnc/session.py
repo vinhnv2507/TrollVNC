@@ -50,6 +50,8 @@ INTERACT_HOLD_SEC = 0.8
 # Lúc pointer đang giữ / vừa thao tác: depth=1. Pipeline=2 biến thành ~360ms
 # ảnh cũ nên thanh captcha Shopee kéo không kịp tay.
 LIVE_PIPELINE = 2
+# Request ma (Q=1 nuốt encode thừa) hết hạn nhanh, không chờ stall_timeout 20s.
+PIPELINE_DRAIN_SEC = 0.4
 
 
 class Tier(enum.IntEnum):
@@ -304,6 +306,20 @@ class VncSession:
         if tier is Tier.LIVE and not self._want_low_latency():
             return LIVE_PIPELINE
         return 1
+
+    def _discard_dropped_inflight(self, depth: int) -> None:
+        """Forget FBURs TrollVNC Q=1 likely dropped so we never wait forever.
+
+        Pipeline=2 hides RTT while watching. The device (default Q=1) skips a
+        capture when gInflight >= gMaxInflightUpdates, so the extra FBUR can
+        be consumed without a VIDEO reply. _inflight then stays > 0 as a ghost.
+        0.2.15 dropped depth to 1 on drag and waited stall_timeout (20s) for
+        that ghost: PC video froze while pointer packets still reached iOS.
+        """
+        if self._inflight > depth:
+            self._inflight = depth
+        if self._want_low_latency() and self._inflight >= depth:
+            self._inflight = 0
 
     async def _await_pace_gap(self, remaining: float) -> None:
         if remaining <= 0:
@@ -618,15 +634,35 @@ class VncSession:
             self._promote.clear()
             started = loop.time()
             depth = self._pipeline_depth(tier)
+            self._discard_dropped_inflight(depth)
             before = self.frame_count
+            sent = 0
             while self._inflight < depth:
                 incremental = not self._force_full
                 if not incremental:
                     client.video.data = None
                 self._force_full = False
                 self._write_fb_request(client, incremental)
+                sent += 1
             await client.drain()
-            await self._wait_frame(before, interruptible=True)
+            # Never block in _wait_frame when nothing is outstanding: a ghost
+            # inflight of 0 would sit until stall_timeout with a frozen picture.
+            if self._inflight <= 0:
+                continue
+            wait_timeout = (
+                PIPELINE_DRAIN_SEC
+                if sent == 0 and self._want_low_latency()
+                else None
+            )
+            try:
+                await self._wait_frame(
+                    before, interruptible=True, timeout=wait_timeout
+                )
+            except TimeoutError:
+                if sent == 0:
+                    self._inflight = 0
+                    continue
+                raise
             if self._promote.is_set():
                 continue
             fps = self._effective_fps(self.tier)
@@ -650,14 +686,18 @@ class VncSession:
         )
         self._inflight += 1
 
-    async def _wait_frame(self, before: int, interruptible: bool = False) -> None:
+    async def _wait_frame(
+        self,
+        before: int,
+        interruptible: bool = False,
+        timeout: Optional[float] = None,
+    ) -> None:
         if self.frame_count > before:
             return
+        limit = self.settings.stall_timeout if timeout is None else timeout
         if not interruptible:
             try:
-                await asyncio.wait_for(
-                    self._wait_until_frame(before), timeout=self.settings.stall_timeout
-                )
+                await asyncio.wait_for(self._wait_until_frame(before), timeout=limit)
             except asyncio.TimeoutError:
                 raise TimeoutError("no framebuffer update")
             return
@@ -670,7 +710,7 @@ class VncSession:
         try:
             done, _pending = await asyncio.wait(
                 {frame_wait, promote_wait},
-                timeout=self.settings.stall_timeout,
+                timeout=limit,
                 return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
