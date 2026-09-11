@@ -54,6 +54,7 @@ class DevicePool:
         self._thread: Optional[threading.Thread] = None
         self._ready = threading.Event()
         self._sessions: Dict[str, VncSession] = {}
+        self._specs: Dict[str, DeviceSpec] = {}
         self._sem: Optional[asyncio.Semaphore] = None
         self._recordings: Dict[str, asyncio.Event] = {}
         self._script_cancel: Optional[asyncio.Event] = None
@@ -114,6 +115,7 @@ class DevicePool:
 
     def _set_devices(self, specs: Sequence[DeviceSpec]) -> None:
         wanted = {s.key: s for s in specs if s.enabled}
+        self._specs = dict(wanted)
         for key in list(self._sessions):
             if key not in wanted:
                 session = self._sessions.pop(key)
@@ -446,11 +448,16 @@ class DevicePool:
 
     # ------------------------------------------------------- kênh điều khiển
 
+    def _spec_for(self, key: str):
+        session = self._sessions.get(key)
+        if session is not None:
+            return session.spec
+        return self._specs.get(key)
+
     def _channel(self, key: str):
         from ..control_channel import ControlChannel
 
-        session = self._sessions.get(key)
-        spec = session.spec if session else None
+        spec = self._spec_for(key)
         host = spec.host if spec else key.partition(":")[0]
         # Cổng control riêng của máy (chế độ USB) nếu có, không thì cổng chung.
         port = (spec.control_port if spec and spec.control_port

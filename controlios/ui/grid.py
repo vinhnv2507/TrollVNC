@@ -62,6 +62,7 @@ class DeviceGrid(QScrollArea):
         self._laying_out = False
         self._selection_anchor = QPoint()
         self._selection_base: List[str] = []
+        self._selection_before_click: List[str] = []
         self._selection_drag_modifiers = Qt.NoModifier
         self._selection_drag_active = False
         self._selection_rubber = QRubberBand(QRubberBand.Rectangle, self.viewport())
@@ -131,7 +132,7 @@ class DeviceGrid(QScrollArea):
             tile = DeviceTile(spec, self.tile_width, self._body)
             tile.set_monitored(spec.key in self._monitored_keys)
             tile.clicked.connect(self._on_tile_clicked)
-            tile.activated.connect(self.device_activated)
+            tile.activated.connect(self._on_tile_activated)
             tile.set_control_enabled(self.control_enabled)
             tile.pressed_at.connect(self._on_tile_pressed)
             tile.moved_at.connect(self.tile_moved)
@@ -259,6 +260,7 @@ class DeviceGrid(QScrollArea):
         self._selection_base = []
 
     def _on_tile_clicked(self, key: str, modifiers) -> None:
+        self._selection_before_click = list(self.selection)
         selection = list(self.selection)
         if modifiers & Qt.ControlModifier:
             if key in selection:
@@ -276,6 +278,27 @@ class DeviceGrid(QScrollArea):
             selection = [key]
 
         self._apply_selection(selection)
+
+    def _on_tile_activated(self, key: str) -> None:
+        """Mở khung lớn không được xóa nhóm máy đang chọn trên lưới.
+
+        Cú double-click luôn gửi một click thường trước: không Ctrl/Shift thì
+        click đó gom selection về đúng một ô, nên Khởi động lại app chỉ trúng
+        máy đang mở to. Khôi phục nhóm chọn nếu máy vừa mở vốn nằm trong nhóm.
+        """
+
+        previous = list(self._selection_before_click or self.selection)
+        current = list(self.selection)
+        if len(current) > 1 and key in current:
+            wanted = current
+        elif len(previous) > 1 and key in previous:
+            wanted = previous
+        elif current:
+            wanted = current if key in current else [key]
+        else:
+            wanted = [key]
+        self._apply_selection(wanted)
+        self.device_activated.emit(key)
 
     def select_all(self) -> None:
         self._apply_selection(list(self.order))

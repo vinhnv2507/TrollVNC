@@ -276,6 +276,40 @@ class WindowIntegrationTest(unittest.TestCase):
         self.assertEqual(len(sent[0][0]), 2)
         self.assertEqual(sent[0][1:], ("com.brd.earnapp", 3.0, 5.0))
 
+    def test_restart_after_opening_a_selected_tile_hits_every_selected_device(self) -> None:
+        """Double-click mở to không được làm Khởi động lại app chỉ trúng máy đang xem."""
+
+        sent = []
+        self.window.pool.restart_app = (
+            lambda keys, bundle, min_delay, max_delay, **kw:
+            sent.append((list(keys), bundle, min_delay, max_delay)))
+        self.window.grid.select_all()
+        keys = list(self.window.grid.selection)
+        self.assertEqual(len(keys), 2)
+        opened = keys[0]
+        # Qt gửi click thường rồi mới activated — đúng trình tự double-click.
+        self.window.grid._on_tile_clicked(opened, Qt.NoModifier)
+        self.window.grid._on_tile_activated(opened)
+        self.assertEqual(self.window.detail.key, opened)
+        self.assertEqual(self.window.grid.selection, keys)
+
+        self.window._restart_app("com.shopee.vn")
+
+        self.assertEqual(sorted(sent[0][0]), sorted(keys))
+        self.assertEqual(sent[0][1:], ("com.shopee.vn", 3.0, 5.0))
+
+    def test_restart_after_select_all_with_detail_open_hits_every_device(self) -> None:
+        sent = []
+        self.window.pool.restart_app = (
+            lambda keys, bundle, min_delay, max_delay, **kw:
+            sent.append(list(keys)))
+        first = self.window.grid.order[0]
+        self.window._focus_device(first)
+        self.window.grid.select_all()
+        self.window._restart_app("com.shopee.vn")
+        self.assertEqual(sorted(sent[0]), sorted(self.window.grid.order))
+        self.assertEqual(self.window.detail.key, first)
+
     def test_launch_without_selection_is_refused(self) -> None:
         sent = []
         self.window.pool.launch_app = lambda *a, **k: sent.append(a)

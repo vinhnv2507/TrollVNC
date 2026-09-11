@@ -2665,7 +2665,7 @@ class MainWindow(QMainWindow):
         menu.exec(global_pos)
 
     def _open_apps_for_selection(self, targets: List[str]) -> None:
-        self.grid.selection = list(targets)
+        self.grid._apply_selection(list(targets))
         self.apps_dock.show()
         self.apps_dock.raise_()
         self._reload_apps()
@@ -3041,7 +3041,12 @@ class MainWindow(QMainWindow):
     # ------------------------------------------- chụp ảnh / ghi hình / kịch bản
 
     def action_targets(self) -> List[str]:
-        """Máy để chạy hàng loạt: đang chọn, không thì máy đang mở full."""
+        """Máy để chạy hàng loạt: nhóm đang chọn trên lưới.
+
+        Máy mở to chỉ là fallback khi lưới chưa chọn gì. Mở khung lớn không
+        được thay thế nhóm chọn — nếu không, Khởi động lại app chỉ trúng
+        đúng máy đang xem.
+        """
 
         if self.grid.selection:
             targets = list(self.grid.selection)
@@ -3666,10 +3671,15 @@ class MainWindow(QMainWindow):
         self.apps_panel.set_busy(
             f"Đang khởi động lại {bundle_id} tuần tự trên {len(targets)} máy "
             "(mỗi máy chờ ngẫu nhiên 3–5 giây)…")
+        dialog = BulkResultDialog(f"Khởi động lại {bundle_id}", len(targets), self)
+        dialog.show()
         self.pool.restart_app(
             targets, bundle_id, min_delay=3.0, max_delay=5.0,
-            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+            on_event=dialog.on_event,
+            on_done=lambda d, ok, fails: (
+                dialog.on_done(d, ok, fails),
+                self.bridge.bulk_done.emit(d, ok, fails),
+            ),
         )
 
     def _wipe_app(self, bundle_id: str) -> None:

@@ -160,7 +160,33 @@ class TileControlTest(unittest.TestCase):
 
         self.assertFalse(seen)
 
+    def test_activating_a_selected_tile_keeps_the_multi_selection(self) -> None:
+        """Double-click mở to không được xóa các máy đang chọn trên lưới."""
+
+        keys = [spec.key for spec in self.specs[:3]]
+        self.grid._apply_selection(keys)
+        first = keys[0]
+        self.grid._on_tile_clicked(first, Qt.NoModifier)
+        self.assertEqual(self.grid.selection, [first],
+                         "click thường vẫn gom về một ô")
+
+        opened = []
+        self.grid.device_activated.connect(opened.append)
+        self.grid._on_tile_activated(first)
+
+        self.assertEqual(opened, [first])
+        self.assertEqual(self.grid.selection, keys)
+
+    def test_activating_an_unselected_tile_replaces_the_selection(self) -> None:
+        keys = [spec.key for spec in self.specs[:2]]
+        other = self.specs[2].key
+        self.grid._apply_selection(keys)
+        self.grid._on_tile_clicked(other, Qt.NoModifier)
+        self.grid._on_tile_activated(other)
+        self.assertEqual(self.grid.selection, [other])
+
     def test_double_click_still_opens_the_detail_pane(self) -> None:
+
         self.grid.set_control_enabled(True)
         opened = []
         self.grid.device_activated.connect(opened.append)
