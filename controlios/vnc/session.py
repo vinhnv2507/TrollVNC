@@ -40,6 +40,11 @@ MEDIA_KEYSYMS = {
 # iOS chia độ sáng thành 16 nấc, nên bấy nhiêu lần là chạm đáy hoặc chạm đỉnh.
 BRIGHTNESS_STEPS = 16
 
+# Farm giữ live_fps thấp (12). Khi đang kéo/chạm, tạm nâng tối thiểu 30fps
+# và đánh thức pacer để slider captcha không phải chờ hết chu kỳ 83ms.
+INTERACT_BOOST_FPS = 30.0
+INTERACT_HOLD_SEC = 0.8
+
 
 class Tier(enum.IntEnum):
     OFF = 0     # disconnected on purpose
@@ -151,6 +156,8 @@ class VncSession:
         # không xếp hàng gói cũ trước thao tác hiện tại.
         self._mouse_move_handle: Optional[asyncio.Handle] = None
         self._mouse_move_pending: Optional[tuple[int, int]] = None
+        self._interact = asyncio.Event()
+        self._interact_until = 0.0
 
     # ---------------------------------------------------------------- control
 
@@ -264,6 +271,27 @@ class VncSession:
         mouse.move(int(x), int(y))
         mouse.click(button)
 
+    def _note_pointer_activity(self) -> None:
+        """Tạm tăng fps và đánh thức pacer khi người dùng đang kéo."""
+        self._interact_until = time.monotonic() + INTERACT_HOLD_SEC
+        self._interact.set()
+
+    def _effective_fps(self, tier: Tier) -> float:
+        fps = ((self.live_fps_override or self.settings.live_fps)
+               if tier is Tier.LIVE else self.settings.grid_fps)
+        if time.monotonic() < self._interact_until:
+            fps = max(fps, INTERACT_BOOST_FPS)
+        return fps
+
+    async def _await_pace_gap(self, remaining: float) -> None:
+        if remaining <= 0:
+            return
+        self._interact.clear()
+        try:
+            await asyncio.wait_for(self._interact.wait(), timeout=remaining)
+        except asyncio.TimeoutError:
+            pass
+
     def mouse_down(self, x: int, y: int, button: int = 0) -> None:
         if not self._client:
             return
@@ -272,11 +300,14 @@ class VncSession:
         mouse.x, mouse.y = int(x), int(y)
         mouse.buttons |= 1 << button
         mouse._write()
+        self._note_pointer_activity()
 
     def mouse_move(self, x: int, y: int) -> None:
         if not self._client:
             return
         self._mouse_move_pending = (int(x), int(y))
+        if self._client.mouse.buttons:
+            self._note_pointer_activity()
         if self._mouse_move_handle is None:
             self._mouse_move_handle = asyncio.get_running_loop().call_soon(
                 self._flush_mouse_move)
@@ -297,6 +328,7 @@ class VncSession:
         mouse.x, mouse.y = int(x), int(y)
         mouse.buttons &= ~(1 << button)
         mouse._write()
+        self._note_pointer_activity()
 
     def _cancel_pending_mouse_move(self) -> None:
         if self._mouse_move_handle is not None:
@@ -559,14 +591,18 @@ class VncSession:
             incremental = client.video.data is not None and not self._force_full
             self._force_full = False
             await self._request(client, incremental=incremental, interruptible=True)
-            fps = ((self.live_fps_override or self.settings.live_fps)
-                   if tier is Tier.LIVE else self.settings.grid_fps)
+            fps = self._effective_fps(tier)
             # Nhịp theo thời gian thực: chỉ ngủ phần còn thiếu để chạm fps mục
             # tiêu, không cộng cả chu kỳ lên trên thời gian chờ frame. Nhờ vậy
             # đường nhanh (USB) chạy sát fps thay vì bị hãm còn phân nửa.
+            # Khi đang kéo thì giữ đúng 30fps; khi đang ngủ nhịp chậm (12fps)
+            # thì đánh thức ngay nếu user bắt đầu kéo, không chờ hết 83ms.
             remaining = (1.0 / max(fps, 0.05)) - (loop.time() - started)
             if remaining > 0:
-                await asyncio.sleep(remaining)
+                if time.monotonic() < self._interact_until:
+                    await asyncio.sleep(remaining)
+                else:
+                    await self._await_pace_gap(remaining)
 
     async def _request(self, client: asyncvnc.Client, incremental: bool,
                        interruptible: bool = False) -> None:

@@ -163,6 +163,56 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
 
         await session.stop()
 
+    async def test_mouse_down_boosts_low_live_fps(self) -> None:
+        settings = fast_settings(live_fps=12.0)
+        session = self.make_session(settings)
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2))
+
+        self.assertAlmostEqual(session._effective_fps(Tier.LIVE), 12.0)
+        session.mouse_move(10, 10)
+        self.assertAlmostEqual(session._effective_fps(Tier.LIVE), 12.0,
+                               msg="hover must not boost fps")
+        session.mouse_down(10, 10)
+        self.assertGreaterEqual(session._effective_fps(Tier.LIVE), 30.0)
+        self.assertTrue(session._interact.is_set())
+        await session.stop()
+
+
+class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
+    def _session(self, **kw) -> VncSession:
+        return VncSession(
+            DeviceSpec(host="127.0.0.1", port=1),
+            fast_settings(**kw),
+            asyncio.Semaphore(1),
+            on_frame=lambda f: None,
+            on_status=lambda *a: None,
+        )
+
+    def test_effective_fps_boosts_during_pointer_activity(self) -> None:
+        session = self._session(live_fps=12.0, grid_fps=5.0)
+        self.assertEqual(session._effective_fps(Tier.LIVE), 12.0)
+        self.assertEqual(session._effective_fps(Tier.GRID), 5.0)
+        session._note_pointer_activity()
+        self.assertEqual(session._effective_fps(Tier.LIVE), 30.0)
+        self.assertEqual(session._effective_fps(Tier.GRID), 30.0)
+
+    def test_boost_does_not_lower_high_live_fps(self) -> None:
+        session = self._session(live_fps=40.0)
+        session._note_pointer_activity()
+        self.assertEqual(session._effective_fps(Tier.LIVE), 40.0)
+
+    async def test_pacer_sleep_wakes_on_pointer_activity(self) -> None:
+        session = self._session(live_fps=12.0)
+        started = time.monotonic()
+        task = asyncio.create_task(session._await_pace_gap(1.0))
+        await asyncio.sleep(0.05)
+        session._note_pointer_activity()
+        await asyncio.wait_for(task, timeout=0.5)
+        self.assertLess(time.monotonic() - started, 0.4)
+
 
 class PoolTest(unittest.TestCase):
     """The pool runs its own loop in a thread — exercise it from sync code."""
