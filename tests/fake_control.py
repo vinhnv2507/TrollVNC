@@ -272,6 +272,39 @@ class FakeControlServer:
             self.terminated.append(bundle)
             return b"OK\n"
 
+        if cmd in ("freeram", "killallapps"):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            killed = 0
+            skipped = 0
+            for bundle in list(self.running):
+                lower = bundle.lower()
+                keep = (
+                    "controlios" in lower
+                    or "trollvnc" in lower
+                    or "trollstore" in lower
+                    or (
+                        bundle.startswith("com.apple.")
+                        and bundle not in {
+                            "com.apple.mobilesafari",
+                            "com.apple.SafariViewService",
+                            "com.apple.MobileSMS",
+                            "com.apple.mobilemail",
+                            "com.apple.Music",
+                        }
+                    )
+                )
+                if keep:
+                    skipped += 1
+                    continue
+                self.running.discard(bundle)
+                self.terminated.append(bundle)
+                killed += 1
+            return (
+                f"OK killed={killed} skipped={skipped} "
+                f"mem_before=209715200 mem_after=367001600\n"
+            ).encode()
+
         if cmd.startswith("wipeapp "):
             if self.unpatched:
                 return b"ERR Unknown\n"

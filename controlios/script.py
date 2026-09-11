@@ -22,6 +22,9 @@ Ngoài ra còn các lệnh cử chỉ iOS dựng sẵn trong :mod:`controlios.ge
 thuỷ ở trên ngay lúc phân tích cú pháp.
 
 Dòng trống và dòng bắt đầu bằng # bị bỏ qua.
+
+Lệnh ``freeram`` (alias ``killallapps``) đi qua kênh điều khiển, đóng hết app
+để giải phóng RAM — khác ``closeall`` vốn chỉ hất thẻ trong switcher.
 """
 
 from __future__ import annotations
@@ -149,6 +152,11 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
             raise ScriptError(line_no, "cú pháp: controlcenter")
         return Step(op, line_no=line_no), index
 
+    if op in ("freeram", "killallapps"):
+        if args:
+            raise ScriptError(line_no, "cú pháp: freeram")
+        return Step("freeram", line_no=line_no), index
+
     if op == "button":
         if not args or args[0].lower() not in BUTTON_NAMES:
             raise ScriptError(
@@ -263,7 +271,7 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
 
     known = ", ".join(["tap", "button", "swipe", "controlcenter", "text", "key", "wait", "shot",
                        "repeat", "retry", "brightness", "volume", "launchapp",
-                       "killapp", "restartapp", "openurl", "openurlin",
+                       "killapp", "freeram", "killallapps", "restartapp", "openurl", "openurlin",
                        "clipboard", "savephoto", "wipeapp", "snapshot",
                        "restore"]
                       + sorted(gestures))
@@ -405,6 +413,8 @@ def describe(steps: Sequence[Step]) -> List[str]:
                 )
             elif step.op == "controlcenter":
                 out.append(f"{indent}mở Trung tâm điều khiển")
+            elif step.op == "freeram":
+                out.append(f"{indent}giải phóng RAM (đóng hết app)")
             elif step.op == "launchapp":
                 out.append(f"{indent}mở app {step.args[0]} (qua kênh điều khiển)")
             elif step.op == "killapp":
@@ -507,6 +517,13 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 if control is None:
                     raise ConnectionError("lệnh controlcenter cần kênh điều khiển ControlIOS")
                 await control.control_center()
+            elif step.op == "freeram":
+                if control is None:
+                    raise ConnectionError(
+                        "lệnh freeram cần kênh điều khiển; đặt control_token "
+                        "trong config/devices.json và dùng ControlIOS"
+                    )
+                await control.free_ram()
             elif step.op in ("launchapp", "killapp"):
                 if control is None:
                     raise ConnectionError(

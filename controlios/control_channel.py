@@ -362,6 +362,38 @@ class ControlChannel:
             return False
         raise ControlError(f"Không đóng được {bundle_id}: {head}")
 
+    async def free_ram(self) -> str:
+        """Đóng hết app đang chạy để giải phóng RAM.
+
+        Giữ ControlIOS, TrollStore và tiến trình hệ thống. EarnApp/Golike
+        cũng bị đóng; chỉ gọi khi người dùng chọn tường minh.
+        """
+
+        text = await self.command("freeram", read_timeout=30)
+        head = text.strip()
+        if not head.startswith("OK"):
+            raise ControlError(f"Không giải phóng được RAM: {head}")
+        values: dict[str, str] = {}
+        for part in head.split():
+            if "=" in part:
+                key, _, value = part.partition("=")
+                values[key] = value
+        killed = values.get("killed", "?")
+        skipped = values.get("skipped", "?")
+
+        def _mb(raw: str) -> float:
+            try:
+                return int(raw) / (1024 * 1024)
+            except (TypeError, ValueError):
+                return 0.0
+
+        before = _mb(values.get("mem_before", "0"))
+        after = _mb(values.get("mem_after", "0"))
+        return (
+            f"đã đóng {killed} app, giữ {skipped} tiến trình; "
+            f"RAM {before:.0f}→{after:.0f} MB"
+        )
+
     async def wipe_app(self, bundle_id: str) -> None:
         """Xoá dữ liệu app (Documents/Library/tmp/SystemData) như vừa cài lại.
 

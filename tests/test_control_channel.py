@@ -233,6 +233,38 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         # Lần hai: app đã tắt rồi -> False, không phải lỗi.
         self.assertFalse(await self.channel.terminate("com.golike.app"))
 
+    async def test_free_ram_kills_user_apps_keeps_system(self) -> None:
+        self.server.running = {
+            "com.golike.app",
+            "com.facebook.Facebook",
+            "com.opa334.TrollStore",
+            "com.apple.Preferences",
+        }
+        text = await self.channel.free_ram()
+        self.assertIn("đã đóng 2 app", text)
+        self.assertIn("giữ 2 tiến trình", text)
+        self.assertIn("RAM 200→350 MB", text)
+        self.assertEqual(
+            set(self.server.terminated),
+            {"com.golike.app", "com.facebook.Facebook"},
+        )
+        self.assertIn("com.opa334.TrollStore", self.server.running)
+        self.assertIn("com.apple.Preferences", self.server.running)
+
+    async def test_killallapps_alias_matches_freeram(self) -> None:
+        self.server.running = {"com.golike.app", "com.opa334.TrollStore"}
+        text = await self.channel.command("killallapps", read_timeout=30)
+        self.assertTrue(text.strip().startswith("OK"))
+        self.assertIn("killed=1", text)
+        self.assertIn("skipped=1", text)
+        self.assertEqual(self.server.terminated, ["com.golike.app"])
+        self.assertIn("com.opa334.TrollStore", self.server.running)
+
+    async def test_free_ram_fails_when_unpatched(self) -> None:
+        self.server.unpatched = True
+        with self.assertRaises(NotPatchedError):
+            await self.channel.free_ram()
+
     async def test_wrong_token_is_reported_clearly(self) -> None:
         bad = ControlChannel("127.0.0.1", self.server.port, "SaiToken", timeout=3)
         with self.assertRaises(UnauthorizedError) as ctx:
@@ -401,6 +433,18 @@ class ScriptAppCommandTest(unittest.TestCase):
         self.assertEqual([s.op for s in steps], ["launchapp", "killapp"])
         self.assertEqual(steps[0].args, ("com.zing.zalo",))
 
+    def test_parses_freeram_and_killallapps_alias(self) -> None:
+        steps = script.parse("freeram\nkillallapps")
+        self.assertEqual([s.op for s in steps], ["freeram", "freeram"])
+        self.assertEqual(script.describe(steps), [
+            "giải phóng RAM (đóng hết app)",
+            "giải phóng RAM (đóng hết app)",
+        ])
+
+    def test_freeram_rejects_arguments(self) -> None:
+        with self.assertRaises(script.ScriptError):
+            script.parse("freeram 1")
+
     def test_rejects_display_name_and_points_at_openapp(self) -> None:
         with self.assertRaises(script.ScriptError) as ctx:
             script.parse("launchapp Zalo")
@@ -508,6 +552,23 @@ class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.server.launched, ["com.honeygain.app"])
         self.assertEqual(self.server.terminated, ["com.golike.app"])
+
+    async def test_runner_freeram_closes_user_apps(self) -> None:
+        self.server.running = {"com.golike.app", "com.opa334.TrollStore"}
+        steps = script.parse("freeram")
+        await script.run_on_session(
+            self._FakeSession(), steps, lambda k, m: None, control=self.channel
+        )
+        self.assertEqual(self.server.terminated, ["com.golike.app"])
+        self.assertIn("com.opa334.TrollStore", self.server.running)
+
+    async def test_runner_freeram_needs_channel(self) -> None:
+        steps = script.parse("freeram")
+        with self.assertRaises(ConnectionError) as ctx:
+            await script.run_on_session(
+                self._FakeSession(), steps, lambda k, m: None, control=None
+            )
+        self.assertIn("control_token", str(ctx.exception))
 
     async def test_runner_explains_when_channel_missing(self) -> None:
         steps = script.parse("launchapp com.honeygain.app")

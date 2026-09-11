@@ -555,6 +555,12 @@ class DevicePool:
 
         self._bulk_app_action(keys, f"Đóng {bundle_id}", action, on_event, on_done)
 
+    def free_ram(self, keys: Iterable[str], on_event=None, on_done=None) -> None:
+        async def action(channel):
+            return await channel.free_ram()
+
+        self._bulk_app_action(keys, "Giải phóng RAM", action, on_event, on_done)
+
     def restart_app(self, keys: Iterable[str], bundle_id: str,
                     min_delay: float = 3.0, max_delay: float = 5.0,
                     on_event=None, on_done=None) -> None:

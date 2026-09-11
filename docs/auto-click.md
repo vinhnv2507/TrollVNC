@@ -98,6 +98,7 @@ volumeUp(); volumeDown(); mute(); lockScreen();  // phím cứng
 ```js
 launchApp("com.zing.zalo");           // mở app theo bundle id
 killApp("com.zing.zalo");             // đóng app
+freeRAM();                           // đóng hết app, giải phóng RAM
 openURL("https://x.com");             // mở URL (app mặc định)
 openURLIn("com.zing.zalo", "zalo://"); // mở URL bằng app chỉ định
 toast("Xong!");                       // ghi vào NHẬT KÝ (xem trên PC), alert cũng vậy
@@ -163,7 +164,7 @@ Không cần chèn `log()`: daemon **tự ghi mỗi lệnh + kết quả** vào 
 16:40:03  findImage nut.png = 0.512,0.744
 ```
 Có với: `tap/tapRegion/doubleTap/two-threeFingerTap/longPress/swipe/home/key/
-typeText/sleep/getColor/matchColor/waitColor/findImage/launchApp/killApp/openURL`.
+typeText/sleep/getColor/matchColor/waitColor/findImage/launchApp/killApp/freeRAM/openURL`.
 Vòng lặp dày thì nhật ký giữ **250 dòng gần nhất**. Muốn tắt cho gọn: gọi
 `setTrace(false);` đầu kịch bản (bật lại `setTrace(true);`).
 

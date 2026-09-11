@@ -6,6 +6,7 @@ Thêm ba lệnh vào **control socket** đã có sẵn của TrollVNC:
 apps                      -> danh sách app đã cài (TSV: bundleId, tên, loại, phiên bản)
 launch <bundleId>         -> mở app
 terminate <bundleId>      -> đóng app
+freeram / killallapps     -> đóng hết app, giải phóng RAM
 ```
 
 Kèm khả năng mở cổng điều khiển ra LAN **có token**. Không có token thì cổng
@@ -346,6 +347,7 @@ Mỗi kết nối chỉ nhận **một lệnh** rồi đóng — đúng thiết 
 | `ERR Unavailable` khi gọi `apps` | `LSApplicationWorkspace` không nạp được trên iOS của bạn |
 | `ERR LaunchFailed` | Sai bundle id, hoặc cả hai đường mở app đều bị chặn |
 | `NOT_RUNNING` khi terminate | App vốn không chạy — không phải lỗi |
+| `ERR Unknown` khi `freeram` | Máy chưa cài ControlIOS ≥ 4.10 |
 
 Bản vá này **chưa được biên dịch thử**. Lỗi build lần đầu là chuyện bình
 thường; chép đoạn lỗi trong log GitHub Actions ra là sửa được.

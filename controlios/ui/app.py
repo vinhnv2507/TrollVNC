@@ -84,6 +84,7 @@ SCRIPT_COMMANDS = [
     ("savephoto {đường dẫn ảnh trên máy}", "nạp ảnh đã có trên máy vào Thư viện Ảnh"),
     ("launchapp {bundle id}", "mở app theo bundle id (kênh điều khiển)"),
     ("killapp {bundle id}", "đóng app theo bundle id"),
+    ("freeram", "đóng hết app đang chạy để giải phóng RAM (EarnApp/Golike cũng đóng)"),
     ("restartapp {bundle id} 2", "đóng, chờ 2s, mở lại"),
     ("openurl {url}", "mở URL bằng app mặc định"),
     ("openurlin {bundle id} {url}", "mở URL bằng đúng app chỉ định"),
@@ -100,7 +101,7 @@ SCRIPT_COMMANDS = [
     ("spotlight", "về home rồi vuốt xuống mở ô tìm kiếm"),
     ("openapp {tên app}", "mở app qua Spotlight theo TÊN hiển thị (đủ dấu)"),
     ("closeapp", "đóng app đang mở (vào switcher, hất thẻ)"),
-    ("closeall 5", "hất 5 thẻ liên tiếp trong switcher"),
+    ("closeall 5", "hất 5 thẻ liên tiếp trong switcher — không giải phóng RAM"),
     ("applibrary", "sang trang App Library"),
     ("button home", "bấm nút cứng: home · power · left <x y>"),
 ]
@@ -850,6 +851,7 @@ JS_SNIPPETS = [
     ("retry(3, function() {\n  return tapText(\"OK\");\n});", "thử lại tới khi thành công"),
     ("launchApp(\"com.zing.zalo\");", "mở app"),
     ("killApp(\"com.zing.zalo\");", "đóng app"),
+    ("freeRAM();", "đóng hết app, giải phóng RAM"),
     ("openURL(\"https://\");", "mở URL"),
     ("let r = httpGet(\"https://\");", "HTTP GET"),
     ("toast(\"noi dung\");", "thông báo trên máy"),
@@ -2056,6 +2058,15 @@ class MainWindow(QMainWindow):
         control_center_button.clicked.connect(self._open_control_center_selected)
         gesture_row.addWidget(control_center_button)
         self.device_gesture_buttons["controlcenter"] = control_center_button
+
+        ram_button = QPushButton("RAM")
+        ram_button.setToolTip(
+            "Đóng hết app đang chạy để giải phóng RAM (trừ ControlIOS/TrollStore/hệ thống). "
+            "EarnApp và Golike cũng bị đóng."
+        )
+        ram_button.clicked.connect(self._free_ram_selected)
+        gesture_row.addWidget(ram_button)
+        self.device_gesture_buttons["freeram"] = ram_button
 
         rotation_button = QToolButton()
         rotation_button.setText("↻ Khóa xoay")
@@ -3407,6 +3418,36 @@ class MainWindow(QMainWindow):
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
                   "lock": "Khoá máy"}
         self._run_quick_action(labels.get(gesture, gesture), gesture, False)
+
+    def _free_ram_selected(self) -> None:
+        targets = self._confirmed_action_targets("giải phóng RAM")
+        if targets is None:
+            return
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn/mở một máy.")
+            return
+        if self._needs_control_token(targets) and not self.registry.settings.control_token:
+            QMessageBox.warning(
+                self, "Thiếu control token",
+                "Máy WiFi cần control_token trong config/devices.json "
+                "(máy USB thì không cần).",
+            )
+            return
+        answer = QMessageBox.warning(
+            self, "Giải phóng RAM",
+            f"Đóng tất cả app đang chạy trên <b>{len(targets)} máy</b> trừ "
+            "ControlIOS, TrollStore và tiến trình hệ thống?<br><br>"
+            "<b>EarnApp và Golike cũng sẽ bị đóng</b> — chỉ bấm khi bạn muốn "
+            "nhường RAM cho remote. Không hoàn tác được.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if answer != QMessageBox.Yes:
+            return
+        dialog = BulkResultDialog("Giải phóng RAM", len(targets), self)
+        dialog.show()
+        self.pool.free_ram(targets, on_event=dialog.on_event, on_done=dialog.on_done)
+        self.statusBar().showMessage(
+            f"Đang giải phóng RAM trên {len(targets)} máy", 5000)
 
     def _open_control_center_selected(self) -> None:
         targets = self._confirmed_action_targets("mở Trung tâm điều khiển")

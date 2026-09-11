@@ -288,6 +288,9 @@ máy**:
 
 - Hàng trên cùng: **⌂ Home**, **⇄ Chuyển app**, **⏻ Khoá máy**. Đây là thao tác
   mức thiết bị, đi bằng nút cứng (chuột phải/giữa theo map của TrollVNC).
+- Nút **RAM** (cạnh Home/App/Khoá): đóng hết app đang chạy để giải phóng RAM cho remote.
+  Giữ ControlIOS, TrollStore và tiến trình hệ thống; **EarnApp/Golike cũng bị đóng**.
+  Không tự chạy lúc kết nối VNC. `closeall 5` chỉ hất thẻ switcher, không thay `freeram`.
 - Hàng **Độ sáng**: `▁ Tối đa` hạ xuống đáy, `− +` từng nấc, `▔ Sáng` lên cao
   nhất. Điều khiển qua VNC nên **máy chưa vá cũng dùng được**. Xem mục dưới về
   chuyện tắt hẳn màn hình.
@@ -307,6 +310,7 @@ Trong kịch bản thì dùng bundle id:
 ```
 launchapp com.zing.zalo     # mở theo bundle id, không qua Spotlight
 killapp com.golike.app      # đóng ngay, không phải mò App Switcher
+freeram                     # đóng hết app, giải phóng RAM (trừ ControlIOS)
 ```
 
 Khác với `openapp <tên>` (cử chỉ Spotlight), hai lệnh này **không phụ thuộc tên
@@ -474,7 +478,8 @@ lock                  # nhấn nút Power (= chuột giữa)
 spotlight             # về home rồi vuốt xuống mở ô tìm kiếm
 openapp Zalo          # tìm trong Spotlight rồi Enter mở kết quả đầu
 closeapp              # vào switcher, hất thẻ đầu lên, về home
-closeall 5            # hất 5 thẻ liên tiếp
+closeall 5            # hất 5 thẻ liên tiếp (không giải phóng RAM)
+freeram               # đóng hết app qua kênh điều khiển, nhường RAM cho remote
 applibrary            # sang trang App Library
 home_swipe            # dự phòng: về home bằng cử chỉ vuốt
 switcher_swipe        # dự phòng: mở switcher bằng vuốt-và-giữ
@@ -648,6 +653,7 @@ brightness down 3                 # giảm 3 nấc
 volume mute                       # tắt tiếng
 launchapp com.zing.zalo           # mở app theo bundle id (kênh điều khiển)
 killapp com.zing.zalo             # đóng app
+freeram                           # đóng hết app đang chạy, giải phóng RAM
 restartapp com.zing.zalo 2        # đóng, chờ 2 giây rồi mở lại
 openurl https://example.com       # mở URL bằng app mặc định
 openurlin com.zing.zalo zalo://home # mở URL bằng đúng app chỉ định

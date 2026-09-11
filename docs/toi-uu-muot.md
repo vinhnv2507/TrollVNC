@@ -51,6 +51,15 @@ Muốn cố định tối ưu ngay từ đầu, commit `prefs/TrollVNCPrefs/Reso
 > Các khoá này daemon đọc **lúc khởi động**. Q/defer/xoay còn chỉnh được LIVE từ
 > PC (mục trên); riêng dò-vùng-bẩn và frame rate hiện chỉ đặt lúc build.
 
+## Máy đầy RAM / remote giật — nút **RAM** / lệnh `freeram`
+Khi nhiều app nặng (Safari, Facebook, EarnApp, Golike…) cùng mở, VNC dễ giật.
+Bấm **RAM** trên PC (cạnh Home/App/Khoá), menu **Giải phóng RAM** trong app
+ControlIOS, hoặc lệnh kịch bản `freeram` / JS `freeRAM()`.
+
+Lệnh đóng hết app đang chạy trừ ControlIOS, TrollStore và tiến trình hệ thống.
+**EarnApp và Golike cũng bị đóng** — chỉ bấm khi muốn nhường RAM cho remote.
+Không tự chạy lúc kết nối VNC. `closeall 5` chỉ hất thẻ switcher, không thay `freeram`.
+
 ## Ghi chú
 - Tham số Q/defer/xoay áp live sẽ **giữ tới khi daemon khởi động lại** (máy reboot
   / TrollVNC chạy lại). Sau reboot mở lại **Chất lượng → Áp dụng** để nạp lại,

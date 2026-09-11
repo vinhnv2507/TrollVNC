@@ -691,6 +691,30 @@ class ScriptDialogTest(unittest.TestCase):
         self.assertEqual(len(called), 1)
         self.assertEqual(len(called[0][0]), 2)
 
+    def test_free_ram_button_confirms_then_runs(self) -> None:
+        sent = []
+        self.window.pool.free_ram = lambda keys, **kw: sent.append(list(keys))
+        self.window.registry.settings.control_token = "tok"
+        self.window.grid.select_all()
+        self.assertIn("freeram", self.window.device_gesture_buttons)
+        with unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.warning", return_value=QMessageBox.Yes
+        ):
+            self.window._free_ram_selected()
+        self.assertEqual(len(sent), 1)
+        self.assertEqual(len(sent[0]), 2)
+
+    def test_free_ram_cancelled_sends_nothing(self) -> None:
+        sent = []
+        self.window.pool.free_ram = lambda *a, **k: sent.append(a)
+        self.window.registry.settings.control_token = "tok"
+        self.window.grid.select_all()
+        with unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.warning", return_value=QMessageBox.No
+        ):
+            self.window._free_ram_selected()
+        self.assertFalse(sent)
+
     def test_quick_action_runs_the_gesture_on_selection(self) -> None:
         sent = []
         self.window.pool.run_script = lambda keys, steps, folder, **kw: sent.append(
