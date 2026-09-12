@@ -181,6 +181,7 @@ class WindowIntegrationTest(unittest.TestCase):
         registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
         registry.save(self.path)
         self.window = MainWindow(self.path)
+        self.window.pool.wake_if_locked = lambda *a, **k: None
         self.question_patcher = unittest.mock.patch(
             "controlios.ui.app.QMessageBox.question", return_value=QMessageBox.Yes)
         self.question_patcher.start()

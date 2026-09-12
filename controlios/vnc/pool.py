@@ -165,24 +165,15 @@ class DevicePool:
             session.set_tier(tier)
             if tier > Tier.IDLE:
                 self._idle_since.pop(key, None)
-                if key not in self._offscreen_sleeping and not session.is_running():
-                    session.start()          # đánh thức máy đang ngủ
+                sleeping = self._offscreen_sleeping.pop(key, None)
+                if sleeping is not None:
+                    sleeping.cancel()
+                if not session.is_running():
+                    session.start()          # danh thuc may dang ngu
             else:
+                # Chi danh dau idle; janitor moi ngat sau idle_disconnect_after.
+                # Ngu ngay khi roi khung nhin lam luoi den va phai noi lai moi lan cuon.
                 self._idle_since.setdefault(key, now)
-                if (self.settings.disconnect_offscreen
-                        and self.settings.idle_disconnect_after != 0
-                        and session.is_running()
-                        and key not in self._offscreen_sleeping):
-
-                    async def sleep_offscreen(k=key, s=session):
-                        try:
-                            await s.sleep()
-                        finally:
-                            if self._offscreen_sleeping.get(k) is asyncio.current_task():
-                                self._offscreen_sleeping.pop(k, None)
-                            if s.tier > Tier.IDLE and not s.is_running():
-                                s.start()
-                    self._offscreen_sleeping[key] = asyncio.create_task(sleep_offscreen())
 
     async def _idle_janitor(self) -> None:
         """Ngắt kết nối tới máy đã lâu không nhìn tới.

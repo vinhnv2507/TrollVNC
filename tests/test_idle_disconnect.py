@@ -148,6 +148,16 @@ class IdleDisconnectTest(unittest.TestCase):
             finished = [e for e in events if e[1] == "xong"]
             self.assertEqual(len(finished), self.DEVICES)
 
+    def test_idle_does_not_disconnect_immediately(self) -> None:
+        self.pool.set_tiers({spec.key: Tier.IDLE for spec in self.specs})
+        self.assertTrue(self.wait_until(
+            lambda: len(self.pool._idle_since) == self.DEVICES, 5),
+            "IDLE must be recorded before the janitor runs")
+        self.assertFalse(self.pool._offscreen_sleeping)
+        self.assertEqual(self.pool.stats()["dormant"], 0,
+                         "IDLE must wait for the janitor, not drop at once")
+        self.assertEqual(self.pool.stats()["online"], self.DEVICES)
+
     def test_zero_disables_the_policy(self) -> None:
         self.settings.idle_disconnect_after = 0
         self.pool.set_tiers({spec.key: Tier.IDLE for spec in self.specs})

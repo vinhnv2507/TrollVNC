@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from PySide6.QtCore import Qt, QObject, QSettings, QThread, QTimer, Signal
-from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QAction, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -2004,6 +2004,7 @@ class MainWindow(QMainWindow):
         self.ssh_console: SshConsoleDialog | None = None
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
+        self._apps_for_key: Optional[str] = None
 
         self.bridge = Bridge()
         self.pool = DevicePool(
@@ -2319,12 +2320,14 @@ class MainWindow(QMainWindow):
         bar.addWidget(self.columns_combo)
 
         bar.addSeparator()
-        select_all = QAction("Chọn tất cả", self)
-        select_all.setShortcut(QKeySequence.SelectAll)
-        select_all.setShortcutContext(Qt.WindowShortcut)
-        select_all.setToolTip("Chọn tất cả máy đang hiển thị (Ctrl+A)")
-        select_all.triggered.connect(self.grid.select_all)
-        bar.addAction(select_all)
+        self.select_all_action = QAction("Chọn tất cả", self)
+        self.select_all_action.setToolTip(
+            "Chọn tất cả máy đang hiển thị (Ctrl+A khi đang ở lưới)")
+        self.select_all_action.triggered.connect(self.grid.select_all)
+        bar.addAction(self.select_all_action)
+        self._grid_select_all = QShortcut(QKeySequence.SelectAll, self.grid)
+        self._grid_select_all.setContext(Qt.WidgetWithChildrenShortcut)
+        self._grid_select_all.activated.connect(self.grid.select_all)
         clear = QAction("Bỏ chọn", self)
         clear.triggered.connect(self.grid.clear_selection)
         bar.addAction(clear)
@@ -2629,6 +2632,9 @@ class MainWindow(QMainWindow):
                 lambda _checked=False, value=group: self._select_group_filter(value))
 
     def _show_grid_group_menu(self, targets: List[str], global_pos) -> None:
+        self._build_grid_group_menu(targets).exec(global_pos)
+
+    def _build_grid_group_menu(self, targets: List[str]) -> QMenu:
         menu = QMenu(self)
         count = len(targets)
         menu.addSection(
@@ -2662,7 +2668,17 @@ class MainWindow(QMainWindow):
         menu.addAction("Đưa vào nhóm…").triggered.connect(self._assign_selected_group)
         menu.addAction("Bỏ khỏi nhóm").triggered.connect(
             lambda: self._set_selected_group(""))
-        menu.exec(global_pos)
+        menu.addSeparator()
+        if count == 1:
+            remove_action = menu.addAction("Xoá máy này…")
+        else:
+            remove_action = menu.addAction(f"Xoá {count} máy đã chọn…")
+        remove_action.setToolTip(
+            "Xoá khỏi lưới và danh sách lưu trên PC")
+        keys = list(targets)
+        remove_action.triggered.connect(
+            lambda _checked=False, k=keys: self._remove_selected_devices(k))
+        return menu
 
     def _open_apps_for_selection(self, targets: List[str]) -> None:
         self.grid._apply_selection(list(targets))
@@ -2947,19 +2963,31 @@ class MainWindow(QMainWindow):
 
     def _focus_device(self, key: str) -> None:
         self.detail.set_device(key)
-        # Khi mở một máy, panel ứng dụng luôn xuất hiện và tự nạp danh sách;
-        # không cần người dùng tìm lại nút "Ứng dụng" trên thanh công cụ.
+        self.apps_action.setChecked(True)
         self.apps_dock.show()
+        self.apps_dock.raise_()
         self.grid.set_focus_key(key)
         self.detail.setFocus()
         self._update_detail_title(key)
-        # Buộc refit ở khung kế: nếu không, frame đầu có tỉ lệ trùng _detail_aspect
-        # cũ sẽ bị bỏ qua và khung không co lại đúng cỡ máy mới mở.
         self._detail_aspect = -1.0
         self._fit_detail_pane()
         if self.screen_monitor_dialog:
             self.screen_monitor_dialog.refresh_target_count()
+        self._apps_for_key = None
         self._reload_apps()
+        self._ensure_unlocked(key)
+
+    def _ensure_unlocked(self, key: str) -> None:
+        if not key:
+            return
+        spec = next((d for d in self.registry.devices if d.key == key), None)
+        # Máy LAN cần control_token; USB loopback thì không.
+        if not self.registry.settings.control_token and not (spec and spec.is_usb):
+            return
+        self.pool.wake_if_locked(
+            key,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+        )
 
     def _device_name(self, key: str) -> str:
         for device in self.registry.devices:
@@ -3626,8 +3654,11 @@ class MainWindow(QMainWindow):
 
     def _apply_apps(self, key: str, apps, error: str) -> None:
         if error:
+            if self._apps_for_key == key:
+                self._apps_for_key = None
             self.apps_panel.set_error(f"{key}: {error}")
             return
+        self._apps_for_key = key
         self.apps_panel.set_apps(apps)
         self.apps_panel.set_targets(len(self.action_targets()))
         self.statusBar().showMessage(f"{key}: {len(apps)} app", 4000)
@@ -4122,12 +4153,12 @@ class MainWindow(QMainWindow):
                 on_event=lambda k, m: self.bridge.message.emit(f"[{k}] scale {scale:.2f}: {m}"))
         if key == self.detail.key:
             if state in (State.CONNECTING, State.ERROR):
-                # Đang nối lại -> xoá ảnh cũ ở khung lớn để không giữ khung lồng.
                 self.detail.clear_frame()
             elif state is State.ONLINE:
-                # Nối lại xong -> buộc refit ở khung kế để tự co đúng cỡ mới,
-                # không phải bấm đúp lại.
                 self._detail_aspect = -1.0
+                self._ensure_unlocked(key)
+                if self._apps_for_key != key or not self.apps_panel._apps:
+                    self._reload_apps()
 
     def _refresh_stats(self) -> None:
         stats = self.pool.stats()

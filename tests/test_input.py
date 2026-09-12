@@ -234,6 +234,16 @@ class DetailViewInputTest(unittest.TestCase):
         self.assertEqual(typed, ["a"])
         self.assertEqual(combos, [])
 
+    def test_ctrl_a_sends_command_a_to_the_phone(self) -> None:
+        typed, combos = [], []
+        self.view.text_typed.connect(typed.append)
+        self.view.keys_pressed.connect(combos.append)
+        self.view.keyPressEvent(
+            QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key_A, Qt.ControlModifier, "\x01")
+        )
+        self.assertEqual(combos, [["Super_L", "a"]])
+        self.assertEqual(typed, [])
+
     def test_ctrl_c_becomes_a_combo_not_a_control_character(self) -> None:
         typed, combos = [], []
         self.view.text_typed.connect(typed.append)

@@ -48,6 +48,7 @@ class GridTest(unittest.TestCase):
         grid.set_devices(specs)
         grid.show()
         app.processEvents()
+        grid.set_focus_streaming(True)
         grid.set_focus_key(specs[0].key)
         published = {}
         grid.tiers_changed.connect(published.update)
@@ -57,6 +58,50 @@ class GridTest(unittest.TestCase):
         self.assertEqual(published[specs[0].key], Tier.LIVE)
         idle = [k for k, tier in published.items() if tier is Tier.IDLE]
         self.assertEqual(len(idle), len(specs) - 1)
+
+    def test_open_detail_keeps_grid_when_focus_streaming_is_off(self) -> None:
+        grid = DeviceGrid(tile_width=150)
+        grid.resize(700, 400)
+        specs = [DeviceSpec(host=f"10.0.0.{i}") for i in range(1, 30)]
+        grid.set_devices(specs)
+        grid.show()
+        app.processEvents()
+        grid.set_focus_streaming(False)
+        grid.set_focus_key(specs[0].key)
+        published = {}
+        grid.tiers_changed.connect(published.update)
+        grid._publish_tiers()
+        visible_grid = [k for k, tier in published.items() if tier is Tier.GRID]
+        self.assertTrue(visible_grid, "grid wall must keep streaming when focus_streaming is off")
+        self.assertEqual(published[specs[0].key], Tier.LIVE)
+
+    def test_publish_tiers_with_zero_viewport_does_not_crash(self) -> None:
+        grid = DeviceGrid(tile_width=150)
+        specs = [DeviceSpec(host=f"10.0.0.{i}") for i in range(1, 21)]
+        grid.set_devices(specs)
+        published = {}
+        grid.tiers_changed.connect(published.update)
+        grid._publish_tiers()
+        self.assertEqual(len(published), len(specs))
+        promoted = [k for k, t in published.items() if t is not Tier.IDLE]
+        self.assertGreater(len(promoted), 0)
+        self.assertLess(len(promoted), 20)
+
+    def test_connecting_keeps_the_last_frame(self) -> None:
+        grid = DeviceGrid()
+        spec = DeviceSpec(host="10.0.0.7")
+        grid.set_devices([spec])
+        frame = Frame(key=spec.key, width=4, height=8, data=bytes(4 * 8 * 3),
+                      full_width=375, full_height=667)
+        grid.on_frame(frame)
+        grid.on_status(spec.key, State.ONLINE, "")
+        tile = grid.tiles[spec.key]
+        self.assertIsNotNone(tile._pixmap)
+        grid.on_status(spec.key, State.CONNECTING, "reconnecting")
+        self.assertIsNotNone(tile._pixmap, "CONNECTING must keep the last frame")
+        self.assertEqual(tile.state, State.CONNECTING)
+        grid.on_status(spec.key, State.ERROR, "fail")
+        self.assertIsNone(tile._pixmap)
 
     def test_frame_and_status_reach_the_tile(self) -> None:
         grid = DeviceGrid()
@@ -102,6 +147,77 @@ class WindowTest(unittest.TestCase):
             window._on_status(key, State.ONLINE, "")
             window._on_status(key, State.ONLINE, "")
             self.assertEqual(calls, [([key], 0.35)])
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_context_menu_can_delete_one_or_many_devices(self) -> None:
+        registry_path = Path(__file__).parent / "_ctxdel_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            removed = []
+            window._remove_selected_devices = lambda requested_keys=None: removed.append(
+                list(requested_keys or []))
+            menu = window._build_grid_group_menu(["10.0.0.1:5901"])
+            texts = [action.text() for action in menu.actions()]
+            self.assertTrue(any("Xoá máy này" in text for text in texts))
+            action = next(a for a in menu.actions() if "Xoá máy này" in a.text())
+            action.trigger()
+            self.assertEqual(removed, [["10.0.0.1:5901"]])
+
+            menu = window._build_grid_group_menu(["10.0.0.1:5901", "10.0.0.2:5901"])
+            texts = [action.text() for action in menu.actions()]
+            self.assertTrue(any("Xoá 2 máy đã chọn" in text for text in texts))
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_ctrl_a_is_scoped_to_the_grid_not_the_window(self) -> None:
+        registry_path = Path(__file__).parent / "_ctrla_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            self.assertTrue(window.select_all_action.shortcut().isEmpty())
+            self.assertEqual(
+                window._grid_select_all.context(), Qt.WidgetWithChildrenShortcut)
+            window.grid.clear_selection()
+            window._grid_select_all.activated.emit()
+            self.assertEqual(len(window.grid.selection), 2)
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_focus_device_loads_apps_and_wakes_if_locked(self) -> None:
+        registry_path = Path(__file__).parent / "_focuswake_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window.registry.settings.control_token = "tok"
+            listed, woken = [], []
+            window.pool.list_apps = lambda key, on_done=None: listed.append(key)
+            window.pool.wake_if_locked = lambda key, **kw: woken.append(key)
+            window._focus_device("10.0.0.1:5901")
+            self.assertEqual(window.detail.key, "10.0.0.1:5901")
+            self.assertTrue(window.apps_action.isChecked())
+            self.assertFalse(window.apps_dock.isHidden())
+            self.assertTrue(listed, "opening the large view must load the app list")
+            self.assertTrue(all(key == "10.0.0.1:5901" for key in listed))
+            self.assertEqual(woken, ["10.0.0.1:5901"])
+
+            listed.clear()
+            woken.clear()
+            window._apps_for_key = None
+            window.apps_panel._apps = []
+            window._on_status("10.0.0.1:5901", State.ONLINE, "")
+            self.assertEqual(woken, ["10.0.0.1:5901"])
+            self.assertEqual(listed, ["10.0.0.1:5901"])
         finally:
             window.close()
             registry_path.unlink(missing_ok=True)
@@ -302,6 +418,8 @@ class LayoutTest(unittest.TestCase):
             app.processEvents()
             self.assertEqual(window.splitter.sizes()[1], window.detail.minimumWidth())
 
+            window.pool.wake_if_locked = lambda *a, **k: None
+            window.pool.list_apps = lambda *a, **k: None
             window._focus_device("10.0.0.1:5901")
             app.processEvents()
 
@@ -328,6 +446,8 @@ class LayoutTest(unittest.TestCase):
             window.resize(1500, 900)
             window.show()
             app.processEvents()
+            window.pool.wake_if_locked = lambda *a, **k: None
+            window.pool.list_apps = lambda *a, **k: None
             window._focus_device("10.0.0.1:5901")
             app.processEvents()
             before = window.splitter.sizes()[1]

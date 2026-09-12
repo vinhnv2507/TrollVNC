@@ -234,6 +234,16 @@ class TileControlTest(unittest.TestCase):
         self.assertFalse(self.grid.tiles[self.key].monitored)
         self.assertFalse(self.grid._monitor_timer.isActive())
 
+    def test_focus_without_focus_streaming_still_promotes_viewport(self) -> None:
+        self.grid.set_focus_streaming(False)
+        self.grid.set_focus_key(self.key)
+        published = {}
+        self.grid.tiers_changed.connect(published.update)
+        self.grid._publish_tiers()
+        grid_keys = [k for k, tier in published.items() if tier is Tier.GRID]
+        self.assertTrue(grid_keys, "viewport must stay GRID when focus_streaming is off")
+        self.assertEqual(published[self.key], Tier.LIVE)
+
     def test_monitor_marks_survive_grid_rebuild(self) -> None:
         self.grid.set_monitored_keys([self.key])
         self.grid.set_devices(self.specs)

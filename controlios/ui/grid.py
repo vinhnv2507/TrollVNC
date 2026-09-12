@@ -17,7 +17,7 @@ from .tile import DeviceTile
 
 # Rows of tiles kept warm above and below the viewport, so scrolling does not
 # show empty cells while the first frame arrives.
-PREFETCH_ROWS = 0
+PREFETCH_ROWS = 1
 
 
 class DeviceGrid(QScrollArea):
@@ -83,6 +83,7 @@ class DeviceGrid(QScrollArea):
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.setMinimumWidth(self.MIN_TILE_WIDTH * 2 + self.SPACING + self.MARGIN * 2 + 20)
         self.setStyleSheet("QScrollArea { background: #0b0d11; border: none; }")
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self._debounce = QTimer(self)
         self._debounce.setSingleShot(True)
@@ -217,6 +218,7 @@ class DeviceGrid(QScrollArea):
         self.selection_changed.emit(list(self.selection))
 
     def _begin_selection_drag(self, _key: str, modifiers, global_pos: QPoint) -> None:
+        self.setFocus()
         self._selection_anchor = self.viewport().mapFromGlobal(global_pos)
         self._selection_base = list(self.selection)
         self._selection_drag_modifiers = modifiers
@@ -260,6 +262,7 @@ class DeviceGrid(QScrollArea):
         self._selection_base = []
 
     def _on_tile_clicked(self, key: str, modifiers) -> None:
+        self.setFocus()
         self._selection_before_click = list(self.selection)
         selection = list(self.selection)
         if modifiers & Qt.ControlModifier:
@@ -370,6 +373,7 @@ class DeviceGrid(QScrollArea):
     def _on_tile_pressed(self, key: str, x: int, y: int, button: int) -> None:
         # Ô trong lưới chỉ làm mới 1 hình/giây, bấm vào mà chờ một giây mới thấy
         # phản hồi thì không dùng được. Nâng riêng ô đang thao tác lên nhịp cao.
+        self.setFocus()
         if key != self._control_key:
             self._control_key = key
             self._publish_tiers()
@@ -393,30 +397,61 @@ class DeviceGrid(QScrollArea):
         self._focus_key = key
         self._publish_tiers()
 
+    def _viewport_keys(self) -> List[str]:
+        """May nam trong khung nhin (cong hang prefetch).
+
+        Khong chia cho height=0: o chua layout xong se ZeroDivisionError
+        va luoi khong bao gio duoc promote.
+        """
+
+        if not self.order:
+            return []
+        columns = max(1, self._columns or 1)
+        tile0 = self.tiles.get(self.order[0])
+        row_height = (tile0.height() + self._layout.spacing()) if tile0 is not None else 0
+        view_h = self.viewport().height()
+        if row_height <= 0 or view_h <= 0:
+            return list(self.order[: max(columns * 3, 12)])
+
+        margin = self._layout.contentsMargins().top()
+        top = self.verticalScrollBar().value()
+        bottom = top + view_h
+        first_row = max(0, (top - margin) // row_height - PREFETCH_ROWS)
+        last_row = (bottom - margin) // row_height + PREFETCH_ROWS
+        first = first_row * columns
+        last = (last_row + 1) * columns
+        keys = list(self.order[first:last])
+
+        view = self.viewport().rect()
+        extra = row_height * PREFETCH_ROWS
+        warm = view.adjusted(0, -extra, 0, extra)
+        seen = set(keys)
+        for key in self.order:
+            if key in seen:
+                continue
+            tile = self.tiles.get(key)
+            if tile is None or not tile.isVisible():
+                continue
+            top_left = self.viewport().mapFromGlobal(tile.mapToGlobal(QPoint(0, 0)))
+            if QRect(top_left, tile.size()).intersects(warm):
+                keys.append(key)
+                seen.add(key)
+        return keys
+
     def _publish_tiers(self) -> None:
         if not self.order:
             return
-        columns = max(1, self._columns)
-        row_height = self.tiles[self.order[0]].height() + self._layout.spacing()
-        top = self.verticalScrollBar().value()
-        bottom = top + self.viewport().height()
-
-        first_row = max(0, top // row_height - PREFETCH_ROWS)
-        last_row = bottom // row_height + PREFETCH_ROWS
-        first = first_row * columns
-        last = (last_row + 1) * columns
 
         live_key = self._control_key or self._focus_key
-        if live_key in self.tiles:
-            # Tập trung: chỉ máy đang xem chạy LIVE, tất cả còn lại NGƯNG stream ->
-            # máy đó chiếm trọn băng thông -> trễ giảm mạnh trên farm đông máy.
+        exclusive = bool(self._focus_streaming and live_key in self.tiles)
+        if exclusive:
             tiers = {key: Tier.IDLE for key in self.order}
             tiers[live_key] = Tier.LIVE
             self.tiers_changed.emit(tiers)
             return
 
         tiers = {key: Tier.IDLE for key in self.order}
-        for key in self.order[first:last]:
+        for key in self._viewport_keys():
             tiers[key] = Tier.GRID
         if self._focus_key in tiers:
             tiers[self._focus_key] = Tier.LIVE
