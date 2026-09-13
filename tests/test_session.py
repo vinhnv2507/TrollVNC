@@ -260,6 +260,30 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
 
 
 
+    async def test_new_grid_session_requests_a_full_first_frame(self) -> None:
+        session = self.make_session()
+        session.set_tier(Tier.GRID)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: self.server.fb_incremental),
+                        "no framebuffer request")
+        self.assertFalse(self.server.fb_incremental[0],
+                         "first GRID request must be a full frame")
+        await session.stop()
+
+    async def test_reconnect_while_already_grid_requests_full_frame(self) -> None:
+        session = self.make_session()
+        session.set_tier(Tier.GRID)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        await session.stop()
+        self.server.fb_incremental.clear()
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: self.server.fb_incremental),
+                        "reconnect sent no framebuffer request")
+        self.assertFalse(self.server.fb_incremental[0],
+                         "reconnect at GRID must request a full frame, not incremental")
+        await session.stop()
+
 class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
     def _session(self, **kw) -> VncSession:
         return VncSession(
@@ -376,7 +400,6 @@ class PoolTest(unittest.TestCase):
         self.assertEqual(stats["online"], len(specs), f"stats: {stats}")
         self.assertEqual(len(keys_with_frames), len(specs),
                          "not every device produced its initial thumbnail")
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

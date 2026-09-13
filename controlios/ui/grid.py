@@ -17,7 +17,7 @@ from .tile import DeviceTile
 
 # Rows of tiles kept warm above and below the viewport, so scrolling does not
 # show empty cells while the first frame arrives.
-PREFETCH_ROWS = 1
+PREFETCH_ROWS = 2
 
 
 class DeviceGrid(QScrollArea):

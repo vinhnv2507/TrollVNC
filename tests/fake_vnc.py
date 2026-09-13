@@ -29,6 +29,7 @@ class FakeVncServer:
     key_events: List[Tuple[int, int]] = field(default_factory=list)
     encodings: List[List[int]] = field(default_factory=list)
     update_requests: int = 0
+    fb_incremental: List[bool] = field(default_factory=list)
     connections: int = 0
     # 0 = reply to every FBUR immediately (legacy tests). 1 mimics TrollVNC
     # Q=1: extra FBURs that arrive while an encode is busy are dropped.
@@ -99,7 +100,8 @@ class FakeVncServer:
                     raw = await reader.readexactly(4 * count)
                     self.encodings.append(list(struct.unpack(">%di" % count, raw)))
                 elif kind == 3:                    # FramebufferUpdateRequest
-                    await reader.readexactly(9)
+                    rest = await reader.readexactly(9)
+                    self.fb_incremental.append(bool(rest[0]))
                     self.update_requests += 1
                     if self.max_inflight and encoding >= self.max_inflight:
                         # Drop extra encode like TrollVNC gMaxInflightUpdates=1.

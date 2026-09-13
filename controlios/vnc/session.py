@@ -173,6 +173,9 @@ class VncSession:
     def start(self) -> None:
         if self._task is None or self._task.done():
             self._stop.clear()
+            # Moi TCP session can 1 frame full. set_tier(GRID) khi da o GRID la no-op
+            # nen khong ep _force_full; neu xin incremental luc moi noi, man tinh se den.
+            self._force_full = True
             self._task = asyncio.create_task(self._run(), name=f"vnc:{self.spec.key}")
 
     async def stop(self) -> None:
@@ -605,6 +608,7 @@ class VncSession:
 
     async def _pace_loop(self, client: asyncvnc.Client) -> None:
         first = True
+        self._force_full = True
         loop = asyncio.get_running_loop()
         while not self._stop.is_set():
             if self._capture_waiters:

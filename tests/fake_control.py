@@ -68,6 +68,8 @@ class FakeControlServer:
     unauthorized: int = 0
     #: Đặt True để giả lập bản TrollVNC gốc (chưa vá).
     unpatched: bool = False
+    launch_failures: int = 0
+    launch_fail_reply: str = "ERR LaunchFailed sbs=6"
 
     _server: asyncio.AbstractServer | None = None
     port: int = 0
@@ -213,8 +215,11 @@ class FakeControlServer:
 
         if cmd.startswith("launch "):
             bundle = cmd[len("launch "):].strip()
+            if self.launch_failures > 0:
+                self.launch_failures -= 1
+                return (self.launch_fail_reply + "\n").encode()
             if bundle not in self.apps:
-                return b"ERR LaunchFailed\n"
+                return b"ERR LaunchFailed sbs=6\n"
             self.launched.append(bundle)
             self.running.add(bundle)
             self.frontmost = bundle

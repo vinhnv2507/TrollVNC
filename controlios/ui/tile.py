@@ -100,10 +100,7 @@ class DeviceTile(QWidget):
         self.update()
 
     def set_state(self, state: State, detail: str = "") -> None:
-        # Loi thi bo anh cu. CONNECTING giu khung cuoi de luoi khong den khi noi lai.
-        if state is State.ERROR:
-            self._pixmap = None
-            self._scaled = None
+        # Giu khung cuoi ca khi ERROR/CONNECTING de luoi khong den luc noi lai.
         self.state = state
         self.detail = detail
         self.update()
@@ -215,6 +212,19 @@ class DeviceTile(QWidget):
                 scaled.width(), scaled.height(),
             )
             painter.drawPixmap(self._image_rect.topLeft(), scaled)
+        else:
+            painter.setPen(QColor("#8b93a1"))
+            if self.state is State.CONNECTING:
+                msg = "Đang kết nối…"
+            elif self.state is State.ONLINE:
+                msg = "Đang lấy hình…"
+            elif self.state is State.ERROR:
+                msg = "Lỗi kết nối"
+            elif self.state is State.DORMANT:
+                msg = "Tạm nghỉ"
+            else:
+                msg = "Chưa có hình"
+            painter.drawText(body, Qt.AlignCenter, msg)
 
         colour = STATE_COLOUR.get(self.state, QColor("#6b7280"))
         if self.monitored:

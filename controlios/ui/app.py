@@ -127,7 +127,7 @@ def _short_reason(error: str) -> str:
 class IOSFileBrowserDialog(QDialog):
     """Duyệt các đường dẫn mà daemon ControlIOS trên iOS nhìn thấy."""
 
-    listed = Signal(str, str, object, str)
+    listed = Signal(str, str, object, str, int)
     container_loaded = Signal(str, str, str, str)
 
     def __init__(self, pool: DevicePool, key: str, parent=None,
@@ -139,6 +139,7 @@ class IOSFileBrowserDialog(QDialog):
         self.path = "/var/mobile"
         self.entries: list[tuple[str, int, bool]] = []
         self.selected_app_bundle: str | None = None
+        self._list_gen = 0
         self.setWindowTitle(
             "Chọn thư mục trên iOS" if directories_only else "Lấy tệp từ iOS"
         )
@@ -214,17 +215,24 @@ class IOSFileBrowserDialog(QDialog):
         if not path.startswith("/"):
             self.status.setText("Đường dẫn phải bắt đầu bằng '/'.")
             return
+        self._list_gen += 1
+        gen = self._list_gen
         self.entries = []
         self.table.setRowCount(0)
         self.select_button.setEnabled(False)
+        self.path_edit.setText(path)
         self.status.setText(f"Đang đọc {path}…")
-        self.pool.list_dir(self.key, path, self._emit_listed)
+        self.pool.list_dir(
+            self.key, path,
+            lambda k, p, e, err, g=gen: self._emit_listed(k, p, e, err, g),
+        )
 
     def _load_preset(self, index: int) -> None:
         path = self.preset_combo.itemData(index)
         if isinstance(path, str) and path.startswith("@app:"):
             bundle_id = path[5:]
             self.selected_app_bundle = bundle_id
+            self._list_gen += 1  # bỏ ls /var/mobile đang bay
             self.status.setText(f"Đang tìm thư mục dữ liệu của {bundle_id}…")
             self.pool.app_container(
                 self.key, bundle_id,
@@ -240,19 +248,50 @@ class IOSFileBrowserDialog(QDialog):
         if key != self.key:
             return
         if error:
-            self.status.setText(f"Lỗi: {error}")
+            extra = ""
+            if bundle_id == "notes.3u":
+                extra = (
+                    " App 3uTools (notes.3u) chưa cài trên máy này — "
+                    "Tệp → Trên iPhone sẽ không có thư mục đó."
+                )
+            self.status.setText(f"Lỗi: {error}.{extra}")
             return
         self.selected_app_bundle = bundle_id
-        self.load_path(data.rstrip("/") + "/Documents")
-
-    def _emit_listed(self, key: str, path: str, entries: list[tuple], error: str | None) -> None:
-        self.listed.emit(key, path, entries, error or "")
-
-    def _on_listed(self, key: str, path: str, entries: list[tuple], error: str) -> None:
-        if key != self.key:
+        root = (data or "").rstrip("/")
+        if not root:
+            self.status.setText(f"Máy không trả về thư mục dữ liệu của {bundle_id}.")
             return
+        self.load_path(root + "/Documents")
+
+    def _emit_listed(self, key: str, path: str, entries: list[tuple],
+                     error: str | None, gen: int | None = None) -> None:
+        self.listed.emit(
+            key, path, entries, error or "",
+            self._list_gen if gen is None else gen,
+        )
+
+    @staticmethod
+    def _missing_dir_error(error: str) -> bool:
+        text = error or ""
+        return any(token in text for token in (
+            "CannotRead", "NotFound", "No such", "NotADirectory",
+        ))
+
+    def _on_listed(self, key: str, path: str, entries: list[tuple],
+                   error: str, gen: int = 0) -> None:
+        if key != self.key or gen != self._list_gen:
+            return
+        if error and self._missing_dir_error(error) and (
+            path.rstrip("/").endswith("/Documents") or self.selected_app_bundle
+        ):
+            # Documents của app 3uTools thường chưa được tạo — vẫn mở thư mục trống
+            # để chọn/đẩy file, không để lỗi đè lên path /var/mobile.
+            error = ""
+            entries = []
         if error:
-            self.status.setText(f"Lỗi: {error}")
+            self.path = path
+            self.path_edit.setText(path)
+            self.status.setText(f"Không đọc được {path}: {error}")
             return
         self.path = path
         self.path_edit.setText(path)

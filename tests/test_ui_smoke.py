@@ -101,7 +101,7 @@ class GridTest(unittest.TestCase):
         self.assertIsNotNone(tile._pixmap, "CONNECTING must keep the last frame")
         self.assertEqual(tile.state, State.CONNECTING)
         grid.on_status(spec.key, State.ERROR, "fail")
-        self.assertIsNone(tile._pixmap)
+        self.assertIsNotNone(tile._pixmap, "ERROR must keep the last frame")
 
     def test_frame_and_status_reach_the_tile(self) -> None:
         grid = DeviceGrid()

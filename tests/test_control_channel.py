@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from controlios import script                                   # noqa: E402
 from controlios.control_channel import (                        # noqa: E402
     AppInfo, AppNetworkSample, ControlChannel, ControlError, NotPatchedError,
-    UnauthorizedError, probe,
+    UnauthorizedError, describe_launch_failure, probe,
 )
 from tests.fake_control import FakeControlServer                # noqa: E402
 
@@ -427,6 +427,18 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
             local.unlink(missing_ok=True)
 
 
+    async def test_launch_retries_after_sbs_failure(self) -> None:
+        self.server.launch_failures = 2
+        await self.channel.launch("com.honeygain.app", retries=2, retry_delay=0.01)
+        self.assertEqual(self.server.launched, ["com.honeygain.app"])
+
+    async def test_launch_unknown_bundle_explains_sbs6(self) -> None:
+        with self.assertRaises(ControlError) as ctx:
+            await self.channel.launch("com.khong.ton.tai")
+        msg = str(ctx.exception)
+        self.assertIn("sbs=6", msg)
+        self.assertIn("SpringBoard", msg)
+
 class ScriptAppCommandTest(unittest.TestCase):
     def test_parses_bundle_id_commands(self) -> None:
         steps = script.parse("launchapp com.zing.zalo\nkillapp com.golike.app")
@@ -652,6 +664,12 @@ class ScriptRunnerTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(control.attempts, 3)
         self.assertEqual(len([event for event in events if "thử lại" in event]), 2)
 
+class LaunchErrorTextTest(unittest.TestCase):
+    def test_sbs6_mentions_springboard(self) -> None:
+        text = describe_launch_failure("com.brd.earnapp", "ERR LaunchFailed sbs=6")
+        self.assertIn("com.brd.earnapp", text)
+        self.assertIn("sbs=6", text)
+        self.assertIn("SpringBoard", text)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

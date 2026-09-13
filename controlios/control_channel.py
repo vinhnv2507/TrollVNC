@@ -123,6 +123,43 @@ class Snapshot:
         return self.size / (1024 * 1024)
 
 
+def describe_launch_failure(bundle_id: str, reply: str) -> str:
+    """Đổi ERR LaunchFailed sbs=N thành câu tiếng Việt có thể hành động."""
+
+    text = (reply or "").strip()
+    sbs = None
+    lowered = text.lower()
+    marker = "sbs="
+    if marker in lowered:
+        raw = lowered.split(marker, 1)[1]
+        sign = ""
+        if raw.startswith("-"):
+            sign = "-"
+            raw = raw[1:]
+        digits = []
+        for ch in raw:
+            if ch.isdigit():
+                digits.append(ch)
+            else:
+                break
+        if digits:
+            try:
+                sbs = int(sign + "".join(digits))
+            except ValueError:
+                sbs = None
+    hints = {
+        1: "lỗi không rõ từ SpringBoard",
+        2: "yêu cầu mở app không hợp lệ",
+        3: "dịch vụ mở app không tương thích",
+        4: "bị chặn quyền",
+        5: "lệnh mở app bị hủy",
+        6: "SpringBoard từ chối — app vừa đóng chưa sẵn sàng, chưa cài, hoặc máy đang khoá",
+    }
+    hint = hints.get(sbs)
+    extra = f" ({hint})" if hint else ""
+    return f"Không mở được {bundle_id}: {text}{extra}"
+
+
 @dataclass
 class ControlChannel:
     """Một máy. Không giữ kết nối — mỗi lệnh mở một socket ngắn."""
@@ -213,10 +250,28 @@ class ControlChannel:
         apps.sort(key=lambda a: (not a.is_user_app, a.display_name.lower()))
         return apps
 
-    async def launch(self, bundle_id: str) -> None:
-        text = await self.command(f"launch {bundle_id}")
-        if not text.strip().startswith("OK"):
-            raise ControlError(f"Không mở được {bundle_id}: {text.strip()}")
+    async def launch(self, bundle_id: str, retries: int = 0,
+                     retry_delay: float = 1.5) -> None:
+        last = ""
+        attempts = max(0, int(retries)) + 1
+        delay = max(0.0, float(retry_delay))
+        for attempt in range(attempts):
+            try:
+                text = (await self.command(f"launch {bundle_id}")).strip()
+            except (UnauthorizedError, NotPatchedError):
+                raise
+            except ControlError as exc:
+                last = str(exc)
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(delay)
+                    continue
+                raise ControlError(describe_launch_failure(bundle_id, last)) from None
+            if text.startswith("OK"):
+                return
+            last = text
+            if attempt + 1 < attempts:
+                await asyncio.sleep(delay)
+        raise ControlError(describe_launch_failure(bundle_id, last))
 
     async def wake_if_locked(self) -> str:
         """Trả ``locked``, ``blanked`` hoặc ``unlocked``; bấm Home khi cần."""
