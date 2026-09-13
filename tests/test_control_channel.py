@@ -439,6 +439,65 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("sbs=6", msg)
         self.assertIn("SpringBoard", msg)
 
+
+    async def test_finds_files_app_downloads_in_file_provider(self) -> None:
+        keep = (
+            "/var/mobile/Containers/Shared/AppGroup/"
+            "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/"
+            "File Provider Storage/Downloads/.keep"
+        )
+        decoy = "/var/mobile/Containers/Shared/AppGroup/OTHER-UUID/Library/x.dat"
+        self.server.received[keep] = b""
+        self.server.received[decoy] = b"x"
+        self.server.received["/var/mobile/Downloads/old.txt"] = b"old"
+
+        path = await self.channel.find_files_downloads()
+
+        self.assertEqual(
+            path,
+            "/var/mobile/Containers/Shared/AppGroup/"
+            "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/"
+            "File Provider Storage/Downloads",
+        )
+
+    async def test_prefers_file_provider_that_already_has_downloads(self) -> None:
+        decoy = (
+            "/var/mobile/Containers/Shared/AppGroup/OTHER-UUID/"
+            "File Provider Storage/Other/x.dat"
+        )
+        keep = (
+            "/var/mobile/Containers/Shared/AppGroup/"
+            "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/"
+            "File Provider Storage/Downloads/.keep"
+        )
+        self.server.received[decoy] = b"x"
+        self.server.received[keep] = b""
+
+        path = await self.channel.find_files_downloads()
+
+        self.assertEqual(
+            path,
+            "/var/mobile/Containers/Shared/AppGroup/"
+            "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE/"
+            "File Provider Storage/Downloads",
+        )
+
+    async def test_files_downloads_falls_back_to_icloud(self) -> None:
+        self.server.received[
+            "/var/mobile/Library/Mobile Documents/"
+            "com~apple~CloudDocs/Downloads/a.pdf"
+        ] = b"a"
+
+        path = await self.channel.find_files_downloads()
+
+        self.assertTrue(path.endswith("com~apple~CloudDocs/Downloads"))
+
+    async def test_files_downloads_missing_is_an_error(self) -> None:
+        with self.assertRaises(ControlError) as ctx:
+            await self.channel.find_files_downloads()
+        self.assertIn("Tải về", str(ctx.exception))
+
+
 class ScriptAppCommandTest(unittest.TestCase):
     def test_parses_bundle_id_commands(self) -> None:
         steps = script.parse("launchapp com.zing.zalo\nkillapp com.golike.app")

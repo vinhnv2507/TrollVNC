@@ -557,7 +557,12 @@ Các nút dễ thấy trên toolbar:
 Trình duyệt iOS có các vị trí nhanh:
 
 - Thư viện ảnh/video: `/var/mobile/Media/DCIM`
-- Downloads: `/var/mobile/Downloads`
+- **Tệp → Tải về (Trên iPhone)**: thư mục Tải về cạnh 3uTools trong app Tệp.
+  UUID File Provider khác nhau từng máy, PC tự dò
+  `.../Shared/AppGroup/<UUID>/File Provider Storage/Downloads`
+- **3uTools (Tệp → Trên iPhone)**: Documents của app `notes.3u`
+- **3uTools + Tải về**: đẩy một file vào cả hai chỗ trên từng máy
+- Downloads cũ: `/var/mobile/Downloads` (không hiện icon trong app Tệp)
 - Documents của ControlIOS: `/var/mobile/Documents` (không phải lúc nào cũng
   được app Tệp hiển thị)
 - Thư mục Documents của app hiện trong **Tệp → Trên iPhone**:

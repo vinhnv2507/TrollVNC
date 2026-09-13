@@ -676,6 +676,71 @@ class ControlChannel:
             entries.append((fields[0], int(fields[1] or 0), fields[2] == "1"))
         return entries
 
+    async def _directory_names(self, path: str) -> List[str]:
+        """Tên thư mục con; đường dẫn không đọc được thì coi như không có."""
+
+        try:
+            entries = await self.list_dir(path)
+        except ControlError:
+            return []
+        names: List[str] = []
+        for name, _size, is_dir in entries:
+            if (is_dir and name and name not in {".", ".."}
+                    and "/" not in name and "\\" not in name):
+                names.append(name)
+        return names
+
+    async def find_files_downloads(self) -> str:
+        """Thư mục Tải về hiện trong app Tệp, cạnh icon 3uTools.
+
+        Không phải `/var/mobile/Downloads`. Trên iOS, Tệp → Trên iPhone → Tải về
+        nằm trong App Group File Provider Storage của FileProvider LocalStorage.
+        Mỗi máy một UUID khác nhau nên phải dò, không ghi cứng đường dẫn.
+        Nếu có nhiều File Provider, ưu tiên cái đã có thư mục Downloads.
+        """
+
+        app_group = "/var/mobile/Containers/Shared/AppGroup"
+        storage_name = "File Provider Storage"
+        uuids = await self._directory_names(app_group)
+        with_downloads: List[str] = []
+        without_downloads: List[str] = []
+        if uuids:
+            sem = asyncio.Semaphore(8)
+
+            async def probe(uuid: str) -> Optional[tuple[str, bool]]:
+                async with sem:
+                    children = await self._directory_names(f"{app_group}/{uuid}")
+                    if storage_name not in children:
+                        return None
+                    storage = f"{app_group}/{uuid}/{storage_name}"
+                    inner = await self._directory_names(storage)
+                    return f"{storage}/Downloads", "Downloads" in inner
+
+            results = await asyncio.gather(
+                *(probe(uuid) for uuid in uuids), return_exceptions=True)
+            for result in results:
+                if not isinstance(result, tuple) or not result:
+                    continue
+                path, has_downloads = result
+                if has_downloads:
+                    with_downloads.append(path)
+                else:
+                    without_downloads.append(path)
+
+        if with_downloads:
+            return with_downloads[0]
+        if without_downloads:
+            return without_downloads[0]
+
+        icloud = "/var/mobile/Library/Mobile Documents/com~apple~CloudDocs"
+        if "Downloads" in await self._directory_names(icloud):
+            return icloud + "/Downloads"
+        if "Downloads" in await self._directory_names("/var/mobile"):
+            return "/var/mobile/Downloads"
+        raise ControlError(
+            "Không tìm thấy thư mục Tải về của app Tệp (Trên iPhone) trên máy này"
+        )
+
     async def get_file(self, remote: str, local: Path | str, progress=None) -> int:
         """Tải một file trong vùng dữ liệu mobile qua control socket, không cần SSH."""
 

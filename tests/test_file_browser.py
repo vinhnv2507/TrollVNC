@@ -31,6 +31,12 @@ class _FakeFilePool:
         self.entries: dict[str, list] = {}
         self.containers = {"notes.3u": CONTAINER}
         self.container_errors: dict[str, str] = {}
+        self.downloads_path = (
+            "/var/mobile/Containers/Shared/AppGroup/UUID-FP/"
+            "File Provider Storage/Downloads"
+        )
+        self.downloads_error = None
+        self.downloads_calls = 0
 
     def list_dir(self, key, path, on_done) -> None:
         self.list_calls.append(path)
@@ -44,6 +50,12 @@ class _FakeFilePool:
         err = self.container_errors.get(bundle_id)
         data = "" if err else self.containers.get(bundle_id, "")
         on_done(key, data, bundle_id, err)
+
+    def find_files_downloads(self, key, on_done) -> None:
+        self.downloads_calls += 1
+        err = self.downloads_error
+        data = "" if err else self.downloads_path
+        on_done(key, data, err)
 
 
 class FileBrowserDialogTest(unittest.TestCase):
@@ -109,6 +121,45 @@ class FileBrowserDialogTest(unittest.TestCase):
         self.assertIn("0 m\u1ee5c", dialog.status.text())
         self.assertNotIn("CannotRead", dialog.status.text())
         self.assertNotEqual(dialog.path_edit.text(), "/var/mobile")
+
+    def _select_data(self, dialog, data: str) -> None:
+        combo = dialog.preset_combo
+        for index in range(combo.count()):
+            if combo.itemData(index) == data:
+                combo.setCurrentIndex(index)
+                return
+        self.fail("missing preset " + data)
+
+    def test_files_downloads_preset_opens_file_provider_folder(self) -> None:
+        dialog = self._open()
+        self._select_data(dialog, "@files:downloads")
+        self.assertEqual(self.pool.downloads_calls, 1)
+        self.assertTrue(dialog.selected_files_downloads)
+        self.assertEqual(dialog.path, self.pool.downloads_path)
+        self.assertEqual(dialog.downloads_relpath(), "")
+        self.assertEqual(dialog.preset_combo.currentData(), "@files:downloads")
+
+    def test_missing_files_downloads_folder_still_opens(self) -> None:
+        self.pool.errors[self.pool.downloads_path] = "ERR CannotRead"
+        dialog = self._open()
+        self._select_data(dialog, "@files:downloads")
+        self.assertEqual(dialog.path, self.pool.downloads_path)
+        self.assertNotIn("CannotRead", dialog.status.text())
+        self.assertTrue(dialog.selected_files_downloads)
+
+    def test_both_3utools_and_downloads_marks_two_destinations(self) -> None:
+        dialog = self._open()
+        self._select_data(dialog, "@both:3u+downloads")
+        self.assertEqual(dialog.selected_app_bundle, "notes.3u")
+        self.assertTrue(dialog.selected_files_downloads)
+        self.assertTrue(dialog.select_button.isEnabled())
+
+    def test_files_downloads_error_explains(self) -> None:
+        self.pool.downloads_error = "ERR CannotRead"
+        dialog = self._open()
+        self._select_data(dialog, "@files:downloads")
+        self.assertFalse(dialog.selected_files_downloads)
+        self.assertIn("Tải về", dialog.status.text())
 
 
 if __name__ == "__main__":

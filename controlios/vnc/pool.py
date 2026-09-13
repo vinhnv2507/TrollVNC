@@ -62,6 +62,8 @@ class DevicePool:
         self._idle_since: Dict[str, float] = {}
         self._offscreen_sleeping: Dict[str, asyncio.Task] = {}
         self._janitor: Optional[asyncio.Task] = None
+        #: key -> đường dẫn Tải về (Tệp → Trên iPhone), cache theo máy
+        self._files_downloads_cache: Dict[str, str] = {}
 
     # --------------------------------------------------------------- lifecycle
 
@@ -736,6 +738,23 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def find_files_downloads(self, key: str, on_done) -> None:
+        """Tìm thư mục Tải về của app Tệp trên một máy."""
+
+        async def run() -> None:
+            try:
+                cached = self._files_downloads_cache.get(key)
+                if cached:
+                    on_done(key, cached, None)
+                    return
+                path = await self._channel(key).find_files_downloads()
+                self._files_downloads_cache[key] = path
+                on_done(key, path, None)
+            except Exception as exc:
+                on_done(key, "", str(exc))
+
+        self._call_coro(run())
+
     def measure_app_traffic(self, keys: Iterable[str], bundle_id: str,
                             concurrency: int = 10, sample_seconds: int = 10,
                             min_rx_bytes: int = 32 * 1024, on_event=None,
@@ -1340,6 +1359,64 @@ class DevicePool:
                 except Exception as exc:
                     if on_event:
                         on_event(key, f"LỖI: {exc}")
+
+            await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
+
+        self._call_coro(run())
+
+    def push_file_to_files_downloads(self, keys: Iterable[str], local: Path | str,
+                                     rel: str = "", on_event=None) -> None:
+        """Đẩy file vào Tệp → Trên iPhone → Tải về, dò UUID riêng từng máy."""
+
+        self.push_file_to_visible_folders(
+            keys, local, to_downloads=True, downloads_rel=rel, on_event=on_event)
+
+    def push_file_to_visible_folders(
+            self, keys: Iterable[str], local: Path | str, *,
+            bundle_id: str | None = None, to_downloads: bool = False,
+            downloads_rel: str = "", on_event=None) -> None:
+        """Đẩy file vào Documents của app và/hoặc thư mục Tải về của app Tệp."""
+
+        key_list = list(keys)
+        local = Path(local)
+        rel = (downloads_rel or "").strip().strip("/")
+
+        async def run() -> None:
+            async def one(key: str) -> None:
+                channel = self._channel(key)
+                written_any = False
+                if bundle_id:
+                    try:
+                        data, _bundle = await channel.container(bundle_id)
+                        remote = f"{data}/Documents/{local.name}"
+                        written = await channel.put_file(local, remote)
+                        written_any = True
+                        if on_event:
+                            on_event(key, f"đã ghi {written} byte vào 3uTools ({remote})")
+                    except Exception as exc:
+                        if on_event:
+                            on_event(key, f"LỖI 3uTools: {exc}")
+                if to_downloads:
+                    try:
+                        root = self._files_downloads_cache.get(key)
+                        if not root:
+                            root = await channel.find_files_downloads()
+                            self._files_downloads_cache[key] = root
+                        remote_dir = root.rstrip("/")
+                        if rel:
+                            remote_dir += "/" + rel
+                        remote = remote_dir + "/" + local.name
+                        written = await channel.put_file(local, remote)
+                        written_any = True
+                        if on_event:
+                            on_event(key, f"đã ghi {written} byte vào Tải về ({remote})")
+                    except Exception as exc:
+                        if on_event:
+                            on_event(key, f"LỖI Tải về: {exc}")
+                if not bundle_id and not to_downloads and on_event:
+                    on_event(key, "LỖI: chưa chọn nơi đẩy file")
+                elif not written_any and on_event and (bundle_id or to_downloads):
+                    pass
 
             await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
 

@@ -428,6 +428,32 @@ class WindowIntegrationTest(unittest.TestCase):
         ))
         self.assertEqual(len(sent[0][0]), 2)
 
+    def test_push_file_to_3utools_and_downloads(self) -> None:
+        sent = []
+        self.window.pool.push_file_to_visible_folders = (
+            lambda keys, local, **k: sent.append(
+                (list(keys), Path(local).name, k.get("bundle_id"),
+                 k.get("to_downloads"), k.get("downloads_rel"))
+            )
+        )
+        self.window.grid.select_all()
+
+        browser = unittest.mock.Mock()
+        browser.exec.return_value = 1
+        browser.selected_path.return_value = "/ignored"
+        browser.selected_app_bundle = "notes.3u"
+        browser.selected_files_downloads = True
+        browser.downloads_relpath.return_value = ""
+
+        with unittest.mock.patch("controlios.ui.app.QFileDialog.getOpenFileName",
+                                 return_value=(r"C:\\tmp\\anh.jpg", "")), \
+             unittest.mock.patch("controlios.ui.app.IOSFileBrowserDialog",
+                                 return_value=browser):
+            self.window._push_file()
+
+        self.assertEqual(sent, [(sent[0][0], "anh.jpg", "notes.3u", True, "")])
+        self.assertEqual(len(sent[0][0]), 2)
+
     def test_push_file_cancelled_sends_nothing(self) -> None:
         sent = []
         self.window.pool.push_file = lambda *a, **k: sent.append(a)

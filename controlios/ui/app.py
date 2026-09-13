@@ -129,6 +129,7 @@ class IOSFileBrowserDialog(QDialog):
 
     listed = Signal(str, str, object, str, int)
     container_loaded = Signal(str, str, str, str)
+    downloads_loaded = Signal(str, str, str)
 
     def __init__(self, pool: DevicePool, key: str, parent=None,
                  directories_only: bool = False) -> None:
@@ -139,6 +140,8 @@ class IOSFileBrowserDialog(QDialog):
         self.path = "/var/mobile"
         self.entries: list[tuple[str, int, bool]] = []
         self.selected_app_bundle: str | None = None
+        self.selected_files_downloads = False
+        self.files_downloads_root = ""
         self._list_gen = 0
         self.setWindowTitle(
             "Chọn thư mục trên iOS" if directories_only else "Lấy tệp từ iOS"
@@ -146,6 +149,7 @@ class IOSFileBrowserDialog(QDialog):
         self.resize(760, 520)
         self.listed.connect(self._on_listed)
         self.container_loaded.connect(self._on_container_loaded)
+        self.downloads_loaded.connect(self._on_downloads_loaded)
 
         layout = QVBoxLayout(self)
         presets = QHBoxLayout()
@@ -153,10 +157,11 @@ class IOSFileBrowserDialog(QDialog):
         self.preset_combo = QComboBox()
         self.preset_combo.addItem("Chọn vị trí…", "")
         self.preset_combo.addItem("Ảnh & video (DCIM)", "/var/mobile/Media/DCIM")
-        self.preset_combo.addItem("Downloads", "/var/mobile/Downloads")
+        self.preset_combo.addItem("Tệp → Tải về (Trên iPhone)", "@files:downloads")
         self.preset_combo.addItem("Documents (ControlIOS)", "/var/mobile/Documents")
         self.preset_combo.addItem("3uTools (Tệp → Trên iPhone)", "@app:notes.3u")
-        self.preset_combo.addItem("Thư mục ngoài iPhone (Downloads)", "/var/mobile/Downloads")
+        self.preset_combo.addItem("3uTools + Tải về", "@both:3u+downloads")
+        self.preset_combo.addItem("Downloads (cũ /var/mobile)", "/var/mobile/Downloads")
         self.preset_combo.addItem(
             "Tệp → thư mục ứng dụng",
             "/var/mobile/Containers/Data/Application",
@@ -167,11 +172,10 @@ class IOSFileBrowserDialog(QDialog):
         layout.addLayout(presets)
         if directories_only:
             hint = QLabel(
-                "Muốn file hiện trong app Tệp → Trên iPhone: chọn "
-                "‘Tệp → thư mục ứng dụng’, mở thư mục UUID của app rồi mở "
-                "Documents. Thư mục ngoài như Downloads nằm cùng cấp dữ liệu "
-                "nhưng iOS không hiển thị thành biểu tượng trong Tệp. Hoặc nhập "
-                "đường dẫn tuyệt đối bên dưới."
+                "File hiện trong app Tệp → Trên iPhone: chọn "
+                "‘Tệp → Tải về’ để vào thư mục Tải về cạnh 3uTools, "
+                "‘3uTools’ để vào icon 3uTools, hoặc ‘3uTools + Tải về’ "
+                "để đẩy vào cả hai chỗ trên từng máy."
             )
             hint.setWordWrap(True)
             hint.setStyleSheet("color: #687078; font-size: 11px;")
@@ -229,9 +233,34 @@ class IOSFileBrowserDialog(QDialog):
 
     def _load_preset(self, index: int) -> None:
         path = self.preset_combo.itemData(index)
+        if path == "@both:3u+downloads":
+            self.selected_app_bundle = "notes.3u"
+            self.selected_files_downloads = True
+            self.files_downloads_root = ""
+            self._list_gen += 1
+            self.entries = []
+            self.table.setRowCount(0)
+            self.status.setText(
+                "Sẽ đẩy vào 3uTools và Tệp → Tải về trên từng máy.")
+            self.select_button.setEnabled(True)
+            return
+        if path == "@files:downloads":
+            self.selected_app_bundle = None
+            self.selected_files_downloads = True
+            self.files_downloads_root = ""
+            self._list_gen += 1
+            self.status.setText("Đang tìm thư mục Tải về của app Tệp…")
+            self.pool.find_files_downloads(
+                self.key,
+                lambda k, data, err:
+                self.downloads_loaded.emit(k, data, err or ""),
+            )
+            return
         if isinstance(path, str) and path.startswith("@app:"):
             bundle_id = path[5:]
             self.selected_app_bundle = bundle_id
+            self.selected_files_downloads = False
+            self.files_downloads_root = ""
             self._list_gen += 1  # bỏ ls /var/mobile đang bay
             self.status.setText(f"Đang tìm thư mục dữ liệu của {bundle_id}…")
             self.pool.app_container(
@@ -242,6 +271,8 @@ class IOSFileBrowserDialog(QDialog):
             return
         if path:
             self.selected_app_bundle = None
+            self.selected_files_downloads = False
+            self.files_downloads_root = ""
             self.load_path(path)
 
     def _on_container_loaded(self, key: str, data: str, bundle_id: str, error: str) -> None:
@@ -263,6 +294,24 @@ class IOSFileBrowserDialog(QDialog):
             return
         self.load_path(root + "/Documents")
 
+
+    def _on_downloads_loaded(self, key: str, data: str, error: str) -> None:
+        if key != self.key:
+            return
+        if error:
+            self.status.setText(
+                f"Lỗi: {error}. Máy chưa có thư mục Tải về trong app Tệp.")
+            self.selected_files_downloads = False
+            return
+        root = (data or "").rstrip("/")
+        if not root:
+            self.status.setText("Máy không trả về thư mục Tải về của app Tệp.")
+            self.selected_files_downloads = False
+            return
+        self.selected_files_downloads = True
+        self.files_downloads_root = root
+        self.load_path(root)
+
     def _emit_listed(self, key: str, path: str, entries: list[tuple],
                      error: str | None, gen: int | None = None) -> None:
         self.listed.emit(
@@ -282,7 +331,10 @@ class IOSFileBrowserDialog(QDialog):
         if key != self.key or gen != self._list_gen:
             return
         if error and self._missing_dir_error(error) and (
-            path.rstrip("/").endswith("/Documents") or self.selected_app_bundle
+            path.rstrip("/").endswith("/Documents")
+            or path.rstrip("/").endswith("/Downloads")
+            or self.selected_app_bundle
+            or self.selected_files_downloads
         ):
             # Documents của app 3uTools thường chưa được tạo — vẫn mở thư mục trống
             # để chọn/đẩy file, không để lỗi đè lên path /var/mobile.
@@ -326,6 +378,17 @@ class IOSFileBrowserDialog(QDialog):
         if 0 <= row < len(self.entries) and self.directories_only:
             valid = bool(self.entries[row][2])
         self.select_button.setEnabled(valid)
+
+    def downloads_relpath(self) -> str:
+        root = (self.files_downloads_root or "").rstrip("/")
+        current = (self.path or "").rstrip("/")
+        if not self.selected_files_downloads or not root:
+            return ""
+        if current == root:
+            return ""
+        if current.startswith(root + "/"):
+            return current[len(root) + 1:]
+        return ""
 
     def selected_path(self) -> str:
         row = self.table.currentRow()
@@ -3344,9 +3407,19 @@ class MainWindow(QMainWindow):
 
         event = lambda k, m: self.bridge.message.emit(f"[{k}] {m}")
         app_bundle = getattr(browser, "selected_app_bundle", None)
-        if isinstance(app_bundle, str) and app_bundle:
-            self.pool.push_file_to_app(targets, Path(path), app_bundle,
-                                       on_event=event)
+        to_downloads = getattr(browser, "selected_files_downloads", False) is True
+        rel = ""
+        rel_fn = getattr(browser, "downloads_relpath", None)
+        if callable(rel_fn):
+            try:
+                rel = rel_fn() or ""
+            except Exception:
+                rel = ""
+        if (isinstance(app_bundle, str) and app_bundle) or to_downloads:
+            self.pool.push_file_to_visible_folders(
+                targets, Path(path),
+                bundle_id=app_bundle if isinstance(app_bundle, str) and app_bundle else None,
+                to_downloads=to_downloads, downloads_rel=rel, on_event=event)
         else:
             self.pool.push_file(targets, Path(path), remote.strip(), on_event=event)
         self.statusBar().showMessage(
