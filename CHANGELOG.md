@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.13] - 2026-09-14
+
+- Add a lightweight `version` control command so PC can show the IPA version
+  on the device grid without running full diagnostics.
+
+
 ## [4.12] - 2026-09-14
 
 - Fix EarnApp/app relaunch failing with `sbs=3` (IncompatibleService): terminate

@@ -7221,6 +7221,9 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlWakeIfLocked();
     } else if ([cmd isEqualToString:@"devicename"]) {
         resp = tvCtlDeviceName();
+    } else if ([cmd isEqualToString:@"version"]) {
+        resp = [[NSString stringWithFormat:@"OK %s\n", PACKAGE_VERSION]
+            dataUsingEncoding:NSUTF8StringEncoding];
     } else if ([cmd isEqualToString:@"homeaudit"]) {
         resp = tvCtlHomeAudit(NO);
     } else if ([cmd isEqualToString:@"homeaudit clear"]) {
