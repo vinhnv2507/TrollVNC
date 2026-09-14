@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.12] - 2026-09-14
+
+- Fix EarnApp/app relaunch failing with `sbs=3` (IncompatibleService): terminate
+  through FrontBoard before SIGKILL, and launch with SBS UnlockDevice options
+  instead of NULL dictionaries. Treat an already-running PID as launch success.
+
 ## [4.11] - 2026-09-11
 
 - Skip the capture defer window while a pointer is held, so slider captchas

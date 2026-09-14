@@ -4200,6 +4200,22 @@ static NSData *tvCtlTSVForApps(void) {
     return [out dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static void tvFBSTerminateBundle(NSString *bundleId);
+#if !TARGET_OS_SIMULATOR
+static int tvKillRelatedProcesses(NSString *bundleId, pid_t mainPID);
+#endif
+
+static NSDictionary *tvSBSUnlockLaunchOptions(void *sbsHandle) {
+    NSString *unlockKey = @"UnlockDevice";
+    if (sbsHandle) {
+        NSString * const *keyPtr =
+            (NSString * const *)dlsym(sbsHandle, "SBSApplicationLaunchOptionUnlockDeviceKey");
+        if (keyPtr && (*keyPtr).length > 0)
+            unlockKey = *keyPtr;
+    }
+    return @{unlockKey : @YES};
+}
+
 static NSData *tvCtlLaunchApp(NSString *bundleId) {
     if (bundleId.length == 0)
         return [@"ERR MissingBundleID\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -4207,19 +4223,31 @@ static NSData *tvCtlLaunchApp(NSString *bundleId) {
     BOOL ok = NO;
     int sbsErr = -1; // mã lỗi SpringBoardServices gần nhất (để chẩn đoán)
 
-    // 1) SpringBoardServices — đường đáng tin nhất khi gọi từ daemon root. Ưu
-    //    tiên bản CÓ launch options (iOS mới trả lỗi với bản không options).
+    // 1) SpringBoardServices — đường đáng tin nhất khi gọi từ daemon root.
+    //    Ưu tiên API 5 tham số mà app ControlIOS đang dùng thành công
+    //    (UnlockDevice, không bao giờ truyền NULL options). NULL options trên
+    //    iOS mới trả SBSApplicationLaunchErrorIncompatibleService (sbs=3).
     //    entitlement com.apple.springboard.launchapplications đã có sẵn.
     void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
                      "SpringBoardServices",
                      RTLD_LAZY);
     if (h) {
-        int (*sbsLaunchOpts)(CFStringRef, CFDictionaryRef, Boolean) =
-            (int (*)(CFStringRef, CFDictionaryRef, Boolean))dlsym(
-                h, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
-        if (sbsLaunchOpts) {
-            sbsErr = sbsLaunchOpts((__bridge CFStringRef)bundleId, NULL, false);
+        CFDictionaryRef opts = (__bridge CFDictionaryRef)tvSBSUnlockLaunchOptions(h);
+        int (*sbsLaunchURLOpts)(CFStringRef, CFURLRef, CFDictionaryRef, CFDictionaryRef, Boolean) =
+            (int (*)(CFStringRef, CFURLRef, CFDictionaryRef, CFDictionaryRef, Boolean))dlsym(
+                h, "SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions");
+        if (sbsLaunchURLOpts) {
+            sbsErr = sbsLaunchURLOpts((__bridge CFStringRef)bundleId, NULL, NULL, opts, false);
             ok = (sbsErr == 0);
+        }
+        if (!ok) {
+            int (*sbsLaunchOpts)(CFStringRef, CFDictionaryRef, Boolean) =
+                (int (*)(CFStringRef, CFDictionaryRef, Boolean))dlsym(
+                    h, "SBSLaunchApplicationWithIdentifierAndLaunchOptions");
+            if (sbsLaunchOpts) {
+                sbsErr = sbsLaunchOpts((__bridge CFStringRef)bundleId, opts, false);
+                ok = (sbsErr == 0);
+            }
         }
         if (!ok) {
             int (*sbsLaunch)(CFStringRef, Boolean) =
@@ -4238,6 +4266,10 @@ static NSData *tvCtlLaunchApp(NSString *bundleId) {
             ok = [ws openApplicationWithBundleID:bundleId];
     }
 
+    // 3) LS/SBS có thể báo lỗi dù process đã lên (false-negative).
+    if (!ok && tvPIDForBundleIdentifier(bundleId) > 0)
+        ok = YES;
+
     TVLog(@"Control socket: launch %@ -> %@ (sbsErr=%d)", bundleId, ok ? @"OK" : @"FAIL", sbsErr);
     if (ok)
         return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -4250,26 +4282,22 @@ static NSData *tvCtlTerminateApp(NSString *bundleId) {
     if (bundleId.length == 0)
         return [@"ERR MissingBundleID\n" dataUsingEncoding:NSUTF8StringEncoding];
 
-    pid_t pid = 0;
-    void *h = dlopen("/System/Library/PrivateFrameworks/SpringBoardServices.framework/"
-                     "SpringBoardServices",
-                     RTLD_LAZY);
-    if (h) {
-        int (*sbsPid)(CFStringRef, pid_t *) =
-            (int (*)(CFStringRef, pid_t *))dlsym(h, "SBSProcessIDForDisplayIdentifier");
-        if (sbsPid)
-            sbsPid((__bridge CFStringRef)bundleId, &pid);
-    }
-
+    pid_t pid = tvPIDForBundleIdentifier(bundleId);
     if (pid <= 0) {
         TVLog(@"Control socket: terminate %@ -> not running", bundleId);
         return [@"NOT_RUNNING\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
 
-    BOOL ok = (kill(pid, SIGKILL) == 0);
-    TVLog(@"Control socket: terminate %@ (pid %d) -> %@", bundleId, pid, ok ? @"OK" : @"FAIL");
-    const char *raw = ok ? "OK\n" : "ERR KillFailed\n";
-    return [NSData dataWithBytes:raw length:strlen(raw)];
+    // FrontBoard trước, SIGKILL sau — cùng cách Free RAM. Chỉ SIGKILL để
+    // SpringBoard vẫn nghĩ app đang chiếm service -> relaunch sbs=3.
+    tvFBSTerminateBundle(bundleId);
+#if !TARGET_OS_SIMULATOR
+    int killed = tvKillRelatedProcesses(bundleId, pid);
+#else
+    int killed = (kill(pid, SIGKILL) == 0) ? 1 : 0;
+#endif
+    TVLog(@"Control socket: terminate %@ (pid %d) killed=%d", bundleId, pid, killed);
+    return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
 
