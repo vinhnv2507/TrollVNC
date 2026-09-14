@@ -100,6 +100,32 @@ class BulkResultTest(unittest.TestCase):
         self.assertEqual(ok, 1)
         self.assertFalse(failures)
 
+
+    def test_launch_wakes_locked_device_first(self) -> None:
+        self.good.locked = True
+        describe, ok, failures = self._run(
+            self.pool.launch_app, [self.good_key], "com.golike.app"
+        )
+        self.assertEqual(ok, 1)
+        self.assertFalse(failures)
+        self.assertGreaterEqual(self.good.home_count, 1)
+        self.assertEqual(self.good.launched, ["com.golike.app"])
+
+    def test_restart_wakes_locked_device_before_relaunch(self) -> None:
+        self.good.locked = True
+        describe, ok, failures = self._run(
+            lambda keys, bundle, **kw: self.pool.restart_app(
+                keys, bundle, min_delay=0, max_delay=0, **kw
+            ),
+            [self.good_key], "com.golike.app"
+        )
+        self.assertEqual(ok, 1)
+        self.assertFalse(failures)
+        self.assertGreaterEqual(self.good.home_count, 1)
+        self.assertEqual(self.good.terminated, ["com.golike.app"])
+        self.assertEqual(self.good.launched, ["com.golike.app"])
+
+
     def test_unpatched_device_shows_up_as_a_failure(self) -> None:
         # Máy thứ hai dùng cổng khác nên phải đổi cấu hình cổng cho nó.
         self.pool.settings.control_port = self.bad.port

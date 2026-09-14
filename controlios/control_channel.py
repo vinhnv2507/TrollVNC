@@ -150,7 +150,7 @@ def describe_launch_failure(bundle_id: str, reply: str) -> str:
     hints = {
         1: "lỗi không rõ từ SpringBoard",
         2: "yêu cầu mở app không hợp lệ",
-        3: "dịch vụ mở app không tương thích",
+        3: "SpringBoard từ chối dịch vụ mở app — cần IPA ControlIOS 4.12+",
         4: "bị chặn quyền",
         5: "lệnh mở app bị hủy",
         6: "SpringBoard từ chối — app vừa đóng chưa sẵn sàng, chưa cài, hoặc máy đang khoá",

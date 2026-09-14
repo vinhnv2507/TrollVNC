@@ -502,10 +502,17 @@ class DevicePool:
 
         self._call_coro(run())
 
+    async def _wake_then_launch(self, channel, bundle_id: str) -> None:
+        try:
+            await channel.wake_if_locked()
+        except Exception:
+            pass
+        await channel.launch(bundle_id, retries=2, retry_delay=1.5)
+
     def launch_app(self, keys: Iterable[str], bundle_id: str,
                    on_event=None, on_done=None) -> None:
         async def action(channel):
-            await channel.launch(bundle_id, retries=2, retry_delay=1.5)
+            await self._wake_then_launch(channel, bundle_id)
             return f"đã mở {bundle_id}"
 
         self._bulk_app_action(keys, f"Mở {bundle_id}", action, on_event, on_done)
@@ -581,7 +588,7 @@ class DevicePool:
                         on_event(key, f"đã đóng {bundle_id}; chờ {delay:.1f} giây "
                                       f"({index}/{len(key_list)})")
                     await asyncio.sleep(delay)
-                    await channel.launch(bundle_id, retries=2, retry_delay=1.5)
+                    await self._wake_then_launch(channel, bundle_id)
                     succeeded.append(key)
                     if on_event:
                         on_event(key, f"đã khởi động lại {bundle_id} sau "
@@ -660,7 +667,7 @@ class DevicePool:
                             if on_event:
                                 on_event(key, f"app đang mở là {foreground or 'màn hình hệ thống'}; "
                                               f"đang mở {bundle_id}")
-                            await channel.launch(bundle_id, retries=2, retry_delay=1.5)
+                            await self._wake_then_launch(channel, bundle_id)
                             await asyncio.sleep(2.0)
                             await session.request_capture()
                         elif foreground != bundle_id:
@@ -712,7 +719,7 @@ class DevicePool:
                             on_event(key, f'vẫn thấy "{second_state}"; đang khởi động lại {bundle_id}')
                         await channel.terminate(bundle_id)
                         await asyncio.sleep(random.uniform(delay_min, delay_max))
-                        await channel.launch(bundle_id, retries=2, retry_delay=1.5)
+                        await self._wake_then_launch(channel, bundle_id)
                         if on_event:
                             on_event(key, f"đã khởi động lại {bundle_id}")
                     except Exception as exc:

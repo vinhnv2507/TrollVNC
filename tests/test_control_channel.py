@@ -730,5 +730,11 @@ class LaunchErrorTextTest(unittest.TestCase):
         self.assertIn("sbs=6", text)
         self.assertIn("SpringBoard", text)
 
+    def test_sbs3_mentions_ipa_update(self) -> None:
+        text = describe_launch_failure("com.brd.earnapp", "ERR LaunchFailed sbs=3")
+        self.assertIn("com.brd.earnapp", text)
+        self.assertIn("sbs=3", text)
+        self.assertIn("4.12", text)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
