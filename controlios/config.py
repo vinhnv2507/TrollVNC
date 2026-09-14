@@ -165,6 +165,10 @@ class DeviceSpec:
     ssh_port: Optional[int] = None
     # UDID máy USB (để tự dựng lại relay khi mở app). Rỗng với máy mạng thường.
     udid: str = ""
+    # Ghi chú riêng của máy, chỉ lưu trên PC.
+    note: str = ""
+    # Phiên bản IPA ControlIOS đang chạy (cache từ control socket).
+    ios_version: str = ""
     # Chất lượng riêng của màn hình lớn. None = dùng mặc định toàn cục.
     live_fps: Optional[float] = None
     live_long_edge: Optional[int] = None

@@ -163,6 +163,9 @@ class WindowTest(unittest.TestCase):
                 list(requested_keys or []))
             menu = window._build_grid_group_menu(["10.0.0.1:5901"])
             texts = [action.text() for action in menu.actions()]
+            self.assertTrue(any(text == "Copy IP" for text in texts))
+            self.assertTrue(any("Đặt tên hiển thị" in (text or "") for text in texts))
+            self.assertTrue(any((text or "").startswith("Ghi chú") for text in texts))
             self.assertTrue(any("Xoá máy này" in text for text in texts))
             action = next(a for a in menu.actions() if "Xoá máy này" in a.text())
             action.trigger()
@@ -171,6 +174,55 @@ class WindowTest(unittest.TestCase):
             menu = window._build_grid_group_menu(["10.0.0.1:5901", "10.0.0.2:5901"])
             texts = [action.text() for action in menu.actions()]
             self.assertTrue(any("Xoá 2 máy đã chọn" in text for text in texts))
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_window_shows_pc_version(self) -> None:
+        from controlios import __version__
+        registry_path = Path(__file__).parent / "_ver_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            self.assertIn(__version__, window.windowTitle())
+            self.assertIn(__version__, window.pc_version_label.text())
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_copy_ip_and_display_name_and_note(self) -> None:
+        registry_path = Path(__file__).parent / "_label_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window._copy_device_ips(["10.0.0.1:5901", "10.0.0.2:5901"])
+            self.assertEqual(app.clipboard().text(), "10.0.0.1\n10.0.0.2")
+            with unittest.mock.patch(
+                "controlios.ui.app.QInputDialog.getText",
+                return_value=("May A", True),
+            ):
+                window._rename_display_name(["10.0.0.1:5901"])
+            device = next(d for d in window.registry.devices if d.host == "10.0.0.1")
+            self.assertEqual(device.name, "May A")
+            self.assertEqual(window.grid.tiles[device.key].spec.name, "May A")
+            from PySide6.QtWidgets import QDialog
+            with unittest.mock.patch(
+                "controlios.ui.app.DeviceNoteDialog.exec",
+                return_value=QDialog.Accepted,
+            ), unittest.mock.patch(
+                "controlios.ui.app.DeviceNoteDialog.text",
+                return_value="keo captcha shopee",
+            ):
+                window._open_device_note(["10.0.0.1:5901"])
+            device = next(d for d in window.registry.devices if d.host == "10.0.0.1")
+            self.assertEqual(device.note, "keo captcha shopee")
+            saved = Registry.load(registry_path).devices[0]
+            self.assertEqual(saved.name, "May A")
+            self.assertEqual(saved.note, "keo captcha shopee")
         finally:
             window.close()
             registry_path.unlink(missing_ok=True)
@@ -394,7 +446,8 @@ class LayoutTest(unittest.TestCase):
                             data=bytes(40 * 71 * 3),
                             full_width=752, full_height=1338))
         app.processEvents()
-        expected = int(tile.width() / (752 / 1338)) + 22
+        from controlios.ui.tile import LABEL_HEIGHT
+        expected = int(tile.width() / (752 / 1338)) + LABEL_HEIGHT
         self.assertEqual(tile.height(), expected)
         self.assertNotEqual(tile.height(), before)
         grid.close()

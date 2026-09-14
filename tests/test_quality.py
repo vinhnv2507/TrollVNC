@@ -177,6 +177,29 @@ class ScaledPixmapCacheTest(unittest.TestCase):
         self.assertEqual(device_display_name(named), "iPhone cua An — 172.30.3.152")
         self.assertEqual(device_display_name(unnamed), "172.30.3.153")
 
+    def test_tile_shows_alias_under_ip_and_group(self) -> None:
+        from controlios.config import DeviceSpec
+        from controlios.ui.tile import (
+            device_alias, device_group_line, device_ip_line, device_tooltip,
+        )
+
+        spec = DeviceSpec(
+            host="172.30.3.152", name="May A", group="Farm A",
+            ios_version="4.13", note="capcha shopee",
+        )
+        self.assertEqual(device_ip_line(spec), "172.30.3.152  ·  v4.13")
+        self.assertEqual(device_group_line(spec), "Nhóm: Farm A")
+        self.assertEqual(device_alias(spec), "May A")
+        tip = device_tooltip(spec)
+        self.assertIn("172.30.3.152", tip)
+        self.assertIn("ControlIOS 4.13", tip)
+        self.assertIn("May A", tip)
+        self.assertIn("capcha shopee", tip)
+        unnamed = DeviceSpec(host="172.30.3.153")
+        self.assertEqual(device_ip_line(unnamed), "172.30.3.153")
+        self.assertEqual(device_alias(unnamed), "")
+        self.assertEqual(device_group_line(unnamed), "Nhóm: Chưa được gán")
+
 
 class QualityDialogTest(unittest.TestCase):
     def setUp(self) -> None:

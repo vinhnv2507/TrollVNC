@@ -179,7 +179,8 @@ class DeviceGrid(QScrollArea):
             for tile_key, tile in self.tiles.items():
                 tile.set_selected(tile_key == key)
             self.selection_changed.emit(list(self.selection))
-        return list(self.selection)
+            return [key]
+        return [key] + [item for item in self.selection if item != key]
 
     def _show_device_menu(self, key: str, global_pos) -> None:
         targets = self._context_targets(key)

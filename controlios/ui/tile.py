@@ -21,16 +21,52 @@ STATE_COLOUR = {
 }
 
 
-LABEL_HEIGHT = 38
+LABEL_HEIGHT = 54
 # Tỉ lệ ngang/dọc trước khi có khung hình đầu tiên (iPhone màn hình dài).
 DEFAULT_ASPECT = 9 / 19.5
 
 
-def device_display_name(spec: DeviceSpec) -> str:
-    """Tên đã biết của iPhone kèm địa chỉ để phân biệt các máy."""
+def device_alias(spec: DeviceSpec) -> str:
+    """Tên hiển thị do người dùng đặt hoặc tên iPhone, không gồm IP."""
 
     name = (spec.name or "").strip()
-    return spec.host if not name or name == spec.host else f"{name} — {spec.host}"
+    return "" if not name or name == spec.host else name
+
+
+def device_ip_line(spec: DeviceSpec) -> str:
+    """Dòng 1: IP, kèm version IPA nếu đã biết."""
+
+    version = (getattr(spec, "ios_version", "") or "").strip().lstrip("vV")
+    return f"{spec.host}  ·  v{version}" if version else spec.host
+
+
+def device_group_line(spec: DeviceSpec) -> str:
+    """Dòng 2: nhóm gán trên PC."""
+
+    group = (spec.group or "").strip() or "Chưa được gán"
+    return f"Nhóm: {group}"
+
+
+def device_display_name(spec: DeviceSpec) -> str:
+    """Tên một dòng (IP, hoặc 'tên — IP') cho chỗ không phải ô lưới."""
+
+    alias = device_alias(spec)
+    return spec.host if not alias else f"{alias} — {spec.host}"
+
+
+def device_tooltip(spec: DeviceSpec) -> str:
+    lines = [spec.host]
+    version = (getattr(spec, "ios_version", "") or "").strip()
+    if version:
+        lines.append(f"ControlIOS {version.lstrip('vV')}")
+    lines.append(device_group_line(spec))
+    alias = device_alias(spec)
+    if alias:
+        lines.append(alias)
+    note = (getattr(spec, "note", "") or "").strip()
+    if note:
+        lines.extend(["", note])
+    return "\n".join(lines)
 
 
 class DeviceTile(QWidget):
@@ -67,7 +103,7 @@ class DeviceTile(QWidget):
         self._dragging = False
         self._selection_dragging = False
         self._apply_size()
-        self.setToolTip(spec.key)
+        self.setToolTip(device_tooltip(spec))
 
     # -------------------------------------------------------------------- size
 
@@ -241,20 +277,35 @@ class DeviceTile(QWidget):
 
         label = QRect(0, self.height() - LABEL_HEIGHT, self.width(), LABEL_HEIGHT)
         painter.fillRect(label, QColor("#1b1f27"))
+        line_h = LABEL_HEIGHT // 3
         painter.setPen(colour)
-        painter.drawEllipse(6, self.height() - 15, 8, 8)
+        painter.drawEllipse(6, label.y() + max(2, (line_h - 8) // 2), 8, 8)
+        text_width = label.width() - 26
+        ip_rect = QRect(20, label.y(), text_width, line_h)
+        group_rect = QRect(20, label.y() + line_h, text_width, line_h)
+        name_rect = QRect(20, label.y() + 2 * line_h, text_width, line_h)
+        metrics = painter.fontMetrics()
         painter.setPen(QColor("#d5d9e0"))
-        text = device_display_name(self.spec)
         painter.drawText(
-            label.adjusted(20, 0, -4, -18), Qt.AlignVCenter | Qt.AlignLeft,
-            painter.fontMetrics().elidedText(text, Qt.ElideRight, label.width() - 26),
+            ip_rect, Qt.AlignVCenter | Qt.AlignLeft,
+            metrics.elidedText(device_ip_line(self.spec), Qt.ElideRight, text_width),
         )
-        group = self.spec.group.strip() or "Chưa được gán"
         painter.setPen(QColor("#9aa6b2"))
         painter.drawText(
-            label.adjusted(20, 19, -4, 0), Qt.AlignVCenter | Qt.AlignLeft,
-            painter.fontMetrics().elidedText(
-                f"Nhóm: {group}", Qt.ElideRight, label.width() - 26
-            ),
+            group_rect, Qt.AlignVCenter | Qt.AlignLeft,
+            metrics.elidedText(device_group_line(self.spec), Qt.ElideRight, text_width),
         )
+        alias = device_alias(self.spec)
+        if alias:
+            painter.setPen(QColor("#f2f5f8"))
+            painter.drawText(
+                name_rect, Qt.AlignVCenter | Qt.AlignLeft,
+                metrics.elidedText(alias, Qt.ElideRight, text_width - 12),
+            )
+        if (getattr(self.spec, "note", "") or "").strip():
+            painter.setPen(QColor("#f0b429"))
+            painter.drawText(
+                label.adjusted(0, 2 * line_h, -4, 0),
+                Qt.AlignVCenter | Qt.AlignRight, "✎",
+            )
         painter.end()

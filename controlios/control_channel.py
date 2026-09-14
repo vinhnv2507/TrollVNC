@@ -299,6 +299,29 @@ class ControlChannel:
             raise ControlError("Tên thiết bị trống")
         return name
 
+    async def server_version(self) -> str:
+        """Phiên bản IPA ControlIOS đang chạy trên máy."""
+
+        reply = ""
+        try:
+            reply = (await self.command("version")).strip()
+        except NotPatchedError:
+            reply = ""
+        if reply.startswith("OK "):
+            value = reply[3:].strip().splitlines()[0].strip()
+            if value:
+                return value
+        diag = await self.diagnostics()
+        for line in diag.splitlines():
+            if line.startswith("server_version="):
+                value = line.split("=", 1)[1].strip()
+                if value:
+                    return value
+        raise ControlError(
+            f"Không đọc được phiên bản ControlIOS: {reply}" if reply
+            else "Không đọc được phiên bản ControlIOS"
+        )
+
     async def app_network_sample(self, bundle_id: str) -> AppNetworkSample:
         """Lấy PID, số socket và bộ đếm mạng tại thời điểm hiện tại.
 

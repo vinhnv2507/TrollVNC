@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from .. import script as script_lang
+from .. import __version__
 from ..config import (
     DEFAULT_EARNAPP_MONITOR, DEFAULT_PORT,
     DEFAULT_REGISTRY, DEFAULT_SCAN_RANGE, PROJECT_ROOT,
@@ -40,6 +41,7 @@ from .detail import DetailView
 from .grid import DeviceGrid
 from .quality import QualityDialog
 from .ssh_console import SshConsoleDialog
+from .tile import device_alias, device_tooltip
 
 log = logging.getLogger(__name__)
 
@@ -472,6 +474,7 @@ class ScanWorker(QThread):
 
 class DeviceNameWorker(QThread):
     found = Signal(str, str)
+    version = Signal(str, str)
     failed = Signal(str, str)
 
     def __init__(self, devices: List[DeviceSpec], port: int, token: str, parent=None) -> None:
@@ -490,16 +493,52 @@ class DeviceNameWorker(QThread):
                     timeout=2.0,
                     loopback=device.is_usb,
                 )
-                try:
-                    name = await channel.device_name()
-                except (ControlError, ValueError) as error:
-                    self.failed.emit(device.key, str(error))
-                    return
-                self.found.emit(device.key, name)
+                need_name = (
+                    not device.name.strip()
+                    or device.name.strip() in {device.host, device.udid[:8]}
+                )
+                need_version = not (getattr(device, "ios_version", "") or "").strip()
+                if need_version:
+                    try:
+                        version = await channel.server_version()
+                    except (ControlError, ValueError):
+                        pass
+                    else:
+                        self.version.emit(device.key, version)
+                if need_name:
+                    try:
+                        name = await channel.device_name()
+                    except (ControlError, ValueError) as error:
+                        self.failed.emit(device.key, str(error))
+                        return
+                    self.found.emit(device.key, name)
 
             await asyncio.gather(*(one(device) for device in self.devices))
 
         asyncio.run(lookup())
+
+
+class DeviceNoteDialog(QDialog):
+    """Bảng ghi chú gắn với một máy, lưu trên PC."""
+
+    def __init__(self, spec: DeviceSpec, parent=None) -> None:
+        super().__init__(parent)
+        alias = device_alias(spec) or spec.name or spec.host
+        self.setWindowTitle(f"Ghi chú — {spec.host}")
+        self.resize(460, 320)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"{alias}  ·  {spec.host}"))
+        self.editor = QPlainTextEdit()
+        self.editor.setPlaceholderText("Ghi chú cho máy này (chỉ lưu trên PC)…")
+        self.editor.setPlainText(getattr(spec, "note", "") or "")
+        layout.addWidget(self.editor)
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def text(self) -> str:
+        return self.editor.toPlainText()
 
 
 class ScanDialog(QDialog):
@@ -2083,7 +2122,7 @@ class ScriptDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self, registry_path: Path = DEFAULT_REGISTRY) -> None:
         super().__init__()
-        self.setWindowTitle("Control IOS PC")
+        self.setWindowTitle(f"Control IOS PC {__version__}")
         self.resize(1500, 950)
         self.registry_path = registry_path
         self.registry = Registry.load(registry_path)
@@ -2273,6 +2312,9 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.coords_label)
         self.stats_label = QLabel("")
         self.statusBar().addPermanentWidget(self.stats_label)
+        self.pc_version_label = QLabel(f"PC {__version__}")
+        self.pc_version_label.setToolTip("Phiên bản Control IOS PC đang chạy")
+        self.statusBar().addPermanentWidget(self.pc_version_label)
 
         self.bridge.frame.connect(self._on_frame)
         self.bridge.status.connect(self._on_status)
@@ -2742,6 +2784,22 @@ class MainWindow(QMainWindow):
         menu.addSection(
             "Xếp/Nhóm máy này" if count == 1 else f"Xếp/Nhóm {count} máy đã chọn"
         )
+        copy_action = menu.addAction("Copy IP")
+        copy_action.setToolTip("Copy địa chỉ IP của máy đang chọn")
+        copy_action.triggered.connect(
+            lambda _checked=False, keys=list(targets): self._copy_device_ips(keys)
+        )
+        rename_action = menu.addAction("Đặt tên hiển thị…")
+        rename_action.setToolTip("Đặt tên hiện ngay dưới dòng IP và nhóm")
+        rename_action.triggered.connect(
+            lambda _checked=False, keys=list(targets): self._rename_display_name(keys)
+        )
+        note_action = menu.addAction("Ghi chú…")
+        note_action.setToolTip("Mở bảng ghi chú của máy này")
+        note_action.triggered.connect(
+            lambda _checked=False, keys=list(targets): self._open_device_note(keys)
+        )
+        menu.addSeparator()
         apps_menu = menu.addMenu("Ứng dụng")
         apps_action = apps_menu.addAction("Nạp ứng dụng đã cài…")
         apps_action.setToolTip(
@@ -2966,7 +3024,11 @@ class MainWindow(QMainWindow):
             return
         devices = [
             d for d in self.registry.devices
-            if d.enabled and (not d.name.strip() or d.name.strip() in {d.host, d.udid[:8]})
+            if d.enabled and (
+                not d.name.strip()
+                or d.name.strip() in {d.host, d.udid[:8]}
+                or not (getattr(d, "ios_version", "") or "").strip()
+            )
         ]
         if not devices:
             return
@@ -2978,6 +3040,7 @@ class MainWindow(QMainWindow):
         )
         self._device_name_worker = worker
         worker.found.connect(self._on_device_name_found)
+        worker.version.connect(self._on_device_version_found)
         worker.failed.connect(self._on_device_name_failed)
         worker.finished.connect(lambda w=worker: self._device_name_worker_finished(w))
         worker.finished.connect(worker.deleteLater)
@@ -2998,7 +3061,82 @@ class MainWindow(QMainWindow):
             return
         device.name = name.strip()
         self.registry.save(self.registry_path)
-        self._apply_page()
+        self._sync_tile_spec(device)
+
+    def _on_device_version_found(self, key: str, version: str) -> None:
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        value = (version or "").strip()
+        if not device or not value or device.ios_version.strip() == value:
+            return
+        device.ios_version = value
+        self.registry.save(self.registry_path)
+        self._sync_tile_spec(device)
+
+    def _sync_tile_spec(self, device: DeviceSpec) -> None:
+        tile = self.grid.tiles.get(device.key)
+        if tile is not None:
+            tile.spec = device
+            tile.setToolTip(device_tooltip(device))
+            tile.update()
+        if self.detail.key == device.key:
+            self._update_detail_title(device.key)
+
+    def _copy_device_ips(self, targets: List[str]) -> None:
+        hosts = []
+        seen = set()
+        for key in targets:
+            device = next((d for d in self.registry.devices if d.key == key), None)
+            host = device.host if device else key.partition(":")[0]
+            if host and host not in seen:
+                hosts.append(host)
+                seen.add(host)
+        if not hosts:
+            return
+        QApplication.clipboard().setText("\n".join(hosts))
+        self.statusBar().showMessage(
+            f"Đã copy IP {hosts[0]}" if len(hosts) == 1
+            else f"Đã copy {len(hosts)} địa chỉ IP",
+            3000,
+        )
+
+    def _rename_display_name(self, targets: List[str]) -> None:
+        if not targets:
+            return
+        key = targets[0]
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        if device is None:
+            return
+        current = device_alias(device)
+        name, ok = QInputDialog.getText(
+            self, "Đặt tên hiển thị",
+            f"Tên hiện dưới IP {device.host}:",
+            text=current,
+        )
+        if not ok:
+            return
+        device.name = name.strip()
+        self.registry.save(self.registry_path)
+        self._sync_tile_spec(device)
+        self.statusBar().showMessage(
+            f"Đã đặt tên hiển thị cho {device.host}" if device.name
+            else f"Đã xoá tên hiển thị của {device.host}",
+            4000,
+        )
+
+    def _open_device_note(self, targets: List[str]) -> None:
+        if not targets:
+            return
+        key = targets[0]
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        if device is None:
+            return
+        dialog = DeviceNoteDialog(device, self)
+        if dialog.exec() != QDialog.Accepted:
+            return
+        device.note = dialog.text()
+        self.registry.save(self.registry_path)
+        self._sync_tile_spec(device)
+        self.statusBar().showMessage(f"Đã lưu ghi chú {device.host}", 3000)
 
     def _on_device_name_failed(self, key: str, error: str) -> None:
         device = next((d for d in self.registry.devices if d.key == key), None)
@@ -3111,6 +3249,9 @@ class MainWindow(QMainWindow):
             name = self._device_name(key)
             host = device.host if device else key
             title = name if name == host else f"{name} — {host}"
+            version = (getattr(device, "ios_version", "") or "").strip().lstrip("vV") if device else ""
+            if version:
+                title = f"{title}  ·  v{version}"
             self.detail_title.setText(f"🖥  {title}")
             self.detail_title.setVisible(True)
         else:

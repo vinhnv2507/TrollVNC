@@ -17,6 +17,7 @@ from typing import Dict, List, Set, Tuple
 class FakeControlServer:
     token: str = "Congavinh1"
     device_name: str = "iPhone cua An"
+    server_version: str = "4.12"
     network_sample: Tuple[int, int, int, int, int] = (
         321, 1_000_000, 500_000, 3, 1_000,
     )
@@ -233,6 +234,11 @@ class FakeControlServer:
             encoded = base64.b64encode(self.device_name.encode("utf-8")).decode("ascii")
             return f"OK {encoded}\n".encode()
 
+        if cmd == "version":
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            return f"OK {self.server_version}\n".encode()
+
         if cmd.startswith("nettraffic "):
             if self.unpatched:
                 return b"ERR Unknown\n"
@@ -403,7 +409,9 @@ class FakeControlServer:
             return b"OK cleared\n"
 
         if cmd == "diagnostics":
-            return (b"OK\nuptime=3600\ndisk_free=1073741824\nkeeper=1\n"
+            version = self.server_version.encode("ascii", "ignore")
+            return (b"OK\nserver_version=" + version + b"\nuptime=3600\n"
+                    b"disk_free=1073741824\nkeeper=1\n"
                     b"frontmost=com.brd.earnapp\ncrash_count=0\n")
 
         if cmd == "wakeiflocked":

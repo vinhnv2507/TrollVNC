@@ -73,7 +73,7 @@ class TileControlTest(unittest.TestCase):
         self.grid.tiles[self.key].set_selected(True)
         self.grid.tiles[second].set_selected(True)
 
-        self.assertEqual(self.grid._context_targets(second), [self.key, second])
+        self.assertEqual(self.grid._context_targets(second), [second, self.key])
         self.assertEqual(self.grid._context_targets(third), [third])
         self.assertTrue(self.grid.tiles[third].selected)
         self.assertFalse(self.grid.tiles[self.key].selected)

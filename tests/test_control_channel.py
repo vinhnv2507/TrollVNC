@@ -66,6 +66,15 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         self.server.device_name = "iPhone của An"
         self.assertEqual(await self.channel.device_name(), "iPhone của An")
 
+    async def test_reads_server_version(self) -> None:
+        self.server.server_version = "4.13"
+        self.assertEqual(await self.channel.server_version(), "4.13")
+
+    async def test_server_version_falls_back_to_diagnostics(self) -> None:
+        self.server.unpatched = True
+        self.server.server_version = "4.12"
+        self.assertEqual(await self.channel.server_version(), "4.12")
+
     async def test_reads_app_network_sample(self) -> None:
         self.server.network_sample = (99, 10_000, 20_000, 4, 3_000)
 
