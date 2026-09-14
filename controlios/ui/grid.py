@@ -198,6 +198,10 @@ class DeviceGrid(QScrollArea):
 
     # -------------------------------------------------------------- selection
 
+    @property
+    def selection_dragging(self) -> bool:
+        return self._selection_drag_active
+
     def _apply_selection(self, keys: List[str]) -> None:
         """Update highlights only for tiles whose state actually changed."""
 

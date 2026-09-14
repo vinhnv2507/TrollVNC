@@ -314,6 +314,50 @@ class WindowGridControlTest(unittest.TestCase):
 
         self.assertEqual(len(taps), 1)
 
+    def test_selecting_all_does_not_reprompt_broadcast(self) -> None:
+        """Keo chon het may khong duoc bam hop thoai Xac nhan phat toan bo."""
+        self.window.broadcast = True
+        self.window.broadcast_box.blockSignals(True)
+        self.window.broadcast_box.setChecked(True)
+        self.window.broadcast_box.blockSignals(False)
+        with unittest.mock.patch("controlios.ui.app.QMessageBox.question") as question:
+            self.window.grid.select_all()
+            app.processEvents()
+        question.assert_not_called()
+        self.assertTrue(self.window.broadcast)
+        self.assertEqual(len(self.window.grid.selection), 2)
+
+    def test_enabling_broadcast_with_all_selected_still_confirms(self) -> None:
+        self.window.grid.select_all()
+        self.window.broadcast = False
+        self.window.broadcast_box.blockSignals(True)
+        self.window.broadcast_box.setChecked(False)
+        self.window.broadcast_box.blockSignals(False)
+        with unittest.mock.patch(
+            "controlios.ui.app.QMessageBox.question",
+            return_value=QMessageBox.No,
+        ) as question:
+            self.window.broadcast_box.setChecked(True)
+        question.assert_called_once()
+        self.assertFalse(self.window.broadcast)
+        self.assertFalse(self.window.broadcast_box.isChecked())
+
+    def test_select_all_does_not_reload_apps_until_timer(self) -> None:
+        listed = []
+        self.window.registry.settings.control_token = "tok"
+        self.window.pool.list_apps = lambda key, on_done=None, **kw: listed.append(key)
+        with unittest.mock.patch.object(
+                self.window.apps_dock, "isVisible", return_value=True):
+            self.window.grid.select_all()
+            self.assertFalse(listed, "phai debounce, khong list_apps ngay luc chon")
+            self.assertTrue(self.window._apps_reload_timer.isActive())
+            self.window._apps_reload_timer.stop()
+            self.window._maybe_reload_apps_for_selection()
+            self.assertTrue(listed)
+            listed.clear()
+            self.window._maybe_reload_apps_for_selection()
+            self.assertFalse(listed, "khong nap lai khi van cung mot may dau")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

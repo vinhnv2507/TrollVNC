@@ -2146,6 +2146,10 @@ class MainWindow(QMainWindow):
         self.recording_id: str | None = None
         self._scale_initialized: set[str] = set()
         self._apps_for_key: Optional[str] = None
+        self._apps_reload_timer = QTimer(self)
+        self._apps_reload_timer.setSingleShot(True)
+        self._apps_reload_timer.setInterval(250)
+        self._apps_reload_timer.timeout.connect(self._maybe_reload_apps_for_selection)
 
         self.bridge = Bridge()
         self.pool = DevicePool(
@@ -3280,7 +3284,8 @@ class MainWindow(QMainWindow):
     def _on_selection(self, keys: List[str]) -> None:
         self.statusBar().showMessage(f"Đã chọn {len(keys)} máy", 3000)
         if self.broadcast and self._is_all_enabled_devices(keys):
-            self._set_broadcast(True)
+            self.statusBar().showMessage(
+                f"Phát đa máy đang gửi thao tác tới tất cả {len(keys)} máy", 4000)
         if self.script_dialog:
             self.script_dialog.refresh_targets()
         if self.screen_monitor_dialog:
@@ -3288,10 +3293,22 @@ class MainWindow(QMainWindow):
         # Nhãn "thao tác áp cho N máy" phải theo kịp, nếu không nó đứng ở con số
         # lúc nạp danh sách và người dùng tưởng đang thao tác một máy.
         self.apps_panel.set_targets(len(self.action_targets()))
-        # Bảng ứng dụng luôn mở: khi người dùng chọn ô đầu tiên (chưa mở khung
-        # lớn), tự nạp danh sách của máy đó thay vì bắt bấm "Nạp danh sách".
+        # Không nạp app ngay trong lúc kéo rubber-band: mỗi pixel chuột sẽ
+        # gọi list_apps, làm giao diện đơ.
         if keys and self.apps_dock.isVisible() and not self.detail.key:
-            self._reload_apps()
+            self._apps_reload_timer.start()
+
+    def _maybe_reload_apps_for_selection(self) -> None:
+        """Nạp danh sách app sau khi chọn xong, không nạp lại giữa lúc kéo."""
+        if self.grid.selection_dragging:
+            self._apps_reload_timer.start()
+            return
+        keys = list(self.grid.selection)
+        if not keys or not self.apps_dock.isVisible() or self.detail.key:
+            return
+        if keys[0] == self._apps_for_key:
+            return
+        self._reload_apps()
 
     def _set_broadcast(self, on: bool) -> None:
         if on and self._is_all_enabled_devices(list(self.grid.selection)):
@@ -3898,6 +3915,7 @@ class MainWindow(QMainWindow):
                 "không hỏi được máy. Xem tài liệu cấu hình ControlIOS."
             )
             return
+        self._apps_for_key = key
         self.apps_panel.set_loading()
         self.pool.list_apps(key, on_done=self._on_apps_loaded)
 
@@ -4422,6 +4440,7 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self._apps_reload_timer.stop()
         self._stats_timer.stop()
         self._auto_scan_timer.stop()
         if self._auto_scan_worker and self._auto_scan_worker.isRunning():
