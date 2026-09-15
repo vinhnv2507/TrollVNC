@@ -52,6 +52,8 @@ INTERACT_HOLD_SEC = 0.8
 LIVE_PIPELINE = 2
 # Request ma (Q=1 nuốt encode thừa) hết hạn nhanh, không chờ stall_timeout 20s.
 PIPELINE_DRAIN_SEC = 0.4
+# Snapshot for OCR: fail fast so LIVE/control are not blocked for stall_timeout.
+CAPTURE_FRAME_SEC = 4.5
 
 
 class Tier(enum.IntEnum):
@@ -254,6 +256,20 @@ class VncSession:
         self._promote.set()
         return future
 
+    def drop_capture(self, future: asyncio.Future) -> None:
+        """Caller gave up; do not keep the LIVE pacer in snapshot mode."""
+        try:
+            self._capture_waiters.remove(future)
+        except ValueError:
+            pass
+        if not future.done():
+            future.cancel()
+        self._prune_captures()
+
+    def _prune_captures(self) -> list:
+        self._capture_waiters = [item for item in self._capture_waiters if not item.done()]
+        return self._capture_waiters
+
     def _resolve_captures(self, result) -> None:
         waiters, self._capture_waiters = self._capture_waiters, []
         for future in waiters:
@@ -266,9 +282,15 @@ class VncSession:
 
     async def _serve_capture(self, client: asyncvnc.Client) -> None:
         try:
-            await self._request(client, incremental=False)
+            await self._request(
+                client, incremental=False, timeout=CAPTURE_FRAME_SEC)
             rgb = np.ascontiguousarray(client.video.as_rgba()[:, :, :3])
             width, height = client.video.width, client.video.height
+        except TimeoutError as exc:
+            # Stalled VIDEO: fail the snapshot, keep LIVE. Re-raising used to
+            # tear the RFB session and stall control port 46752 during EarnApp.
+            self._resolve_captures(exc)
+            return
         except Exception as exc:
             self._resolve_captures(exc)
             raise
@@ -638,7 +660,7 @@ class VncSession:
         self._force_full = True
         loop = asyncio.get_running_loop()
         while not self._stop.is_set():
-            if self._capture_waiters:
+            if self._prune_captures():
                 first = False
                 try:
                     while self._inflight > 0:
@@ -652,7 +674,8 @@ class VncSession:
                     # wait stall_timeout and do not tear down the live stream
                     # just to snapshot the framebuffer for OCR.
                     self._inflight = 0
-                await self._serve_capture(client)
+                if self._prune_captures():
+                    await self._serve_capture(client)
                 continue
 
             tier = self.tier
@@ -769,14 +792,16 @@ class VncSession:
             await self._frame_ready.wait()
 
     async def _request(self, client: asyncvnc.Client, incremental: bool,
-                       interruptible: bool = False) -> None:
+                       interruptible: bool = False,
+                       timeout: Optional[float] = None) -> None:
         if not incremental:
             client.video.data = None
         before = self.frame_count
         self._write_fb_request(client, incremental)
         await client.drain()
         # Capture/IDLE: đợi đúng một câu trả lời, không chồng request.
-        await self._wait_frame(before, interruptible=interruptible)
+        await self._wait_frame(
+            before, interruptible=interruptible, timeout=timeout)
 
     def _emit(self, client: asyncvnc.Client) -> None:
         video = client.video

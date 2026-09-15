@@ -10,7 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from controlios.config import Settings
-from controlios.vnc.pool import DevicePool
+from controlios.vnc.pool import DevicePool, _short_exc
 from controlios.vnc.session import State
 
 
@@ -32,18 +32,23 @@ class FakeOcrChannel:
 
 
 class FakeSession:
-    def __init__(self, last_frame_at: float = 0.0, failures: int = 0) -> None:
+    def __init__(self, last_frame_at: float = 0.0, failures: int = 0,
+                 drop_on_fail: bool = False) -> None:
         self.state = State.ONLINE
         self.last_frame_at = last_frame_at
         self.failures_left = failures
+        self.drop_on_fail = drop_on_fail
         self.captures = 0
         self.reconnects = 0
+        self.dropped = 0
 
     def request_capture(self):
         self.captures += 1
         fut = asyncio.get_running_loop().create_future()
         if self.failures_left > 0:
             self.failures_left -= 1
+            if self.drop_on_fail:
+                self.state = State.ERROR
             fut.set_exception(
                 ConnectionError("172.30.2.50:5901 disconnected during capture")
             )
@@ -52,8 +57,14 @@ class FakeSession:
             fut.set_result(object())
         return fut
 
+    def drop_capture(self, future) -> None:
+        self.dropped += 1
+        if not future.done():
+            future.cancel()
+
     def reconnect_now(self) -> None:
         self.reconnects += 1
+        self.state = State.ONLINE
 
 
 class EarnAppWatchdogCaptureTest(unittest.TestCase):
@@ -96,21 +107,30 @@ class EarnAppWatchdogCaptureTest(unittest.TestCase):
         self.assertFalse(any("LỖI kiểm tra màn hình" in e or "disconnected during capture" in e
                              for e in events))
 
-    def test_retries_capture_disconnect_then_ocrs(self):
-        session = FakeSession(last_frame_at=0.0, failures=1)
-        (total, found, failures), events, channel = self.run_monitor(session)
-        self.assertGreaterEqual(session.captures, 1)
-        self.assertGreaterEqual(session.reconnects, 1)
-        self.assertFalse(failures)
-        self.assertTrue(channel.finds)
-        self.assertTrue(any("đang nối lại" in e for e in events))
-
-    def test_still_ocrs_when_capture_keeps_failing_but_vnc_is_online(self):
+    def test_stale_capture_fail_ocrs_without_reconnect_when_online(self):
         session = FakeSession(last_frame_at=0.0, failures=99)
         (total, found, failures), events, channel = self.run_monitor(session)
+        self.assertEqual(session.captures, 1)
+        self.assertEqual(session.reconnects, 0)
+        self.assertGreaterEqual(session.dropped, 1)
         self.assertFalse(failures)
         self.assertTrue(channel.finds)
         self.assertTrue(any("OCR trên khung đang có" in e for e in events))
+        self.assertFalse(any("đang nối lại" in e for e in events))
+
+    def test_reconnects_only_when_vnc_drops(self):
+        session = FakeSession(last_frame_at=0.0, failures=1, drop_on_fail=True)
+        (total, found, failures), events, channel = self.run_monitor(session)
+        self.assertEqual(session.captures, 1)
+        self.assertEqual(session.reconnects, 1)
+        self.assertEqual(session.state, State.ONLINE)
+        self.assertFalse(failures)
+        self.assertTrue(channel.finds)
+
+    def test_short_exc_names_empty_timeout(self):
+        self.assertEqual(_short_exc(TimeoutError()), "hết thời gian chờ")
+        self.assertEqual(_short_exc(TimeoutError("no framebuffer update")),
+                         "no framebuffer update")
 
 
 if __name__ == "__main__":

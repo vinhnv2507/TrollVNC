@@ -293,6 +293,27 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
             await dead.list_apps()
         self.assertIn("không phản hồi", str(ctx.exception))
 
+    async def test_find_text_retries_connect_timeout(self) -> None:
+        calls = {"n": 0}
+
+        async def flaky(line: str, read_timeout=None):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise ControlError(
+                    "172.30.2.60:46752 không phản hồi — ControlIOS chưa chạy, "
+                    "hoặc đang bận/treo (hết thời gian chờ)"
+                )
+            return "OK found\n"
+
+        self.channel.command = flaky  # type: ignore[method-assign]
+        self.assertTrue(await self.channel.find_text("Connecting"))
+        self.assertEqual(calls["n"], 3)
+
+    async def test_empty_timeout_is_named_in_connect_error(self) -> None:
+        from controlios.control_channel import _exc_detail
+        self.assertEqual(_exc_detail(TimeoutError()), "hết thời gian chờ")
+        self.assertEqual(_exc_detail(OSError("refused")), "refused")
+
     async def test_malformed_rows_are_skipped_not_fatal(self) -> None:
         self.server.apps = {"com.ok.app": ("Ổn", "User", "1.0")}
 

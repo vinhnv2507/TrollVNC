@@ -64,6 +64,15 @@ class UnauthorizedError(ControlError):
     """Sai token."""
 
 
+def _exc_detail(exc: BaseException) -> str:
+    text = str(exc).strip()
+    if text:
+        return text
+    if isinstance(exc, TimeoutError):
+        return "hết thời gian chờ"
+    return type(exc).__name__
+
+
 @dataclass(frozen=True)
 class AppInfo:
     bundle_id: str
@@ -193,7 +202,7 @@ class ControlChannel:
         except (OSError, asyncio.TimeoutError) as exc:
             raise ControlError(
                 f"{self.host}:{self.port} không phản hồi — ControlIOS chưa chạy, "
-                f"hoặc bản trên máy chưa được vá ({exc})"
+                f"hoặc đang bận/treo ({_exc_detail(exc)})"
             ) from None
 
         try:
@@ -202,7 +211,7 @@ class ControlChannel:
             data = await asyncio.wait_for(
                 reader.read(), timeout=read_timeout or self.timeout)
         except (OSError, asyncio.TimeoutError) as exc:
-            raise ControlError(f"{self.host}: mất kết nối giữa chừng ({exc})") from None
+            raise ControlError(f"{self.host}: mất kết nối giữa chừng ({_exc_detail(exc)})") from None
         finally:
             writer.close()
             try:
@@ -213,6 +222,23 @@ class ControlChannel:
         text = data.decode("utf-8", errors="replace")
         self._raise_for_error(text, line)
         return text
+
+    async def _command_with_connect_retry(
+            self, line: str, read_timeout: Optional[float] = None,
+            attempts: int = 3) -> str:
+        """Retry when port 46752 does not accept; VNC may still be online."""
+        last = None
+        for attempt in range(max(1, attempts)):
+            try:
+                return await self.command(line, read_timeout=read_timeout)
+            except (UnauthorizedError, NotPatchedError):
+                raise
+            except ControlError as exc:
+                last = exc
+                if "không phản hồi" not in str(exc) or attempt + 1 >= attempts:
+                    raise
+                await asyncio.sleep(0.8)
+        raise last
 
     @staticmethod
     def _raise_for_error(text: str, line: str) -> None:
@@ -347,7 +373,8 @@ class ControlChannel:
     async def find_text(self, needle: str) -> bool:
         """OCR framebuffer trên ControlIOS và tìm chuỗi, không phân biệt hoa/thường."""
         encoded = base64.b64encode(needle.encode("utf-8")).decode("ascii")
-        reply = (await self.command(f"findtext64 {encoded}", read_timeout=20)).strip()
+        reply = (await self._command_with_connect_retry(
+            f"findtext64 {encoded}", read_timeout=20)).strip()
         if reply.startswith("OK found"):
             return True
         if reply == "OK notfound":
@@ -415,7 +442,7 @@ class ControlChannel:
 
     async def frontmost_app(self) -> Optional[str]:
         """Bundle ID đang hiển thị; ``None`` khi ở màn hình hệ thống/không xác định."""
-        reply = (await self.command("frontmost")).strip()
+        reply = (await self._command_with_connect_retry("frontmost")).strip()
         if reply == "OK none":
             return None
         if reply.startswith("OK "):
@@ -577,7 +604,7 @@ class ControlChannel:
                 asyncio.open_connection(self.host, self.port), timeout=self.timeout
             )
         except (OSError, asyncio.TimeoutError) as exc:
-            raise ControlError(f"{self.host}:{self.port} không phản hồi ({exc})") from None
+            raise ControlError(f"{self.host}:{self.port} không phản hồi ({_exc_detail(exc)})") from None
 
         try:
             header = f"{self._auth_prefix()}put {size} {remote}\n"
@@ -772,7 +799,7 @@ class ControlChannel:
             reader, writer = await asyncio.wait_for(
                 asyncio.open_connection(self.host, self.port), timeout=self.timeout)
         except (OSError, asyncio.TimeoutError) as exc:
-            raise ControlError(f"{self.host}:{self.port} không phản hồi ({exc})") from None
+            raise ControlError(f"{self.host}:{self.port} không phản hồi ({_exc_detail(exc)})") from None
         try:
             writer.write(f"{self._auth_prefix()}getfile {remote}\n".encode("utf-8"))
             await writer.drain()
@@ -869,7 +896,7 @@ class ControlChannel:
         except (OSError, asyncio.TimeoutError) as exc:
             raise ControlError(
                 f"{self.host}:{self.port} không phản hồi — ControlIOS chưa chạy, "
-                f"hoặc bản trên máy chưa được vá ({exc})"
+                f"hoặc đang bận/treo ({_exc_detail(exc)})"
             ) from None
 
         try:
@@ -881,7 +908,7 @@ class ControlChannel:
                 reader.read(), timeout=read_timeout or self.timeout
             )
         except (OSError, asyncio.TimeoutError) as exc:
-            raise ControlError(f"{self.host}: mất kết nối giữa chừng ({exc})") from None
+            raise ControlError(f"{self.host}: mất kết nối giữa chừng ({_exc_detail(exc)})") from None
         finally:
             writer.close()
             try:
@@ -1107,7 +1134,7 @@ class ControlChannel:
         chuẩn hơn đọc từ khung đã nén ở PC. None nếu máy chưa có khung/không hỗ trợ."""
 
         try:
-            text = (await self.command(
+            text = (await self._command_with_connect_retry(
                 f"color {rx:.4f} {ry:.4f}", read_timeout=3.0)).strip()
         except NotPatchedError:
             return None          # bản TrollVNC cũ chưa có lệnh 'color'

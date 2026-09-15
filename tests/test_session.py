@@ -254,6 +254,24 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
                          (self.server.width, self.server.height))
         await session.stop()
 
+    async def test_drop_capture_lets_live_keep_streaming(self) -> None:
+        """EarnApp OCR timeout must not leave the pacer stuck in snapshot mode."""
+        session = self.make_session()
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2),
+                        "LIVE never streamed")
+        future = session.request_capture()
+        session.drop_capture(future)
+        self.assertFalse(session._capture_waiters)
+        self.assertTrue(future.done())
+        before = session.frame_count
+        self.assertTrue(await self.wait_for(lambda: session.frame_count > before),
+                        "LIVE did not resume after dropped capture")
+        self.assertEqual(session.state, State.ONLINE)
+        await session.stop()
+
     async def test_live_sends_drag_path_not_just_release(self) -> None:
         """Captcha sliders need intermediate PointerEvents while held.
 

@@ -2,6 +2,23 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## PC 0.2.26: canh EarnApp không còn rớt cổng 46752 vì chụp màn 3 lần
+
+Log 0.2.25 kiểu `chụp màn hình lỗi (); đang nối lại` rồi `46752 không phản hồi`
+**không có nghĩa là máy mất mạng**. VNC và control vẫn sống: PC đọc được SpringBoard
+và mở EarnApp. Capture timeout (`()` = hết thời gian chờ, hoặc `no framebuffer
+update`) bị lặp 3 lần, mỗi lần chiếm pacer LIVE / có thể làm rớt phiên RFB.
+TrollVNC bận nên cổng 46752 không accept, OCR `findtext` fail.
+
+PC 0.2.26 (không cần cài lại iOS):
+
+- Máy VNC còn ONLINE: thử chụp **một lần** (4.5s). Lỗi thì OCR luôn, không nối lại 3 lần.
+- Capture timeout không giết phiên LIVE; waiter hết hạn bị bỏ, hình tiếp tục chạy.
+- `findtext` / `frontmost` / `color` thử lại khi 46752 không accept.
+- Log hết thời gian chờ ghi rõ `hết thời gian chờ`, không còn `()`.
+
+Đóng bản PC đang chạy rồi mở 0.2.26.
+
 ## PC 0.2.25: canh EarnApp không còn fail vì disconnected during capture
 
 OCR EarnApp đọc framebuffer trên máy. Bản trước **bắt chụp một khung VNC full**

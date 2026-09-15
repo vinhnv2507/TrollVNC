@@ -29,6 +29,15 @@ def _slug(text: str) -> str:
     return _UNSAFE.sub("-", text).strip("-") or "device"
 
 
+def _short_exc(exc: BaseException) -> str:
+    text = str(exc).strip()
+    if text:
+        return text
+    if isinstance(exc, TimeoutError):
+        return "hết thời gian chờ"
+    return type(exc).__name__
+
+
 def _write_capture(folder: Path, spec: DeviceSpec, frame, label: str = "",
                    stamped: bool = True) -> Path:
     """Chạy trong thread riêng — nén PNG là việc nặng, không để nghẽn event loop."""
@@ -223,34 +232,36 @@ class DevicePool:
         a recent VIDEO frame is already fresh: another full capture on a
         half-open LIVE socket is what shows up as "disconnected during
         capture" and aborts the whole EarnApp check.
+
+        If VIDEO is stale, try ONE short snapshot. Do not reconnect an ONLINE
+        session three times: that hijacks the LIVE pacer, freezes the picture,
+        and can stall control port 46752 so OCR dies with "không phản hồi".
         """
 
-        last_error = None
-        for _attempt in range(3):
-            session = await self._ensure_awake(key)
-            if session is None or session.state is not State.ONLINE:
-                last_error = ConnectionError("VNC chưa kết nối")
-                await asyncio.sleep(0.5)
-                continue
-            age = (time.monotonic() - session.last_frame_at
-                   if session.last_frame_at else 1e9)
-            if age < 2.5:
-                return session
-            try:
-                await asyncio.wait_for(session.request_capture(), timeout=12)
-                return session
-            except Exception as exc:
-                last_error = exc
-                if on_event:
-                    on_event(key, f"chụp màn hình lỗi ({exc}); đang nối lại")
-                session.reconnect_now()
-                await asyncio.sleep(0.8)
         session = await self._ensure_awake(key)
-        if session is not None and session.state is State.ONLINE:
-            if on_event and last_error is not None:
-                on_event(key, f"không chụp được khung mới ({last_error}); OCR trên khung đang có")
+        if session is None or session.state is not State.ONLINE:
+            raise ConnectionError("VNC chưa kết nối")
+        age = (time.monotonic() - session.last_frame_at
+               if session.last_frame_at else 1e9)
+        if age < 2.5:
             return session
-        raise last_error or ConnectionError("VNC chưa kết nối")
+        fut = session.request_capture()
+        try:
+            await asyncio.wait_for(fut, timeout=6)
+            return session
+        except Exception as exc:
+            drop = getattr(session, "drop_capture", None)
+            if callable(drop):
+                drop(fut)
+            if on_event:
+                on_event(key, f"chụp màn hình lỗi ({_short_exc(exc)}); "
+                              f"OCR trên khung đang có")
+            if session.state is not State.ONLINE:
+                session.reconnect_now()
+                session = await self._ensure_awake(key)
+                if session is None or session.state is not State.ONLINE:
+                    raise ConnectionError("VNC chưa kết nối") from exc
+            return session
 
     # ------------------------------------------------------------------- input
 
