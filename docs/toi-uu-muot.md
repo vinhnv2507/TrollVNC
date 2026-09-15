@@ -2,6 +2,23 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## PC 0.2.24: captcha TikTok/Shopee không còn đứng hình đến lúc thả chuột
+
+0.2.16–0.2.23 dồn MouseMove bằng `call_soon` (một điểm mỗi vòng asyncio) và
+quên `_inflight` **mỗi nhịp** lúc kéo. Qt có thể xếp hết các điểm kéo trước
+khi vòng lặp chạy, nên iOS chỉ nhận down rồi một move lúc mouse_up: mũi tên
+và mảnh puzzle đứng yên, nhảy khi thả, captcha fail. Kéo tay trên máy thì
+bình thường vì không đi qua cầu PC.
+
+PC 0.2.24 (không cần cài lại iOS):
+
+- Lúc **giữ chuột**: gửi từng PointerEvent ngay, không dồn thành 1 điểm cuối.
+- Quên FBUR ma **một lần** khi bắt đầu kéo (vẫn sửa đóng băng 0.2.15), không
+  gửi chồng request lúc encode Q=1 đang chạy.
+- LIVE lúc xem vẫn pipeline=2 + Tight JPEG; lúc kéo vẫn depth=1.
+
+Đóng bản PC đang chạy rồi mở 0.2.24.
+
 ## PC 0.2.16: hết đóng băng hình khi kéo (lỗi 0.2.15)
 
 0.2.15 tắt pipeline lúc kéo captcha nhưng **chờ khung** của request pipeline

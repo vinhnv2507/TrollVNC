@@ -238,6 +238,55 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         session.mouse_up(90, 80)
         await session.stop()
 
+    async def test_live_sends_drag_path_not_just_release(self) -> None:
+        """Captcha sliders need intermediate PointerEvents while held.
+
+        call_soon coalescing plus Qt batching used to emit down, then one
+        move on mouse_up: the puzzle piece jumped and TikTok/Shopee failed.
+        """
+        session = self.make_session(fast_settings(live_fps=12.0))
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.server.pointer_events.clear()
+
+        session.mouse_down(40, 80)
+        for x in (50, 60, 70, 80, 90):
+            session.mouse_move(x, 80)
+            await asyncio.sleep(0)
+        held = [(b, x, y) for b, x, y in self.server.pointer_events if b == 1]
+        self.assertGreaterEqual(
+            len({x for _, x, _ in held}), 4,
+            f"drag path collapsed before release: {self.server.pointer_events}",
+        )
+        session.mouse_up(90, 80)
+        self.assertTrue(await self.wait_for(
+            lambda: self.server.pointer_events and self.server.pointer_events[-1][0] == 0
+        ))
+        await session.stop()
+
+    async def test_live_keeps_frames_while_dragging_with_moves(self) -> None:
+        self.server.max_inflight = 1
+        self.server.encode_delay = 0.03
+        session = self.make_session(fast_settings(live_fps=12.0, stall_timeout=5.0))
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2))
+
+        session.mouse_down(40, 80)
+        start_frames = len(self.frames)
+        for x in range(45, 95, 5):
+            session.mouse_move(x, 80)
+            await asyncio.sleep(0.02)
+        self.assertTrue(
+            await self.wait_for(lambda: len(self.frames) >= start_frames + 3, timeout=2.0),
+            f"video stalled during drag moves: got {len(self.frames) - start_frames} "
+            f"frames inflight={session._inflight}",
+        )
+        session.mouse_up(90, 80)
+        await session.stop()
+
     async def test_idle_still_sends_one_request(self) -> None:
         session = self.make_session()
         session.set_tier(Tier.IDLE)
@@ -322,9 +371,11 @@ class InteractBoostTest(unittest.IsolatedAsyncioTestCase):
         session._discard_dropped_inflight(session._pipeline_depth(Tier.LIVE))
         self.assertEqual(session._inflight, 0)
 
+        # Later ticks must keep a real in-flight encode. Zeroing every drag
+        # frame floods TrollVNC Q=1 and freezes VIDEO until mouse-up.
         session._inflight = 1
         session._discard_dropped_inflight(session._pipeline_depth(Tier.LIVE))
-        self.assertEqual(session._inflight, 0)
+        self.assertEqual(session._inflight, 1)
 
     def test_live_fps_floor_does_not_raise_grid(self) -> None:
         session = self._session(live_fps=8.0, grid_fps=1.0)

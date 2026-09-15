@@ -101,8 +101,13 @@ class SessionInputTest(unittest.IsolatedAsyncioTestCase):
             self.session.mouse_move(20, y)
         self.session.mouse_up(20, 120)
 
-        self.assertTrue(await self.drain(lambda: len(self.server.pointer_events) >= 3))
+        self.assertTrue(await self.drain(lambda: len(self.server.pointer_events) >= 6))
         events = self.server.pointer_events
+        held_y = [y for buttons, x, y in events if buttons == 1]
+        self.assertGreaterEqual(
+            len(set(held_y)), 4,
+            f"drag path collapsed to one point before release: {events}",
+        )
         self.assertTrue(any(buttons == 1 and (x, y) == (20, 120)
                             for buttons, x, y in events),
                         f"coalesced drag was not flushed before release: {events}")

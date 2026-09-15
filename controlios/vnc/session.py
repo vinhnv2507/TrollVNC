@@ -167,6 +167,8 @@ class VncSession:
         self._interact = asyncio.Event()
         self._interact_until = 0.0
         self._inflight = 0
+        # Discard pipeline ghosts once per drag, not every pacer tick.
+        self._low_latency_armed = False
 
     # ---------------------------------------------------------------- control
 
@@ -311,18 +313,25 @@ class VncSession:
         return 1
 
     def _discard_dropped_inflight(self, depth: int) -> None:
-        """Forget FBURs TrollVNC Q=1 likely dropped so we never wait forever.
+        """Forget leftover pipelined FBURs once when a drag starts.
 
-        Pipeline=2 hides RTT while watching. The device (default Q=1) skips a
-        capture when gInflight >= gMaxInflightUpdates, so the extra FBUR can
-        be consumed without a VIDEO reply. _inflight then stays > 0 as a ghost.
-        0.2.15 dropped depth to 1 on drag and waited stall_timeout (20s) for
-        that ghost: PC video froze while pointer packets still reached iOS.
+        Pipeline=2 hides RTT while watching. TrollVNC Q=1 can consume the extra
+        FBUR without a VIDEO reply, leaving a ghost _inflight. 0.2.15 then
+        waited stall_timeout (20s) after depth dropped to 1.
+
+        Clear that ghost *once* when entering low-latency. Doing it every
+        pacer tick zeros a real in-flight encode and floods FBURs: VIDEO
+        stalls until mouse-up, so captcha sliders freeze then jump.
         """
         if self._inflight > depth:
             self._inflight = depth
-        if self._want_low_latency() and self._inflight >= depth:
-            self._inflight = 0
+        low = self._want_low_latency()
+        if low and not self._low_latency_armed:
+            self._low_latency_armed = True
+            if self._inflight >= depth:
+                self._inflight = 0
+        elif not low:
+            self._low_latency_armed = False
 
     async def _await_pace_gap(self, remaining: float) -> None:
         if remaining <= 0:
@@ -346,9 +355,20 @@ class VncSession:
     def mouse_move(self, x: int, y: int) -> None:
         if not self._client:
             return
-        self._mouse_move_pending = (int(x), int(y))
+        x, y = int(x), int(y)
+        # While the button is held, send every point immediately. Coalescing
+        # via call_soon drops the drag path: Qt can enqueue all MouseMove
+        # callbacks before asyncio runs, so captcha sliders stay frozen until
+        # mouse_up flushes one last point (TikTok/Shopee fail).
         if self._client.mouse.buttons:
+            self._cancel_pending_mouse_move()
+            mouse = self._client.mouse
+            if mouse.x != x or mouse.y != y:
+                mouse.x, mouse.y = x, y
+                mouse._write()
             self._note_pointer_activity()
+            return
+        self._mouse_move_pending = (x, y)
         if self._mouse_move_handle is None:
             self._mouse_move_handle = asyncio.get_running_loop().call_soon(
                 self._flush_mouse_move)
