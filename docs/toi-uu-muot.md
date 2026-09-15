@@ -2,6 +2,21 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## PC 0.2.25: canh EarnApp không còn fail vì disconnected during capture
+
+OCR EarnApp đọc framebuffer trên máy. Bản trước **bắt chụp một khung VNC full**
+trước khi OCR. Khi đang mở khung lớn (LIVE), socket nửa sống hoặc FBUR ma của
+pipeline=2 làm phiên VNC rớt ngay: log `LỖI kiểm tra màn hình: ... disconnected
+during capture`, chưa kịp OCR.
+
+PC 0.2.25 (không cần cài lại iOS):
+
+- Máy LIVE/GRID vừa có khung (<2.5s): OCR luôn, không gửi thêm capture full.
+- Capture lỗi: nối lại tối đa 3 lần; nếu VNC vẫn online thì OCR trên khung đang có.
+- Capture không còn chờ stall_timeout 20s rồi giết phiên LIVE vì inflight ma.
+
+Đóng bản PC đang chạy rồi mở 0.2.25.
+
 ## PC 0.2.24: captcha TikTok/Shopee không còn đứng hình đến lúc thả chuột
 
 0.2.16–0.2.23 dồn MouseMove bằng `call_soon` (một điểm mỗi vòng asyncio) và

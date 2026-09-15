@@ -215,6 +215,43 @@ class DevicePool:
             await asyncio.sleep(0.1)
         return session
 
+    async def _refresh_framebuffer_for_ocr(self, key: str, on_event=None):
+        """Wake VNC so ControlIOS OCR is not reading a stale framebuffer.
+
+        findtext/getcolor read TrollVNC gScreen->frameBuffer. Dormant phones
+        must reconnect and pull a frame. A LIVE/GRID session that already has
+        a recent VIDEO frame is already fresh: another full capture on a
+        half-open LIVE socket is what shows up as "disconnected during
+        capture" and aborts the whole EarnApp check.
+        """
+
+        last_error = None
+        for _attempt in range(3):
+            session = await self._ensure_awake(key)
+            if session is None or session.state is not State.ONLINE:
+                last_error = ConnectionError("VNC chưa kết nối")
+                await asyncio.sleep(0.5)
+                continue
+            age = (time.monotonic() - session.last_frame_at
+                   if session.last_frame_at else 1e9)
+            if age < 2.5:
+                return session
+            try:
+                await asyncio.wait_for(session.request_capture(), timeout=12)
+                return session
+            except Exception as exc:
+                last_error = exc
+                if on_event:
+                    on_event(key, f"chụp màn hình lỗi ({exc}); đang nối lại")
+                session.reconnect_now()
+                await asyncio.sleep(0.8)
+        session = await self._ensure_awake(key)
+        if session is not None and session.state is State.ONLINE:
+            if on_event and last_error is not None:
+                on_event(key, f"không chụp được khung mới ({last_error}); OCR trên khung đang có")
+            return session
+        raise last_error or ConnectionError("VNC chưa kết nối")
+
     # ------------------------------------------------------------------- input
 
     def tap(self, key: str, x: int, y: int, button: int = 0) -> None:
@@ -652,12 +689,7 @@ class DevicePool:
                 nonlocal found
                 async with semaphore:
                     try:
-                        session = await self._ensure_awake(key)
-                        if session is None or session.state is not State.ONLINE:
-                            raise ConnectionError("VNC chưa kết nối")
-                        # Ép nhận một khung mới trước khi OCR, tránh đọc ảnh cũ của
-                        # máy đang nằm ngoài viewport và đã tạm ngắt stream.
-                        await session.request_capture()
+                        session = await self._refresh_framebuffer_for_ocr(key, on_event)
                         channel = self._channel(key)
 
                         foreground = await channel.frontmost_app()
@@ -669,7 +701,7 @@ class DevicePool:
                                               f"đang mở {bundle_id}")
                             await self._wake_then_launch(channel, bundle_id)
                             await asyncio.sleep(2.0)
-                            await session.request_capture()
+                            session = await self._refresh_framebuffer_for_ocr(key, on_event)
                         elif foreground != bundle_id:
                             if on_event:
                                 on_event(key, f"không mở {bundle_id} theo ENSURE_APP_OPEN=False; bỏ qua máy")
@@ -704,7 +736,7 @@ class DevicePool:
                         if on_event:
                             on_event(key, f'thấy "{first_state}"; chờ {confirm_seconds} giây để xác nhận lại')
                         await asyncio.sleep(confirm_seconds)
-                        await session.request_capture()
+                        session = await self._refresh_framebuffer_for_ocr(key, on_event)
                         if not await screen_is_expected():
                             if on_event:
                                 on_event(key, "màn hình đã thay đổi; bỏ qua restart")

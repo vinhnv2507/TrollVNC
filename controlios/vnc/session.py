@@ -248,6 +248,10 @@ class VncSession:
             return future
         self._capture_waiters.append(future)
         self._tier_changed.set()   # wake the pacer if this session is idle
+        # Abort the current LIVE wait so capture is not stuck behind a stalled
+        # incremental request (otherwise the session dies and EarnApp OCR
+        # reports 'disconnected during capture').
+        self._promote.set()
         return future
 
     def _resolve_captures(self, result) -> None:
@@ -263,11 +267,11 @@ class VncSession:
     async def _serve_capture(self, client: asyncvnc.Client) -> None:
         try:
             await self._request(client, incremental=False)
+            rgb = np.ascontiguousarray(client.video.as_rgba()[:, :, :3])
+            width, height = client.video.width, client.video.height
         except Exception as exc:
             self._resolve_captures(exc)
             raise
-        rgb = np.ascontiguousarray(client.video.as_rgba()[:, :, :3])
-        width, height = client.video.width, client.video.height
         self._resolve_captures(
             Frame(key=self.spec.key, width=width, height=height,
                   data=rgb.tobytes(), full_width=width, full_height=height)
@@ -539,6 +543,9 @@ class VncSession:
                 try:
                     self._client = client
                     self._configure_socket(client)
+                    # Frame from a previous TCP session must not look 'fresh'
+                    # to OCR; only VIDEO on this connection counts.
+                    self.last_frame_at = 0.0
                     self._set_state(State.ONLINE)
                     delay = self.settings.reconnect_delay
                     await self._session(client)
@@ -633,8 +640,18 @@ class VncSession:
         while not self._stop.is_set():
             if self._capture_waiters:
                 first = False
-                while self._inflight > 0:
-                    await self._wait_frame(self.frame_count, interruptible=False)
+                try:
+                    while self._inflight > 0:
+                        await self._wait_frame(
+                            self.frame_count,
+                            interruptible=False,
+                            timeout=PIPELINE_DRAIN_SEC,
+                        )
+                except TimeoutError:
+                    # Ghost inflight (Q=1 swallowed a pipelined FBUR). Do not
+                    # wait stall_timeout and do not tear down the live stream
+                    # just to snapshot the framebuffer for OCR.
+                    self._inflight = 0
                 await self._serve_capture(client)
                 continue
 

@@ -238,6 +238,22 @@ class SessionTest(unittest.IsolatedAsyncioTestCase):
         session.mouse_up(90, 80)
         await session.stop()
 
+
+    async def test_capture_survives_ghost_inflight_on_live(self) -> None:
+        """EarnApp OCR must not kill LIVE when leftover pipeline FBURs are ghosts."""
+        session = self.make_session()
+        session.set_tier(Tier.LIVE)
+        session.start()
+        self.assertTrue(await self.wait_for(lambda: session.state is State.ONLINE))
+        self.assertTrue(await self.wait_for(lambda: len(self.frames) >= 2),
+                        "LIVE never streamed")
+        session._inflight = 8
+        frame = await asyncio.wait_for(session.request_capture(), timeout=8)
+        self.assertEqual(session.state, State.ONLINE)
+        self.assertEqual((frame.width, frame.height),
+                         (self.server.width, self.server.height))
+        await session.stop()
+
     async def test_live_sends_drag_path_not_just_release(self) -> None:
         """Captcha sliders need intermediate PointerEvents while held.
 
