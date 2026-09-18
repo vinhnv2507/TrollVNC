@@ -1,0 +1,20 @@
+const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync('tools/shopee_sheet/Code.gs', 'utf8');
+const sandbox = {};
+vm.createContext(sandbox);
+vm.runInContext(code, sandbox);
+function assert(cond, msg) { if (!cond) throw new Error(msg); }
+const normalized = sandbox.normalizeCookieHeader_('Cookie: SPC_ST=abc==; SPC_U=1429; username=test\r\n');
+assert(normalized === 'SPC_ST=abc==; SPC_U=1429; username=test', 'normalize cookie');
+const parsed = sandbox.parseCookieMap_(normalized);
+assert(parsed.SPC_ST === 'abc==', 'preserve equals in token');
+assert(parsed.SPC_U === '1429', 'parse user');
+assert(sandbox.formatPhone_('84567699734') === '+84567699734', 'format phone');
+const orders = [];
+sandbox.collectOrderObjects_({data:{orders:[{order_id:123,order_sn:'ABC'}]}}, orders, 0);
+assert(orders.length === 1 && orders[0].order_id === 123, 'collect orders');
+const tracks = [];
+sandbox.collectTrackingNumbers_({parcel:{spx_tn:'SPXVN001'}}, tracks, 0);
+assert(tracks[0] === 'SPXVN001', 'collect tracking');
+console.log('Pure helper tests: OK');
