@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.14] - 2026-09-18
+
+- Add `cookies <bundle>` to copy real HTTP cookies (binarycookies, HTTPStorages
+  sqlite + WAL) and Shopee login files from the data container **and App Group**
+  into `/var/mobile/controlios-cookies/<bundle>/` for PC download.
+- Do not walk huge Documents/Caches trees; login files are copied by known path.
+
 ## [4.13] - 2026-09-14
 
 - Add a lightweight `version` control command so PC can show the IPA version

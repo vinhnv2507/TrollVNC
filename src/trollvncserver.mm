@@ -149,6 +149,7 @@ static void tvPreventAutomaticLock(void) {
 @property(nonatomic, readonly) NSString *shortVersionString;
 @property(nonatomic, readonly) NSURL *bundleURL;
 @property(nonatomic, readonly) NSURL *dataContainerURL;
+@property(nonatomic, readonly) NSDictionary<NSString *, NSURL *> *groupContainerURLs;
 @end
 @interface LSApplicationWorkspace : NSObject
 + (instancetype)defaultWorkspace;
@@ -6742,15 +6743,20 @@ static const uid_t kMobileUID = 501;
 static const gid_t kMobileGID = 501;
 
 // Đường dẫn container DỮ LIỆU của một app (nơi chứa Documents/Library/tmp...).
-static NSString *tvDataContainerPath(NSString *bundleId) {
+static LSApplicationProxy *tvAppProxy(NSString *bundleId) {
     LSApplicationWorkspace *ws = tvAppWorkspace();
-    if (!ws)
+    if (!ws || bundleId.length == 0)
         return nil;
     for (LSApplicationProxy *app in [ws allApplications]) {
         if ([app.applicationIdentifier isEqualToString:bundleId])
-            return app.dataContainerURL.path;
+            return app;
     }
     return nil;
+}
+
+static NSString *tvDataContainerPath(NSString *bundleId) {
+    LSApplicationProxy *app = tvAppProxy(bundleId);
+    return app.dataContainerURL.path;
 }
 
 static NSString *tvSnapshotDir(NSString *bundleId) {
@@ -7057,6 +7063,247 @@ static NSData *tvCtlSnapshotClear(NSString *bundleId) {
     return [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
 }
 
+static NSString *tvCookiesStagingDir(NSString *bundleId) {
+    return [@"/var/mobile/controlios-cookies" stringByAppendingPathComponent:bundleId];
+}
+
+static BOOL tvCookiesSkipDirName(NSString *name) {
+    static NSSet *skip = nil;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        skip = [NSSet setWithObjects:@"Caches", @"tmp", @"IndexedDB", @"CacheStorage",
+                                     @"ServiceWorkers", @"WebKitCache", @"fsCachedData",
+                                     @"OfflineWebApplicationCache", @"LocalStorage",
+                                     @"WebSQL", @"SystemData", nil];
+    });
+    return [name hasPrefix:@"."] || [skip containsObject:name];
+}
+
+static BOOL tvCookiesNameLooksUseful(NSString *name) {
+    NSString *lower = name.lowercaseString;
+    if ([lower hasSuffix:@".binarycookies"] || [lower isEqualToString:@"cookies.binarycookies"])
+        return YES;
+    BOOL sqliteish = [lower hasSuffix:@".sqlite"] || [lower hasSuffix:@".sqlite3"] ||
+                     [lower hasSuffix:@".db"] || [lower hasSuffix:@"-wal"] || [lower hasSuffix:@"-shm"];
+    if (sqliteish && ([lower containsString:@"cookie"] || [lower containsString:@"httpstorages"]))
+        return YES;
+    return NO;
+}
+
+static BOOL tvCookiesCopyFile(NSString *src, NSString *dst, NSFileManager *fm,
+                              NSMutableArray *files, NSString *rel) {
+    NSString *parent = [dst stringByDeletingLastPathComponent];
+    [fm createDirectoryAtPath:parent withIntermediateDirectories:YES attributes:nil error:NULL];
+    [fm removeItemAtPath:dst error:NULL];
+    NSError *e = nil;
+    if (![fm copyItemAtPath:src toPath:dst error:&e]) {
+        TVLog(@"Control socket: cookies copy fail %@ -> %@: %@", src, dst,
+              e.localizedDescription);
+        return NO;
+    }
+    if (rel.length)
+        [files addObject:rel];
+    return YES;
+}
+
+static void tvCookiesCollectTree(NSString *srcRoot, NSString *dstRoot, NSString *relPrefix,
+                                 BOOL copyAllHere, NSFileManager *fm, NSMutableArray *files) {
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:srcRoot isDirectory:&isDir] || !isDir)
+        return;
+    NSArray<NSString *> *names = [fm contentsOfDirectoryAtPath:srcRoot error:NULL];
+    for (NSString *name in names) {
+        if ([name hasPrefix:@"."])
+            continue;
+        if (!copyAllHere && tvCookiesSkipDirName(name))
+            continue;
+        NSString *src = [srcRoot stringByAppendingPathComponent:name];
+        NSString *rel = relPrefix.length ? [relPrefix stringByAppendingPathComponent:name] : name;
+        NSString *dst = [dstRoot stringByAppendingPathComponent:name];
+        BOOL childDir = NO;
+        [fm fileExistsAtPath:src isDirectory:&childDir];
+        if (childDir) {
+            BOOL all = copyAllHere || [name isEqualToString:@"Cookies"] ||
+                       [name isEqualToString:@"HTTPStorages"];
+            tvCookiesCollectTree(src, dst, rel, all, fm, files);
+            continue;
+        }
+        if (copyAllHere || tvCookiesNameLooksUseful(name))
+            tvCookiesCopyFile(src, dst, fm, files, rel);
+    }
+}
+
+static NSDictionary *tvCookiesReadMetadata(NSString *containerPath) {
+    NSString *plistPath =
+        [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+    NSData *data = [NSData dataWithContentsOfFile:plistPath];
+    if (!data)
+        return nil;
+    id obj = [NSPropertyListSerialization propertyListWithData:data options:0 format:NULL error:NULL];
+    return [obj isKindOfClass:[NSDictionary class]] ? obj : nil;
+}
+
+static NSString *tvCookiesGroupIdentifier(NSDictionary *meta, NSString *containerPath) {
+    id ident = meta[@"MCMMetadataIdentifier"];
+    if ([ident isKindOfClass:[NSString class]] && [ident length])
+        return ident;
+    return [containerPath lastPathComponent];
+}
+
+static NSArray<NSDictionary *> *tvCookiesGroupContainers(LSApplicationProxy *app, NSString *bundleId) {
+    NSMutableArray *out = [NSMutableArray array];
+    NSMutableSet *seen = [NSMutableSet set];
+
+    void (^add)(NSString *, NSString *) = ^(NSString *ident, NSString *path) {
+        if (path.length == 0 || [seen containsObject:path])
+            return;
+        [seen addObject:path];
+        [out addObject:@{@"id" : ident.length ? ident : @"", @"path" : path}];
+    };
+
+    @try {
+        if ([app respondsToSelector:@selector(groupContainerURLs)]) {
+            NSDictionary *urls = [app groupContainerURLs];
+            if ([urls isKindOfClass:[NSDictionary class]]) {
+                [urls enumerateKeysAndObjectsUsingBlock:^(id key, id obj, BOOL *stop) {
+                    NSString *ident = [key isKindOfClass:[NSString class]] ? key : [key description];
+                    NSString *path = nil;
+                    if ([obj isKindOfClass:[NSURL class]])
+                        path = [(NSURL *)obj path];
+                    else if ([obj isKindOfClass:[NSString class]])
+                        path = obj;
+                    add(ident, path);
+                }];
+            }
+        }
+    } @catch (NSException *ex) {
+        TVLog(@"Control socket: groupContainerURLs exception %@", ex);
+    }
+    if (out.count > 0)
+        return out;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *root = @"/var/mobile/Containers/Shared/AppGroup";
+    NSArray *names = [fm contentsOfDirectoryAtPath:root error:NULL];
+    NSString *vendor = nil;
+    NSArray *parts = [bundleId componentsSeparatedByString:@"."];
+    if (parts.count >= 2)
+        vendor = [[parts subarrayWithRange:NSMakeRange(0, 2)] componentsJoinedByString:@"."];
+
+    NSMutableArray *vendorMatches = [NSMutableArray array];
+    NSData *bundleNeedle = [bundleId dataUsingEncoding:NSUTF8StringEncoding];
+    for (NSString *name in names) {
+        NSString *path = [root stringByAppendingPathComponent:name];
+        BOOL isDir = NO;
+        if (![fm fileExistsAtPath:path isDirectory:&isDir] || !isDir)
+            continue;
+        NSDictionary *meta = tvCookiesReadMetadata(path);
+        NSString *ident = tvCookiesGroupIdentifier(meta, path);
+        NSString *wanted = [NSString stringWithFormat:@"group.%@", bundleId];
+        BOOL match = NO;
+        if ([ident isEqualToString:wanted] || [ident isEqualToString:bundleId])
+            match = YES;
+        else if (ident.length && [ident containsString:bundleId])
+            match = YES;
+        else {
+            NSString *plistPath = [path stringByAppendingPathComponent:
+                                             @".com.apple.mobile_container_manager.metadata.plist"];
+            NSData *raw = [NSData dataWithContentsOfFile:plistPath];
+            if (raw && bundleNeedle &&
+                [raw rangeOfData:bundleNeedle options:0 range:NSMakeRange(0, raw.length)].location != NSNotFound)
+                match = YES;
+        }
+        if (match) {
+            add(ident, path);
+            continue;
+        }
+        if (vendor.length && ident.length && [ident containsString:vendor])
+            [vendorMatches addObject:@[ ident ?: @"", path ]];
+    }
+    if (out.count == 0) {
+        for (NSArray *pair in vendorMatches)
+            add(pair[0], pair[1]);
+    }
+    return out;
+}
+
+static NSData *tvCtlDumpCookies(NSString *bundleId) {
+    bundleId = [bundleId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (bundleId.length == 0)
+        return [@"ERR BadArg\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    LSApplicationProxy *app = tvAppProxy(bundleId);
+    if (!app)
+        return [@"NOT_FOUND\n" dataUsingEncoding:NSUTF8StringEncoding];
+
+    NSString *dataPath = app.dataContainerURL.path;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *staging = tvCookiesStagingDir(bundleId);
+    [fm removeItemAtPath:staging error:NULL];
+    [fm createDirectoryAtPath:staging withIntermediateDirectories:YES attributes:nil error:NULL];
+
+    NSMutableArray *files = [NSMutableArray array];
+    NSMutableArray *groupInfos = [NSMutableArray array];
+
+    if (dataPath.length) {
+        NSString *dstData = [staging stringByAppendingPathComponent:@"data"];
+        [fm createDirectoryAtPath:dstData withIntermediateDirectories:YES attributes:nil error:NULL];
+        NSArray *loginRels = @[
+            @"Documents/user/bt.userLoginInfo",
+            @"Documents/user/bt.userLastLoginInfo",
+            @"Documents/beeshop/kBTDeviceIDKey",
+            @"Documents/sz-uuid2",
+        ];
+        for (NSString *rel in loginRels) {
+            NSString *src = [dataPath stringByAppendingPathComponent:rel];
+            if ([fm fileExistsAtPath:src]) {
+                NSString *dst = [dstData stringByAppendingPathComponent:rel];
+                tvCookiesCopyFile(src, dst, fm, files, [@"data" stringByAppendingPathComponent:rel]);
+            }
+        }
+        tvCookiesCollectTree([dataPath stringByAppendingPathComponent:@"Library"],
+                             [dstData stringByAppendingPathComponent:@"Library"],
+                             @"data/Library", NO, fm, files);
+    }
+
+    for (NSDictionary *group in tvCookiesGroupContainers(app, bundleId)) {
+        NSString *gpath = group[@"path"];
+        NSString *gid = group[@"id"] ?: @"";
+        if (gpath.length == 0)
+            continue;
+        [groupInfos addObject:@{@"id" : gid, @"path" : gpath}];
+        NSString *safeId = [[gid stringByReplacingOccurrencesOfString:@"/" withString:@"_"]
+            stringByReplacingOccurrencesOfString:@":" withString:@"_"];
+        if (safeId.length == 0)
+            safeId = [gpath lastPathComponent];
+        NSString *dstGroup = [[staging stringByAppendingPathComponent:@"group"] stringByAppendingPathComponent:safeId];
+        [fm createDirectoryAtPath:dstGroup withIntermediateDirectories:YES attributes:nil error:NULL];
+        NSString *relPrefix = [@"group" stringByAppendingPathComponent:safeId];
+        tvCookiesCollectTree(gpath, dstGroup, relPrefix, NO, fm, files);
+    }
+
+    tvChownTree(staging, fm);
+
+    NSDictionary *payload = @{
+        @"bundleId" : bundleId,
+        @"dataContainer" : dataPath ?: @"",
+        @"groupContainers" : groupInfos,
+        @"staging" : staging,
+        @"files" : files,
+    };
+    NSError *je = nil;
+    NSData *json = [NSJSONSerialization dataWithJSONObject:payload options:0 error:&je];
+    if (!json) {
+        NSString *msg = [NSString stringWithFormat:@"ERR %@\n", je.localizedDescription ?: @"JSON"];
+        return [msg dataUsingEncoding:NSUTF8StringEncoding];
+    }
+    NSMutableData *resp = [NSMutableData dataWithData:[@"OK\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    [resp appendData:json];
+    [resp appendBytes:"\n" length:1];
+    TVLog(@"Control socket: cookies %@ files=%lu staging=%@", bundleId, (unsigned long)files.count, staging);
+    return resp;
+}
+
 void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     TVAtomicCounterGuard connectionGuard(gTvCtlActiveConnections);
     gTvCtlAcceptedTotal.fetch_add(1, std::memory_order_relaxed);
@@ -7296,6 +7543,9 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         NSString *bid = (sp.location == NSNotFound) ? rest : [rest substringToIndex:sp.location];
         NSString *nm = (sp.location == NSNotFound) ? @"" : [rest substringFromIndex:sp.location + 1];
         resp = tvCtlRestoreApp(bid, nm);
+    } else if ([cmd hasPrefix:@"cookies "]) {
+        resp = tvCtlDumpCookies([[cmd substringFromIndex:8]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]]);
     } else if ([cmd hasPrefix:@"autoset "]) {
         NSData *raw = [[NSData alloc] initWithBase64EncodedString:[cmd substringFromIndex:8] options:0];
         NSString *script = raw ? [[NSString alloc] initWithData:raw encoding:NSUTF8StringEncoding] : nil;
