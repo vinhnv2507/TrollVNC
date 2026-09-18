@@ -2,12 +2,23 @@
 
 Công cụ chạy dưới dạng Apps Script gắn trực tiếp vào Google Sheet. Cookie được nhập bằng hộp thoại và lưu trong `UserProperties`; không ghi cookie vào ô hoặc nhật ký.
 
+## Cách tự động tìm đơn chỉ bằng cookie
+
+1. Gọi API thông báo đơn hàng (`action_cate=4`).
+2. Giải mã nội dung hex trong thông báo.
+3. Lấy Order ID từ URL chuyển hướng.
+4. Lấy mã đơn Shopee và mã SPX từ nội dung thông báo.
+5. Dùng Order ID lấy ePOD và dùng mã SPX lấy timeline vận chuyển.
+
+Hướng này không phụ thuộc vào API danh sách đơn, vì API danh sách có thể bị Shopee chặn `90309999`.
+
 ## Dữ liệu xuất
 
 - Account nhận diện được từ cookie.
 - Tên người nhận, số điện thoại, địa chỉ và tọa độ.
 - Bộ đếm trạng thái đơn.
-- Nếu API danh sách/chi tiết đơn hoạt động: tự tìm Order ID, ePOD và mã vận đơn có trong phản hồi để lấy timeline SPX.
+- Order ID, mã đơn, trạng thái thông báo, mã vận đơn SPX và ePOD.
+- Timeline SPX: trạng thái, thời gian, trạm và địa chỉ trạm.
 - Nhật ký HTTP/mã lỗi, không chứa cookie/token.
 
 ## Cài vào Google Sheet
@@ -20,16 +31,12 @@ Công cụ chạy dưới dạng Apps Script gắn trực tiếp vào Google She
 6. Chọn **Nhập/cập nhật cookie**, dán `cookie-header.txt`.
 7. Chọn **Lấy dữ liệu**.
 
-## Cấu hình
+## Cấu hình và giới hạn
 
-- `B2`: số đơn tối đa muốn thử lấy.
-- Không có ô nhập Order ID hay mã SPX. Công cụ sẽ tự tìm nếu API phản hồi đủ dữ liệu.
-
-## Giới hạn
-
-Shopee có thể trả `403 / 90309999` cho API danh sách/chi tiết đơn. Cookie không chứa Order ID hoặc mã vận đơn, nên khi API này bị chặn, Google Sheet không thể tự suy ra chỉ từ cookie. Khi đó công cụ chỉ xuất account, địa chỉ và bộ đếm lấy được.
-
-Luồng tự động: danh sách đơn → Order ID → chi tiết/ePOD. Chỉ khi phản hồi chi tiết có mã vận đơn thì công cụ mới tiếp tục lấy SPX tracking; công cụ không OCR ảnh ePOD.
+- `B2`: số thông báo/đơn tối đa muốn thử lấy.
+- Không cần nhập Order ID hay mã SPX.
+- Chỉ những đơn còn thông báo trong lịch sử tài khoản mới tự tìm được theo hướng này. Thông báo quá cũ bị Shopee xóa có thể không xuất hiện.
+- Thông báo chưa có mã SPX sẽ chưa lấy được timeline vận chuyển.
 
 ## Bảo mật
 

@@ -142,6 +142,7 @@ function fetchShopeeData() {
     writeAccountFromCookie_(ctx);
     fetchAddresses_(ctx);
     fetchOrderCounts_(ctx);
+    fetchOrderNotifications_(ctx, limit);
     fetchOrderList_(ctx, limit);
 
     // Khi API danh sách trả dữ liệu, tự dùng Order ID tìm chi tiết và ePOD.
@@ -228,6 +229,129 @@ function fetchOrderCounts_(ctx) {
   appendRows_(ctx.ss.getSheetByName(SHEETS.ACCOUNT), rows);
 }
 
+function fetchOrderNotifications_(ctx, limit) {
+  var path = '/api/v4/notification/get_notifications?action_cate=4&cursor=&limit=' +
+    encodeURIComponent(Math.max(1, Math.min(limit, 100)));
+  var result = shopeeRequest_(ctx, path, 'get');
+  if (!isApiSuccess_(result.json)) return;
+
+  var actions = ((((result.json || {}).data || {}).actions) || []);
+  for (var i = 0; i < actions.length; i++) {
+    var action = actions[i] || {};
+    var title = stripHtml_(decodePossiblyHex_(action.title || ''));
+    var content = stripHtml_(decodePossiblyHex_(action.content || ''));
+    var url = action.action_redirect_url || action.pc_redirect_url || action.apprl || '';
+    var orderId = extractOrderId_(url);
+    var tracking = extractTrackingNumber_(title + ' ' + content + ' ' + url);
+    var orderSn = extractOrderSn_(content, tracking);
+
+    // Một số response để orderid trực tiếp trong id_info.
+    if (!orderId && action.id_info && action.id_info.orderid) {
+      orderId = String(action.id_info.orderid);
+    }
+    if (!orderId && !orderSn && !tracking) continue;
+
+    addDiscoveredOrder_(ctx, {
+      orderId: orderId,
+      orderSn: orderSn,
+      status: title || content,
+      tracking: tracking,
+      note: 'API thông báo đơn hàng' +
+        (action.createtime ? ' — ' + formatUnixTime_(action.createtime) : '')
+    });
+  }
+}
+
+function addDiscoveredOrder_(ctx, data) {
+  var orderId = String(data.orderId || '');
+  var orderSn = String(data.orderSn || '');
+  var tracking = String(data.tracking || '');
+  var key = orderId || orderSn || tracking;
+  if (!key) return;
+
+  var existing = null;
+  for (var i = 0; i < ctx.orderRows.length; i++) {
+    var row = ctx.orderRows[i];
+    if ((orderId && String(row.orderId || '') === orderId) ||
+        (orderSn && String(row.orderSn || '') === orderSn) ||
+        (tracking && String(row.tracking || '') === tracking)) {
+      existing = row;
+      break;
+    }
+  }
+  if (!existing) {
+    existing = {
+      orderId: '', orderSn: '', status: '', shop: '', item: '', total: '',
+      payment: '', carrier: '', tracking: '', epod: '', note: ''
+    };
+    ctx.orderRows.push(existing);
+  }
+
+  existing.orderId = existing.orderId || orderId;
+  existing.orderSn = existing.orderSn || orderSn;
+  existing.status = data.status || existing.status;
+  existing.tracking = existing.tracking || tracking;
+  existing.carrier = existing.carrier || (tracking ? 'SPX Express' : '');
+  existing.note = existing.note ? existing.note + '; ' + (data.note || '') : (data.note || '');
+
+  if (existing.orderId) ctx.seenOrderIds[String(existing.orderId)] = true;
+  if (existing.tracking) ctx.trackingCandidates.push(String(existing.tracking));
+}
+
+function decodePossiblyHex_(value) {
+  var text = String(value || '').trim();
+  if (!text || text.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(text)) return text;
+  try {
+    var encoded = '';
+    for (var i = 0; i < text.length; i += 2) encoded += '%' + text.slice(i, i + 2);
+    return decodeURIComponent(encoded);
+  } catch (e) {
+    return text;
+  }
+}
+
+function stripHtml_(value) {
+  return String(value || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractOrderId_(value) {
+  var text = String(value || '');
+  var patterns = [
+    /[?&]orderId=(\d{10,20})/i,
+    /[?&]order_id=(\d{10,20})/i,
+    /\/order\/(\d{10,20})(?:[/?#]|$)/i
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var match = text.match(patterns[i]);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+function extractTrackingNumber_(value) {
+  var text = String(value || '').toUpperCase();
+  var match = text.match(/\bSPX[A-Z0-9]{10,25}\b/);
+  return match ? match[0] : '';
+}
+
+function extractOrderSn_(value, tracking) {
+  var text = String(value || '').toUpperCase();
+  if (tracking) text = text.replace(String(tracking).toUpperCase(), ' ');
+  var explicit = text.match(/(?:ĐƠN HÀNG|DON HANG|ORDER)[^A-Z0-9]{0,20}([0-9]{6}[A-Z0-9]{6,20})/i);
+  if (explicit) return explicit[1];
+  var candidates = text.match(/\b[0-9]{6}[A-Z0-9]{6,20}\b/g) || [];
+  for (var i = 0; i < candidates.length; i++) {
+    if (!/^SPX/.test(candidates[i])) return candidates[i];
+  }
+  return '';
+}
+
 function fetchOrderList_(ctx, limit) {
   var endpoints = [
     '/api/v4/order/get_all_order_and_checkout_list?limit=' + limit + '&offset=0&version=7',
@@ -251,7 +375,7 @@ function fetchOrderList_(ctx, limit) {
     }
   }
 
-  if (!found && blocked) {
+  if (!found && blocked && !ctx.orderRows.length) {
     appendRows_(ctx.ss.getSheetByName(SHEETS.ORDERS), [[
       '', '', 'Bị chặn 90309999', '', '', '', '', '', '', '',
       'Shopee chặn API danh sách/chi tiết đơn (90309999). Cookie đơn thuần không thể tự suy ra Order ID hoặc mã vận đơn.'
