@@ -2,6 +2,10 @@ const fs = require('fs');
 const vm = require('vm');
 const code = fs.readFileSync('tools/shopee_sheet/Code.gs', 'utf8');
 const sandbox = {};
+
+assert(!code.includes('manualOrderId'), 'no manual order id input');
+assert(!code.includes('manualTracking'), 'no manual tracking input');
+assert(!code.includes("getRange('B3')"), 'no tracking config cell');
 vm.createContext(sandbox);
 vm.runInContext(code, sandbox);
 function assert(cond, msg) { if (!cond) throw new Error(msg); }

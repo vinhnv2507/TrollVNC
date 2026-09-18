@@ -41,20 +41,19 @@ function setupShopeeSheet() {
 
   config.clear();
   config.getRange('A1:B1').setValues([['SHOPEE COOKIE EXPORTER', 'Giá trị']]);
-  config.getRange('A2:B6').setValues([
-    ['Order ID (không bắt buộc)', ''],
-    ['Mã vận đơn SPX (không bắt buộc)', ''],
+  config.getRange('A2:B5').setValues([
     ['Giới hạn đơn thử lấy', 50],
     ['Khu vực', 'VN'],
-    ['Ghi chú', 'Cookie nhập qua menu, không dán vào ô. Nếu API đơn bị 90309999, cần nhập Order ID hoặc mã vận đơn.']
+    ['Chế độ', 'Chỉ nhập cookie — tự dò Order ID và mã vận đơn nếu API phản hồi đủ dữ liệu'],
+    ['Ghi chú', 'Nếu Shopee trả 90309999, cookie không đủ để lấy danh sách/chi tiết đơn; Sheet vẫn xuất account, địa chỉ và bộ đếm.']
   ]);
-  config.getRange('A8:B13').setValues([
+  config.getRange('A7:B12').setValues([
     ['Cách dùng', ''],
     ['Bước 1', 'Menu Shopee Export → Nhập/cập nhật cookie'],
-    ['Bước 2', 'Nếu có, nhập Order ID tại B2 hoặc mã SPX tại B3'],
-    ['Bước 3', 'Menu Shopee Export → Lấy dữ liệu'],
+    ['Bước 2', 'Menu Shopee Export → Lấy dữ liệu'],
+    ['Tự động', 'Nếu lấy được danh sách/chi tiết đơn: tự tìm Order ID, ePOD và mã vận đơn có trong phản hồi → tracking SPX.'],
     ['Bảo mật', 'Không chia sẻ cookie. Khi dùng xong chọn Xóa cookie đã lưu.'],
-    ['Giới hạn', 'Cookie đơn thuần có thể bị Shopee chặn API danh sách/chi tiết đơn với lỗi 90309999.']
+    ['Giới hạn', 'Không có cách đảm bảo lấy toàn bộ đơn chỉ bằng cookie khi Shopee chặn 90309999.']
   ]);
   styleConfig_(config);
 
@@ -125,9 +124,7 @@ function fetchShopeeData() {
   clearResultRows_(ss);
 
   var config = ss.getSheetByName(SHEETS.CONFIG);
-  var manualOrderId = cleanScalar_(config.getRange('B2').getValue());
-  var manualTracking = String(config.getRange('B3').getValue() || '').trim();
-  var limit = parseInt(config.getRange('B4').getValue(), 10) || 50;
+  var limit = parseInt(config.getRange('B2').getValue(), 10) || 50;
   limit = Math.max(1, Math.min(limit, 100));
 
   var ctx = {
@@ -147,17 +144,22 @@ function fetchShopeeData() {
     fetchOrderCounts_(ctx);
     fetchOrderList_(ctx, limit);
 
-    if (manualOrderId) {
-      addManualOrder_(ctx, manualOrderId);
-      fetchOrderDetail_(ctx, manualOrderId);
-      fetchEpod_(ctx, manualOrderId);
+    // Khi API danh sách trả dữ liệu, tự dùng Order ID tìm chi tiết và ePOD.
+    // Không yêu cầu người dùng nhập Order ID hoặc mã vận đơn.
+    var discoveredOrderIds = [];
+    for (var oi = 0; oi < ctx.orderRows.length; oi++) {
+      if (ctx.orderRows[oi].orderId) discoveredOrderIds.push(String(ctx.orderRows[oi].orderId));
+    }
+    discoveredOrderIds = uniqueStrings_(discoveredOrderIds).slice(0, limit);
+    for (var di = 0; di < discoveredOrderIds.length; di++) {
+      fetchOrderDetail_(ctx, discoveredOrderIds[di]);
+      fetchEpod_(ctx, discoveredOrderIds[di]);
+      Utilities.sleep(150);
     }
 
     writeOrderRows_(ctx);
 
-    var trackingNumbers = uniqueStrings_(
-      (manualTracking ? [manualTracking] : []).concat(ctx.trackingCandidates)
-    );
+    var trackingNumbers = uniqueStrings_(ctx.trackingCandidates);
     for (var i = 0; i < trackingNumbers.length; i++) {
       fetchSpxTracking_(ctx, trackingNumbers[i]);
       Utilities.sleep(150);
@@ -252,28 +254,9 @@ function fetchOrderList_(ctx, limit) {
   if (!found && blocked) {
     appendRows_(ctx.ss.getSheetByName(SHEETS.ORDERS), [[
       '', '', 'Bị chặn 90309999', '', '', '', '', '', '', '',
-      'Shopee chặn API danh sách/chi tiết đơn. Nhập Order ID ở Cấu hình!B2 hoặc mã SPX ở B3.'
+      'Shopee chặn API danh sách/chi tiết đơn (90309999). Cookie đơn thuần không thể tự suy ra Order ID hoặc mã vận đơn.'
     ]]);
   }
-}
-
-function addManualOrder_(ctx, orderId) {
-  var key = String(orderId);
-  if (ctx.seenOrderIds[key]) return;
-  ctx.seenOrderIds[key] = true;
-  ctx.orderRows.push({
-    orderId: key,
-    orderSn: '',
-    status: '',
-    shop: '',
-    item: '',
-    total: '',
-    payment: '',
-    carrier: '',
-    tracking: '',
-    epod: '',
-    note: 'Order ID nhập thủ công'
-  });
 }
 
 function fetchOrderDetail_(ctx, orderId) {
@@ -672,10 +655,9 @@ function initializeResultSheet_(sheet, headers) {
 function styleConfig_(sheet) {
   sheet.setFrozenRows(1);
   sheet.getRange('A1:B1').setFontWeight('bold').setBackground('#ee4d2d').setFontColor('#ffffff');
-  sheet.getRange('A8:B8').setFontWeight('bold').setBackground('#fce8e3');
+  sheet.getRange('A7:B7').setFontWeight('bold').setBackground('#fce8e3');
   sheet.setColumnWidth(1, 230);
   sheet.setColumnWidth(2, 620);
-  sheet.getRange('B2:B3').setNumberFormat('@');
   sheet.getDataRange().setVerticalAlignment('top').setWrap(true);
 }
 
