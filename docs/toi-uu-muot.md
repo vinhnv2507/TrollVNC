@@ -2,6 +2,23 @@
 
 Mục tiêu: điều khiển bám tay nhất, độ nét vừa đủ không mờ quá.
 
+## PC 0.2.27: lấy cookie Shopee chuẩn (SPC_ST / SPC_SI / csrftoken)
+
+Bản trước chỉ dựng lại token đăng nhập (`SPC_EC` / `SPC_F` / `SPC_U`) từ
+`bt.userLoginInfo` — **không phải** cookie HTTP jar. Session/captcha Shopee
+cần `SPC_ST`, `SPC_SI`, `csrftoken` nằm trong `Library/Cookies`, HTTPStorages
+hoặc App Group — snapshot Documents cũ không có các file này.
+
+PC 0.2.27 + iOS 4.14:
+
+- Máy: lệnh `cookies <bundle>` copy binarycookies, sqlite HTTPStorages (+ WAL)
+  và file login ra `/var/mobile/controlios-cookies/`, gồm **App Group**.
+- PC: nút **Lấy cookie** / chuột phải **Lấy cookie về PC…**
+- Xuất `cookies.txt` (Netscape), `cookie-header.txt`, `cookies.json`
+- Cookie jar thật thắng token dựng lại khi trùng tên; không xuất mật khẩu (`pw`)
+
+Cần cài **cả** PC 0.2.27 và IPA 4.14. Đóng bản PC đang chạy rồi mở 0.2.27.
+
 ## PC 0.2.26: canh EarnApp không còn rớt cổng 46752 vì chụp màn 3 lần
 
 Log 0.2.25 kiểu `chụp màn hình lỗi (); đang nối lại` rồi `46752 không phản hồi`

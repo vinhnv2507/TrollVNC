@@ -76,6 +76,7 @@ class AppsPanelTest(unittest.TestCase):
         got = {}
         self.panel.snapshot_requested.connect(lambda b: got.setdefault("snap", b))
         self.panel.backup_pc_requested.connect(lambda b: got.setdefault("backup", b))
+        self.panel.cookies_requested.connect(lambda b: got.setdefault("cookies", b))
         self.panel.restore_requested.connect(lambda b: got.setdefault("restore", b))
         self.panel.wipe_requested.connect(lambda b: got.setdefault("wipe", b))
 
@@ -84,9 +85,10 @@ class AppsPanelTest(unittest.TestCase):
 
         self.panel.snapshot_button.click()
         self.panel.backup_pc_button.click()
+        self.panel.cookies_button.click()
         self.panel.restore_button.click()
         self.panel.wipe_button.click()
-        self.assertEqual(got, {"snap": bundle, "backup": bundle,
+        self.assertEqual(got, {"snap": bundle, "backup": bundle, "cookies": bundle,
                                "restore": bundle, "wipe": bundle})
 
     def test_data_buttons_without_selection_hint_instead_of_emitting(self) -> None:

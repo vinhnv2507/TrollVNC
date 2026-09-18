@@ -443,6 +443,30 @@ class FakeControlServer:
                 return b"ERR Args\n"
             return f"OK {getattr(self, 'color_hex', 'FBBC05')}\n".encode()
 
+        if cmd.startswith("cookies "):
+            if self.unpatched:
+                return b"ERR Unknown\n"
+            bundle = cmd[len("cookies "):].strip()
+            if bundle not in self.apps:
+                return b"NOT_FOUND\n"
+            import json
+            from controlios.cookies import Cookie, encode_binarycookies
+            staging = f"/var/mobile/controlios-cookies/{bundle}"
+            remote = staging + "/data/Library/Cookies/Cookies.binarycookies"
+            self.received[remote] = encode_binarycookies([
+                Cookie(name="SPC_ST", value="st-token", domain=".shopee.vn", path="/", flags=1),
+                Cookie(name="SPC_SI", value="si-token", domain=".shopee.vn", path="/", flags=1),
+                Cookie(name="csrftoken", value="csrf-token", domain=".shopee.vn", path="/", flags=1),
+            ])
+            payload = {
+                "bundleId": bundle,
+                "dataContainer": f"/var/mobile/Containers/Data/Application/FAKE-{bundle}",
+                "groupContainers": [],
+                "staging": staging,
+                "files": ["data/Library/Cookies/Cookies.binarycookies"],
+            }
+            return ("OK\n" + json.dumps(payload) + "\n").encode()
+
         if cmd.startswith("restore "):
             if self.unpatched:
                 return b"ERR Unknown\n"

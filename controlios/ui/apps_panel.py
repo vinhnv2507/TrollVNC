@@ -93,6 +93,7 @@ class AppsPanel(QWidget):
     wipe_requested = Signal(str)         # xoá dữ liệu app (như cài lại)
     snapshot_requested = Signal(str)     # lưu snapshot dữ liệu app
     backup_pc_requested = Signal(str)    # tạo snapshot hàng loạt rồi tải về PC
+    cookies_requested = Signal(str)      # lấy cookie HTTP thật về PC
     restore_requested = Signal(str)      # khôi phục dữ liệu app từ snapshot
     refresh_requested = Signal()
 
@@ -174,6 +175,14 @@ class AppsPanel(QWidget):
         self.backup_pc_button.clicked.connect(
             lambda: self._emit_for_selected(self.backup_pc_requested))
         layout.addWidget(self.backup_pc_button)
+
+        self.cookies_button = QPushButton("Lấy cookie")
+        self.cookies_button.setToolTip(
+            "Lấy cookie HTTP thật (Cookies.binarycookies / HTTPStorages) về PC. "
+            "Cần ControlIOS 4.14+ trên máy. Token dựng lại từ login không thay cookie jar.")
+        self.cookies_button.clicked.connect(
+            lambda: self._emit_for_selected(self.cookies_requested))
+        layout.addWidget(self.cookies_button)
 
         self.status = QLabel("Chọn một máy rồi bấm Nạp danh sách.")
         self.status.setWordWrap(True)
@@ -316,6 +325,10 @@ class AppsPanel(QWidget):
         restore_action = QAction("Snapshot & khôi phục…", menu)
         restore_action.triggered.connect(lambda: self.restore_requested.emit(bundle))
         menu.addAction(restore_action)
+
+        cookies_action = QAction("Lấy cookie về PC…", menu)
+        cookies_action.triggered.connect(lambda: self.cookies_requested.emit(bundle))
+        menu.addAction(cookies_action)
 
         menu.addSeparator()
         copy_action = QAction("Chép bundle id", menu)

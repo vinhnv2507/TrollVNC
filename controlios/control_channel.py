@@ -838,6 +838,34 @@ class ControlChannel:
             except Exception:
                 pass
 
+    async def dump_cookies(self, bundle_id: str, dest: Path | str) -> dict:
+        """Lấy cookie HTTP thật (và token dựng lại nếu thiếu) về PC."""
+
+        from .cookies import dump_from_folder, export_dump, parse_cookies_reply
+
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        await self.terminate(bundle_id)
+        text = await self.command(f"cookies {bundle_id}", read_timeout=180)
+        head = text.strip()
+        if head.startswith("NOT_FOUND"):
+            raise ControlError(f"Máy không có app {bundle_id}")
+        if not head.startswith("OK"):
+            raise ControlError(f"Không lấy được cookie {bundle_id}: {head}")
+        reply = parse_cookies_reply(text, bundle_id)
+        staging = str(reply.get("staging") or "").strip() or (
+            f"/var/mobile/controlios-cookies/{bundle_id}"
+        )
+        await self.download_tree(staging, dest / "raw")
+        dump = dump_from_folder(dest, bundle_id)
+        if reply.get("dataContainer"):
+            dump["dataContainer"] = reply["dataContainer"]
+        if reply.get("groupContainers"):
+            dump["groupContainers"] = reply["groupContainers"]
+        dump["staging"] = staging
+        export_dump(dump, dest)
+        return dump
+
     async def download_tree(self, remote: str, local: Path | str) -> int:
         """Tải đệ quy một thư mục snapshot; trả tổng số byte."""
 

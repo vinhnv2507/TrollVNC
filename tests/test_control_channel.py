@@ -437,6 +437,31 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
             await self.channel.restore_app("com.honeygain.app", "khong-co")
         self.assertIn("snapshot", str(ctx.exception).lower())
 
+    async def test_dump_cookies_downloads_staging_and_exports(self) -> None:
+        import tempfile
+        self.server.apps["com.beeasy.shopee.vn"] = ("Shopee", "User", "1.0")
+        with tempfile.TemporaryDirectory() as folder:
+            dest = Path(folder) / "out"
+            dump = await self.channel.dump_cookies("com.beeasy.shopee.vn", dest)
+            names = {item["name"] for item in dump["cookies"]}
+            self.assertTrue(dump["jarFound"])
+            self.assertEqual(names & {"SPC_ST", "SPC_SI", "csrftoken"},
+                             {"SPC_ST", "SPC_SI", "csrftoken"})
+            self.assertTrue((dest / "cookies.txt").exists())
+            self.assertTrue((dest / "cookie-header.txt").exists())
+            self.assertTrue((dest / "cookies.json").exists())
+            raw = dest / "raw/data/Library/Cookies/Cookies.binarycookies"
+            self.assertTrue(raw.exists())
+            header = (dest / "cookie-header.txt").read_text(encoding="utf-8")
+            self.assertIn("SPC_ST=st-token", header)
+            payload = (dest / "cookies.json").read_text(encoding="utf-8")
+            self.assertNotIn('"pw"', payload)
+
+    async def test_cookies_command_unpatched(self) -> None:
+        self.server.unpatched = True
+        with self.assertRaises(NotPatchedError):
+            await self.channel.command("cookies com.golike.app")
+
     async def test_reset_commands_fail_clearly_on_unpatched(self) -> None:
         self.server.unpatched = True
         with self.assertRaises(NotPatchedError):

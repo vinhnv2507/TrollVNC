@@ -2301,6 +2301,7 @@ class MainWindow(QMainWindow):
         self.apps_panel.wipe_requested.connect(self._wipe_app)
         self.apps_panel.snapshot_requested.connect(self._snapshot_app)
         self.apps_panel.backup_pc_requested.connect(self._backup_app_to_pc)
+        self.apps_panel.cookies_requested.connect(self._dump_cookies_to_pc)
         self.apps_panel.restore_requested.connect(self._restore_app)
         # Home / Chuyển app / Khoá đã chuyển xuống dưới khung lớn.
         # Thao tác tệp (gồm cài .ipa) mở nhanh từ nút File trên thanh chính.
@@ -4045,6 +4046,25 @@ class MainWindow(QMainWindow):
             f"Đang tạo và tải snapshot {bundle_id} từ {len(targets)} máy…")
         self.pool.backup_app_to_pc(
             targets, bundle_id, name, folder,
+            on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
+        )
+
+    def _dump_cookies_to_pc(self, bundle_id: str) -> None:
+        targets = self._confirmed_action_targets(f"lấy cookie {bundle_id}")
+        if targets is None:
+            return
+        if not targets:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn các máy ở lưới.")
+            return
+        folder = QFileDialog.getExistingDirectory(
+            self, "Chọn thư mục lưu cookie", str(Path.home()))
+        if not folder:
+            return
+        self.apps_panel.set_busy(
+            f"Đang lấy cookie {bundle_id} từ {len(targets)} máy…")
+        self.pool.dump_cookies_to_pc(
+            targets, bundle_id, folder,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )

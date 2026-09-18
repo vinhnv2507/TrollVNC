@@ -981,6 +981,46 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def dump_cookies_to_pc(self, keys: Iterable[str], bundle_id: str,
+                           destination: Path | str, on_event=None, on_done=None) -> None:
+        """Lấy cookie HTTP của app về PC cho toàn bộ máy đang chọn."""
+
+        key_list = list(keys)
+        destination = Path(destination)
+        succeeded: List[str] = []
+        failures: List[tuple] = []
+
+        async def run() -> None:
+            transfer_slots = asyncio.Semaphore(4)
+
+            async def one(key: str) -> None:
+                session = self._sessions.get(key)
+                label = session.spec.name if session and session.spec.name else key
+                local = destination / f"{_slug(label)}_{_slug(key)}" / _slug(bundle_id)
+                try:
+                    async with transfer_slots:
+                        dump = await self._channel(key).dump_cookies(bundle_id, local)
+                    succeeded.append(key)
+                    if on_event:
+                        count = len(dump.get("cookies") or [])
+                        extra = ""
+                        if not dump.get("jarFound"):
+                            extra += " (không thấy jar HTTP; chỉ token dựng lại)"
+                        missing = dump.get("missing") or []
+                        if missing:
+                            extra += " — thiếu " + ", ".join(str(item) for item in missing)
+                        on_event(key, f"đã lấy {count} cookie ra {local}{extra}")
+                except Exception as exc:
+                    failures.append((key, str(exc)))
+                    if on_event:
+                        on_event(key, f"LỖI {exc}")
+
+            await asyncio.gather(*(one(key) for key in key_list), return_exceptions=True)
+            if on_done:
+                on_done(f"Lấy cookie {bundle_id}", len(succeeded), failures)
+
+        self._call_coro(run())
+
     def backup_app_to_pc(self, keys: Iterable[str], bundle_id: str, name: str,
                          destination: Path | str, on_event=None, on_done=None) -> None:
         """Tạo snapshot rồi tải về PC cho toàn bộ máy được chọn, không cần SSH."""
