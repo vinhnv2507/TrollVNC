@@ -17,6 +17,7 @@ var SIMPLE_SHEET_NAME = 'Shopee';
 var SIMPLE_TRIGGER_HANDLER = 'onEditInstalled';
 var SIMPLE_ORIGIN = 'https://shopee.vn';
 var SIMPLE_SPX_ORIGIN = 'https://spx.vn';
+var SIMPLE_GHN_ORIGIN = 'https://fe-online-gateway.ghn.vn';
 var SIMPLE_MAX_NOTIFICATIONS = 100;
 
 function onOpen() {
@@ -134,12 +135,15 @@ function processRow_(sheet, row) {
 
     var detail = found.orderId ? getOrderDetail_(cookie, found.orderId) : null;
     var address = getDefaultAddress_(cookie);
-    var merged = mergeOrderData_(found, detail, address);
-    var shipping = found.tracking ? getSpxInfo_(found.tracking) : null;
+    var shipping = found.tracking ? getCarrierInfo_(found.tracking, found.carrier, found.status) : {};
+    var merged = mergeOrderData_(found, detail, address, shipping);
     var status = shipping && shipping.status
       ? shipping.status
       : (merged.status || 'Đã tìm thấy đơn');
-    if (detail && detail.blocked) status += ' | Chi tiết đơn bị Shopee chặn 90309999';
+    if (shipping && shipping.carrier && shipping.lookupUrl && shipping.requiresManualLookup) {
+      status += ' | ' + shipping.carrier + ': ' + shipping.lookupUrl;
+    }
+    if (detail && detail.blocked) status += ' | Chi tiết Shopee bị chặn 90309999';
 
     sheet.getRange(row, 2, 1, 7).setValues([[
       merged.tracking || '',
@@ -170,26 +174,32 @@ function getNotifications_(cookie) {
 }
 
 function pickLatestOrder_(actions) {
+  var fallback = null;
   for (var i = 0; i < actions.length; i++) {
     var action = actions[i] || {};
     var title = cleanText_(action.title);
     var content = cleanText_(action.content);
     var redirect = action.action_redirect_url || action.pc_redirect_url || '';
     var all = title + ' ' + content + ' ' + redirect;
-    var tracking = extractTracking_(all);
+    var carrier = detectCarrier_(all, action);
+    var tracking = extractTracking_(all, carrier, action);
     var orderId = extractOrderId_(redirect) || firstValue_(action.id_info, ['orderid', 'order_id', 'orderId']);
     var orderSn = extractOrderSn_(content + ' ' + title, tracking);
-    if (orderId || tracking || orderSn) {
-      return {
-        orderId: String(orderId || ''),
-        orderSn: String(orderSn || ''),
-        tracking: String(tracking || ''),
-        status: title || content,
-        raw: action
-      };
-    }
+    if (!(orderId || tracking || orderSn)) continue;
+    var candidate = {
+      orderId: String(orderId || ''),
+      orderSn: String(orderSn || ''),
+      tracking: String(tracking || ''),
+      carrier: carrier,
+      status: title || content,
+      raw: action
+    };
+    // Prefer the newest notification that contains a real waybill. Some
+    // Shopee notifications have the order id first and the carrier code later.
+    if (tracking) return candidate;
+    if (!fallback) fallback = candidate;
   }
-  return null;
+  return fallback;
 }
 
 function getOrderDetail_(cookie, orderId) {
@@ -221,6 +231,22 @@ function getDefaultAddress_(cookie) {
   };
 }
 
+function getCarrierInfo_(tracking, carrier, fallbackStatus) {
+  carrier = carrier || detectCarrier_(tracking, {});
+  if (!tracking) return {status: fallbackStatus || '', carrier: carrier || ''};
+  if (carrier === 'SPX') return getSpxInfo_(tracking);
+  if (carrier === 'GHN') return getGhnInfo_(tracking);
+  if (carrier === 'VIETTELPOST') {
+    return {
+      status: fallbackStatus || '',
+      carrier: 'Viettel Post',
+      lookupUrl: 'https://viettelpost.com.vn/tra-cuu-hanh-trinh-don/',
+      requiresManualLookup: true
+    };
+  }
+  return {status: fallbackStatus || '', carrier: carrier || ''};
+}
+
 function getSpxInfo_(tracking) {
   var url = SIMPLE_SPX_ORIGIN + '/shipment/order/open/order/get_order_info?spx_tn=' +
     encodeURIComponent(tracking) + '&language_code=vi';
@@ -235,17 +261,63 @@ function getSpxInfo_(tracking) {
   latest = latest || {};
   return {
     status: latest.tracking_name || latest.description || '',
+    carrier: 'SPX',
     receiver: info.receiver_name || '',
     phone: info.receiver_phone || info.phone || '',
-    address: info.receiver_address || ''
+    address: info.receiver_address || '',
+    lookupUrl: SIMPLE_SPX_ORIGIN + '/vi?spx_tn=' + encodeURIComponent(tracking)
   };
 }
 
-function mergeOrderData_(found, detail, fallbackAddress) {
+function getGhnInfo_(tracking) {
+  var url = SIMPLE_GHN_ORIGIN + '/order-tracking/public-api/client/tracking-logs';
+  var result;
+  try {
+    result = jsonPost_(url, {order_code: tracking}, 'https://donhang.ghn.vn/');
+  } catch (err) {
+    return {
+      status: '', carrier: 'GHN', receiver: '', phone: '', address: '',
+      lookupUrl: 'https://donhang.ghn.vn/?order_code=' + encodeURIComponent(tracking),
+      requiresManualLookup: true,
+      errorCode: safeError_(err)
+    };
+  }
+  var data = result.json && result.json.data;
+  var latest = data && (data.latest_status || data.latest_tracking || data.current_status);
+  var status = firstValueDeep_(latest, ['status_name', 'status', 'description', 'name']) ||
+    firstValueDeep_(data, ['status_name', 'current_status', 'status']);
+  var receiver = firstValueDeep_(data, ['receiver_name', 'to_name', 'recipient_name']);
+  var phone = firstValueDeep_(data, ['receiver_phone', 'to_phone', 'recipient_phone']);
+  var address = firstValueDeep_(data, ['receiver_address', 'to_address', 'recipient_address']);
+  var requiresManual = !status && result.json && String(result.json.code_message || '') === 'PHONE_VERIFY_REQUIRED';
+  return {
+    status: status || '', carrier: 'GHN', receiver: receiver || '', phone: phone || '', address: address || '',
+    lookupUrl: 'https://donhang.ghn.vn/?order_code=' + encodeURIComponent(tracking),
+    requiresManualLookup: requiresManual,
+    errorCode: result.json && (result.json.code_message || result.status)
+  };
+}
+
+function jsonPost_(url, payload, referer) {
+  var headers = {
+    'User-Agent': browserUserAgent_(), 'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+    'Origin': referer ? String(referer).replace(/\/$/, '') : '', 'Referer': referer || '',
+    'Content-Type': 'application/json'
+  };
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post', muteHttpExceptions: true, followRedirects: true,
+    contentType: 'application/json', payload: JSON.stringify(payload), headers: headers
+  });
+  return {status: response.getResponseCode(), text: response.getContentText(), json: parseJson_(response.getContentText())};
+}
+
+function mergeOrderData_(found, detail, fallbackAddress, shipping) {
   var data = (detail && detail.data) || {};
-  var receiver = firstValueDeep_(data, ['receiver_name', 'recipient_name', 'consignee_name', 'buyer_name', 'name']);
-  var phone = firstValueDeep_(data, ['receiver_phone', 'recipient_phone', 'consignee_phone', 'phone']);
-  var address = firstValueDeep_(data, ['shipping_address', 'receiver_address', 'recipient_address', 'address_text', 'address']);
+  shipping = shipping || {};
+  var receiver = firstValueDeep_(data, ['receiver_name', 'recipient_name', 'consignee_name', 'buyer_name', 'name']) || shipping.receiver;
+  var phone = firstValueDeep_(data, ['receiver_phone', 'recipient_phone', 'consignee_phone', 'phone']) || shipping.phone;
+  var address = firstValueDeep_(data, ['shipping_address', 'receiver_address', 'recipient_address', 'address_text', 'address']) || shipping.address;
   var actionData = (found.raw && (found.raw.item_card_info || found.raw.item_card || found.raw.rich_contents)) || {};
   var product = firstValueDeep_(data, ['item_name', 'product_name', 'item_title', 'product_title', 'model_name']) || firstValueDeep_(actionData, ['item_name', 'product_name', 'item_title', 'product_title', 'name']);
   var productUrl = firstValueDeep_(data, ['product_url', 'item_url', 'url', 'share_url']) || firstValueDeep_(actionData, ['product_url', 'item_url', 'url', 'share_url']);
@@ -325,9 +397,30 @@ function extractOrderId_(value) {
   return '';
 }
 
-function extractTracking_(value) {
-  var match = String(value || '').toUpperCase().match(/\bSPX[A-Z0-9]{10,25}\b/);
-  return match ? match[0] : '';
+function detectCarrier_(value, action) {
+  var text = String(value || '').toLowerCase();
+  var explicit = firstValueDeep_(action, ['carrier', 'carrier_name', 'shipping_provider', 'logistics_name', 'delivery_company', 'shipping_company']);
+  text += ' ' + String(explicit || '').toLowerCase();
+  if (/\bspx[a-z0-9]*\b|shopee\s*express/.test(text)) return 'SPX';
+  if (/\bghn[a-z0-9]*\b|giao\s*hang\s*nhanh/.test(text)) return 'GHN';
+  if (/\b(vtp|vtpost)[a-z0-9]*\b|viettel\s*post|viettelpost/.test(text)) return 'VIETTELPOST';
+  return String(explicit || '').trim();
+}
+
+function extractTracking_(value, carrier, action) {
+  var explicit = firstValueDeep_(action, [
+    'tracking_number', 'tracking_no', 'tracking_code', 'waybill', 'waybill_number',
+    'shipment_number', 'shipment_code', 'parcel_number', 'package_number',
+    'shipping_traceno', 'shipping_tracking_number'
+  ]);
+  if (explicit && String(explicit).trim()) return String(explicit).trim().toUpperCase();
+  var text = String(value || '').toUpperCase();
+  var match = text.match(/\bSPX[A-Z0-9]{10,25}\b/);
+  if (match) return match[0];
+  // Only accept a code next to a tracking label to avoid mistaking order_sn/phone.
+  var labelled = text.match(/(?:TRACKING|WAYBILL|MA VAN DON|VAN DON|ORDER CODE)\s*[:#-]?\s*([A-Z0-9]{6,24})/i);
+  if (labelled && !/^SPC_|^HTTP|^ORDER$/.test(labelled[1])) return labelled[1];
+  return '';
 }
 
 function extractOrderSn_(value, tracking) {

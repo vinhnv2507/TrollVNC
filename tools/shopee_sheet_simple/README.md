@@ -28,3 +28,13 @@ Một cookie có thể có nhiều đơn; bảng một dòng/cookie lấy thông
 ## Bảo mật
 
 Cookie có thể tương đương phiên đăng nhập. Chỉ dùng Sheet riêng, không chia sẻ quyền chỉnh sửa và xóa cookie khỏi cột A sau khi kiểm tra xong.
+
+## Tra cứu theo đơn vị vận chuyển
+
+Bản đơn giản nhận diện đơn vị vận chuyển từ thông báo Shopee và xử lý như sau:
+
+- **SPX**: gọi dữ liệu tra cứu công khai của SPX để lấy trạng thái mới nhất, người nhận, số điện thoại và địa chỉ nếu SPX trả về.
+- **GHN**: gọi endpoint tra cứu công khai của trang GHN. Một số mã sẽ yêu cầu xác minh số điện thoại (`PHONE_VERIFY_REQUIRED`); khi đó cột trạng thái vẫn giữ trạng thái Shopee và ghi kèm link GHN để mở kiểm tra.
+- **Viettel Post**: trang tra cứu có cơ chế chống bot/captcha nên Apps Script không tự vượt qua. Cột trạng thái sẽ giữ trạng thái từ thông báo Shopee và ghi link Viettel Post để mở tra cứu thủ công.
+
+Việc tra cứu nhà vận chuyển chỉ bổ sung **trạng thái vận chuyển**. Nó không mở khóa API chi tiết đơn Shopee. Vì vậy `Chi tiết Shopee bị chặn 90309999` vẫn có thể xuất hiện; đây là giới hạn riêng của API chi tiết đơn, không phải lỗi mã vận đơn.
