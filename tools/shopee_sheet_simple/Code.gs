@@ -116,6 +116,7 @@ function processRow_(sheet, row) {
   var cookie = normalizeCookie_(sheet.getRange(row, 1).getDisplayValue());
   if (!cookie) {
     sheet.getRange(row, 2, 1, SIMPLE_HEADERS.length - 1).clearContent();
+    sheet.getRange(row, 3).clearNote();
     return;
   }
 
@@ -130,6 +131,7 @@ function processRow_(sheet, row) {
       sheet.getRange(row, 2, 1, 7).setValues([[
         '', 'Không tìm thấy thông báo đơn hàng', '', '', '', '', ''
       ]]);
+      sheet.getRange(row, 3).clearNote();
       return;
     }
 
@@ -143,7 +145,9 @@ function processRow_(sheet, row) {
     if (shipping && shipping.carrier && shipping.lookupUrl && shipping.requiresManualLookup) {
       status += ' | ' + shipping.carrier + ': ' + shipping.lookupUrl;
     }
-    if (detail && detail.blocked) status += ' | Chi tiết Shopee bị chặn 90309999';
+    var detailWarning = detail && detail.blocked
+      ? 'Không lấy được chi tiết đơn Shopee: mã 90309999. Trạng thái vận chuyển vẫn được lấy từ nhà vận chuyển.'
+      : '';
 
     sheet.getRange(row, 2, 1, 7).setValues([[
       merged.tracking || '',
@@ -154,6 +158,8 @@ function processRow_(sheet, row) {
       merged.product || '',
       merged.productUrl || ''
     ]]);
+    if (detailWarning) sheet.getRange(row, 3).setNote(detailWarning);
+    else sheet.getRange(row, 3).clearNote();
   } catch (err) {
     sheet.getRange(row, 2, 1, 7).setValues([[
       '', 'Lỗi: ' + safeError_(err), '', '', '', '', ''

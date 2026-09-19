@@ -37,4 +37,4 @@ Bản đơn giản nhận diện đơn vị vận chuyển từ thông báo Shop
 - **GHN**: gọi endpoint tra cứu công khai của trang GHN. Một số mã sẽ yêu cầu xác minh số điện thoại (`PHONE_VERIFY_REQUIRED`); khi đó cột trạng thái vẫn giữ trạng thái Shopee và ghi kèm link GHN để mở kiểm tra.
 - **Viettel Post**: trang tra cứu có cơ chế chống bot/captcha nên Apps Script không tự vượt qua. Cột trạng thái sẽ giữ trạng thái từ thông báo Shopee và ghi link Viettel Post để mở tra cứu thủ công.
 
-Việc tra cứu nhà vận chuyển chỉ bổ sung **trạng thái vận chuyển**. Nó không mở khóa API chi tiết đơn Shopee. Vì vậy `Chi tiết Shopee bị chặn 90309999` vẫn có thể xuất hiện; đây là giới hạn riêng của API chi tiết đơn, không phải lỗi mã vận đơn.
+Việc tra cứu nhà vận chuyển chỉ bổ sung **trạng thái vận chuyển**. Nó không mở khóa API chi tiết đơn Shopee. Nếu Shopee trả `90309999`, trạng thái cột C vẫn chỉ hiển thị trạng thái vận chuyển sạch (ví dụ `Delivered`); cảnh báo chi tiết đơn bị chặn được đặt trong ghi chú của ô trạng thái, không làm bẩn nội dung trạng thái.
