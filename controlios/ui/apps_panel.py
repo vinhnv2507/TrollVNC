@@ -171,7 +171,8 @@ class AppsPanel(QWidget):
 
         self.backup_pc_button = QPushButton("Sao lưu máy đã chọn ra PC…")
         self.backup_pc_button.setToolTip(
-            "Tạo snapshot app trên tất cả máy đang chọn rồi tải từng bản về một thư mục PC")
+            "Tạo snapshot app trên tất cả máy đang chọn rồi tải từng bản về một thư mục PC. "
+            "Với Shopee, đồng thời xuất cookie HTTP (SPC_ST) vào thư mục bundle.")
         self.backup_pc_button.clicked.connect(
             lambda: self._emit_for_selected(self.backup_pc_requested))
         layout.addWidget(self.backup_pc_button)

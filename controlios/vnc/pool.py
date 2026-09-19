@@ -1025,12 +1025,20 @@ class DevicePool:
 
     def backup_app_to_pc(self, keys: Iterable[str], bundle_id: str, name: str,
                          destination: Path | str, on_event=None, on_done=None) -> None:
-        """Tạo snapshot rồi tải về PC cho toàn bộ máy được chọn, không cần SSH."""
+        """Create an app snapshot, download it, and export Shopee cookies beside it.
+
+        A snapshot is the app-data backup used for restore.  It is not guaranteed to
+        contain WebKit/HTTP cookie jars, so Shopee is handled with the same dedicated
+        ``cookies`` command used by the cookie-export action.  The cookie export is
+        written to the device/bundle directory (not inside the timestamped snapshot)
+        to preserve the old ``.../<device>/com.beeasy.shopee.vn`` layout.
+        """
 
         key_list = list(keys)
         destination = Path(destination)
         succeeded: List[str] = []
         failures: List[tuple] = []
+        is_shopee = bundle_id.casefold() == "com.beeasy.shopee.vn"
 
         async def run() -> None:
             transfer_slots = asyncio.Semaphore(4)
@@ -1039,7 +1047,10 @@ class DevicePool:
                 session = self._sessions.get(key)
                 label = session.spec.name if session and session.spec.name else key
                 device_dir = destination / f"{_slug(label)}_{_slug(key)}"
-                local = device_dir / _slug(bundle_id) / _slug(name)
+                bundle_dir = device_dir / _slug(bundle_id)
+                local = bundle_dir / _slug(name)
+                cookie_dump = None
+                cookie_error = None
                 try:
                     async with transfer_slots:
                         channel = self._channel(key)
@@ -1047,9 +1058,38 @@ class DevicePool:
                         saved = await channel.snapshot_app(bundle_id, name)
                         remote = f"/var/mobile/controlios-snap/{bundle_id}/{saved}"
                         written = await channel.download_tree(remote, local)
+
+                        # Snapshot contents and HTTP jars are separate on iOS.  Do
+                        # not silently return a backup that cannot reproduce the
+                        # previously working Shopee cookie folder.
+                        if is_shopee:
+                            try:
+                                cookie_dump = await channel.dump_cookies(bundle_id, bundle_dir)
+                            except Exception as exc:
+                                # Keep a valid app snapshot even when an older
+                                # ControlIOS build cannot service ``cookies``.
+                                cookie_error = _short_exc(exc)
                     succeeded.append(key)
                     if on_event:
-                        on_event(key, f"đã sao lưu {written} byte ra {local}")
+                        message = f"đã sao lưu {written} byte ra {local}"
+                        if is_shopee:
+                            if cookie_dump is not None:
+                                names = {
+                                    str(item.get("name", ""))
+                                    for item in (cookie_dump.get("cookies") or [])
+                                    if isinstance(item, dict)
+                                }
+                                marker = "đã có" if "SPC_ST" in names else "thi\u1ebfu"
+                                message += (
+                                    f"; đã xuất cookie Shopee ra {bundle_dir}"
+                                    f" (SPC_ST: {marker})"
+                                )
+                            else:
+                                message += (
+                                    "; cảnh báo: snapshot đã xong nhưng chưa xuất được "
+                                    f"cookie Shopee ({cookie_error})"
+                                )
+                        on_event(key, message)
                 except Exception as exc:
                     failures.append((key, str(exc)))
                     if on_event:
