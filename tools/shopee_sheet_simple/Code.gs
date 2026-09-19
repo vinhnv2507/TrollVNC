@@ -1,0 +1,392 @@
+﻿/**
+ * Shopee Cookie -> one-sheet order checker.
+ *
+ * Columns:
+ * A Cookie | B Mã Vận Đơn | C Trạng thái Đơn | D Người nhận
+ * E Số điện thoại nhận | F Địa chỉ | G Sản phẩm | H Link sản phẩm
+ *
+ * Input one cookie per row in column A. Install the edit trigger once from
+ * the menu so every pasted cookie row is checked automatically.
+ */
+
+var SIMPLE_HEADERS = [
+  'Cookie', 'Mã Vận Đơn', 'Trạng thái Đơn', 'Người nhận',
+  'Số điện thoại nhận', 'Địa chỉ', 'Sản phẩm', 'Link sản phẩm'
+];
+var SIMPLE_SHEET_NAME = 'Shopee';
+var SIMPLE_TRIGGER_HANDLER = 'onEditInstalled';
+var SIMPLE_ORIGIN = 'https://shopee.vn';
+var SIMPLE_SPX_ORIGIN = 'https://spx.vn';
+var SIMPLE_MAX_NOTIFICATIONS = 100;
+
+function onOpen() {
+  SpreadsheetApp.getUi()
+    .createMenu('Shopee')
+    .addItem('Tạo bảng 1 trang', 'setupSimpleSheet')
+    .addItem('Bật tự động kiểm tra khi dán cookie', 'installAutoCheck')
+    .addItem('Kiểm tra dòng đang chọn', 'checkSelectedRows')
+    .addItem('Xóa kết quả các dòng đang chọn', 'clearSelectedRows')
+    .addToUi();
+}
+
+function setupSimpleSheet() {
+  var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  sheet.setName(SIMPLE_SHEET_NAME);
+  sheet.getRange(1, 1, 1, SIMPLE_HEADERS.length).setValues([SIMPLE_HEADERS]);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, SIMPLE_HEADERS.length)
+    .setFontWeight('bold')
+    .setFontColor('#ffffff')
+    .setBackground('#ee4d2d')
+    .setVerticalAlignment('middle');
+  sheet.setRowHeight(1, 32);
+  var widths = [420, 190, 230, 170, 150, 330, 300, 360];
+  for (var i = 0; i < widths.length; i++) sheet.setColumnWidth(i + 1, widths[i]);
+  sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), SIMPLE_HEADERS.length)
+    .setVerticalAlignment('top')
+    .setWrap(true);
+  sheet.getRange('A1').setNote(
+    'Dán mỗi cookie vào một dòng. Cookie là dữ liệu đăng nhập nhạy cảm; chỉ dùng Sheet riêng của bạn.'
+  );
+  SpreadsheetApp.getUi().alert(
+    'Đã tạo bảng 1 trang. Tiếp theo chọn “Bật tự động kiểm tra khi dán cookie”.'
+  );
+}
+
+function installAutoCheck() {
+  var ss = SpreadsheetApp.getActive();
+  var triggers = ScriptApp.getProjectTriggers();
+  for (var i = 0; i < triggers.length; i++) {
+    if (triggers[i].getHandlerFunction() === SIMPLE_TRIGGER_HANDLER) {
+      ScriptApp.deleteTrigger(triggers[i]);
+    }
+  }
+  ScriptApp.newTrigger(SIMPLE_TRIGGER_HANDLER).forSpreadsheet(ss).onEdit().create();
+  SpreadsheetApp.getUi().alert(
+    'Đã bật tự động. Từ bây giờ dán cookie vào cột A, dòng đó sẽ tự kiểm tra.'
+  );
+}
+
+/** Installable on-edit trigger. */
+function onEditInstalled(e) {
+  if (!e || !e.range) return;
+  var range = e.range;
+  var sheet = range.getSheet();
+  if (sheet.getName() !== SIMPLE_SHEET_NAME) return;
+  if (range.getColumn() > 1 || range.getLastColumn() < 1 || range.getLastRow() < 2) return;
+
+  var start = Math.max(2, range.getRow());
+  var end = range.getLastRow();
+  var rows = [];
+  for (var row = start; row <= end; row++) rows.push(row);
+  processRows_(sheet, rows);
+}
+
+function checkSelectedRows() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var range = sheet.getActiveRange();
+  if (!range) return;
+  var rows = [];
+  var start = Math.max(2, range.getRow());
+  for (var row = start; row <= range.getLastRow(); row++) rows.push(row);
+  processRows_(sheet, rows);
+}
+
+function clearSelectedRows() {
+  var sheet = SpreadsheetApp.getActiveSheet();
+  var range = sheet.getActiveRange();
+  if (!range) return;
+  var start = Math.max(2, range.getRow());
+  var count = range.getLastRow() - start + 1;
+  if (count > 0) sheet.getRange(start, 2, count, SIMPLE_HEADERS.length - 1).clearContent();
+}
+
+function processRows_(sheet, rows) {
+  var lock = LockService.getDocumentLock();
+  if (!lock.tryLock(1000)) return;
+  try {
+    for (var i = 0; i < rows.length; i++) processRow_(sheet, rows[i]);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function processRow_(sheet, row) {
+  var cookie = normalizeCookie_(sheet.getRange(row, 1).getDisplayValue());
+  if (!cookie) {
+    sheet.getRange(row, 2, 1, SIMPLE_HEADERS.length - 1).clearContent();
+    return;
+  }
+
+  var output = ['', 'Đang kiểm tra…', '', '', '', '', ''];
+  sheet.getRange(row, 2, 1, output.length).setValues([output]);
+  SpreadsheetApp.flush();
+
+  try {
+    var notifications = getNotifications_(cookie);
+    var found = pickLatestOrder_(notifications);
+    if (!found) {
+      sheet.getRange(row, 2, 1, 7).setValues([[
+        '', 'Không tìm thấy thông báo đơn hàng', '', '', '', '', ''
+      ]]);
+      return;
+    }
+
+    var detail = found.orderId ? getOrderDetail_(cookie, found.orderId) : null;
+    var address = getDefaultAddress_(cookie);
+    var merged = mergeOrderData_(found, detail, address);
+    var shipping = found.tracking ? getSpxInfo_(found.tracking) : null;
+    var status = shipping && shipping.status
+      ? shipping.status
+      : (merged.status || 'Đã tìm thấy đơn');
+    if (detail && detail.blocked) status += ' | Chi tiết đơn bị Shopee chặn 90309999';
+
+    sheet.getRange(row, 2, 1, 7).setValues([[
+      merged.tracking || '',
+      status,
+      merged.receiver || '',
+      merged.phone || '',
+      merged.address || '',
+      merged.product || '',
+      merged.productUrl || ''
+    ]]);
+  } catch (err) {
+    sheet.getRange(row, 2, 1, 7).setValues([[
+      '', 'Lỗi: ' + safeError_(err), '', '', '', '', ''
+    ]]);
+  }
+}
+
+function getNotifications_(cookie) {
+  var path = '/api/v4/notification/get_notifications?action_cate=4&cursor=&limit=' + SIMPLE_MAX_NOTIFICATIONS;
+  var result = shopeeGet_(cookie, SIMPLE_ORIGIN + path);
+  if (!result.json || result.status < 200 || result.status >= 300) {
+    throw new Error('Shopee notification HTTP ' + result.status);
+  }
+  if (apiError_(result.json) && String(apiError_(result.json)) !== '0') {
+    throw new Error('Shopee notification ' + apiError_(result.json));
+  }
+  return (((result.json || {}).data || {}).actions) || [];
+}
+
+function pickLatestOrder_(actions) {
+  for (var i = 0; i < actions.length; i++) {
+    var action = actions[i] || {};
+    var title = cleanText_(action.title);
+    var content = cleanText_(action.content);
+    var redirect = action.action_redirect_url || action.pc_redirect_url || '';
+    var all = title + ' ' + content + ' ' + redirect;
+    var tracking = extractTracking_(all);
+    var orderId = extractOrderId_(redirect) || firstValue_(action.id_info, ['orderid', 'order_id', 'orderId']);
+    var orderSn = extractOrderSn_(content + ' ' + title, tracking);
+    if (orderId || tracking || orderSn) {
+      return {
+        orderId: String(orderId || ''),
+        orderSn: String(orderSn || ''),
+        tracking: String(tracking || ''),
+        status: title || content,
+        raw: action
+      };
+    }
+  }
+  return null;
+}
+
+function getOrderDetail_(cookie, orderId) {
+  var result = shopeeGet_(cookie, SIMPLE_ORIGIN + '/api/v4/order/get_order_detail?order_id=' + encodeURIComponent(orderId));
+  var error = apiError_(result.json);
+  if (String(error) === '90309999' || result.status === 403) return {blocked: true, data: {}};
+  if (!result.json || error && String(error) !== '0') return {blocked: false, data: {}};
+  return {blocked: false, data: (result.json || {}).data || {}};
+}
+
+function getDefaultAddress_(cookie) {
+  var result = shopeeGet_(cookie, SIMPLE_ORIGIN + '/api/v4/account/address/get_user_address_list');
+  if (!result.json || apiError_(result.json) && String(apiError_(result.json)) !== '0') return {};
+  var addresses = (((result.json || {}).data || {}).addresses) || [];
+  if (!addresses.length) return {};
+  var selected = addresses[0];
+  for (var i = 0; i < addresses.length; i++) {
+    if (addresses[i] && (addresses[i].is_delivery_address || addresses[i].is_default)) {
+      selected = addresses[i];
+      break;
+    }
+  }
+  return {
+    receiver: firstValue_(selected, ['name', 'receiver_name', 'recipient_name']),
+    phone: firstValue_(selected, ['phone', 'phone_number', 'recipient_phone']),
+    address: [selected.address, selected.district, selected.town, selected.city, selected.state, selected.country]
+      .filter(function (x) { return x !== undefined && x !== null && String(x).trim() !== ''; })
+      .join(', ')
+  };
+}
+
+function getSpxInfo_(tracking) {
+  var url = SIMPLE_SPX_ORIGIN + '/shipment/order/open/order/get_order_info?spx_tn=' +
+    encodeURIComponent(tracking) + '&language_code=vi';
+  var result = shopeeGet_('', url, SIMPLE_SPX_ORIGIN + '/tracking');
+  if (!result.json || String(result.json.retcode) !== '0') return {};
+  var info = (((result.json || {}).data || {}).sls_tracking_info) || {};
+  var records = info.records || [];
+  var latest = null;
+  for (var i = 0; i < records.length; i++) {
+    if (!latest || Number(records[i].actual_time || 0) > Number(latest.actual_time || 0)) latest = records[i];
+  }
+  latest = latest || {};
+  return {
+    status: latest.tracking_name || latest.description || '',
+    receiver: info.receiver_name || '',
+    phone: info.receiver_phone || info.phone || '',
+    address: info.receiver_address || ''
+  };
+}
+
+function mergeOrderData_(found, detail, fallbackAddress) {
+  var data = (detail && detail.data) || {};
+  var receiver = firstValueDeep_(data, ['receiver_name', 'recipient_name', 'consignee_name', 'buyer_name', 'name']);
+  var phone = firstValueDeep_(data, ['receiver_phone', 'recipient_phone', 'consignee_phone', 'phone']);
+  var address = firstValueDeep_(data, ['shipping_address', 'receiver_address', 'recipient_address', 'address_text', 'address']);
+  var actionData = (found.raw && (found.raw.item_card_info || found.raw.item_card || found.raw.rich_contents)) || {};
+  var product = firstValueDeep_(data, ['item_name', 'product_name', 'item_title', 'product_title', 'model_name']) || firstValueDeep_(actionData, ['item_name', 'product_name', 'item_title', 'product_title', 'name']);
+  var productUrl = firstValueDeep_(data, ['product_url', 'item_url', 'url', 'share_url']) || firstValueDeep_(actionData, ['product_url', 'item_url', 'url', 'share_url']);
+  var itemId = firstValueDeep_(data, ['item_id', 'itemid']);
+  var shopId = firstValueDeep_(data, ['shop_id', 'shopid']);
+  if (!productUrl && itemId && shopId) productUrl = 'https://shopee.vn/product/' + shopId + '/' + itemId;
+  return {
+    tracking: found.tracking,
+    status: found.status,
+    receiver: receiver || fallbackAddress.receiver || '',
+    phone: phone || fallbackAddress.phone || '',
+    address: address || fallbackAddress.address || '',
+    product: product || '',
+    productUrl: productUrl || ''
+  };
+}
+
+function shopeeGet_(cookie, url, referer) {
+  var headers = {
+    'User-Agent': browserUserAgent_(),
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+    'Referer': referer || SIMPLE_ORIGIN + '/',
+    'X-API-SOURCE': 'pc',
+    'X-Shopee-Language': 'vi',
+    'X-Requested-With': 'XMLHttpRequest'
+  };
+  if (cookie) headers.Cookie = cookie;
+  var response = UrlFetchApp.fetch(url, {
+    method: 'get', muteHttpExceptions: true, followRedirects: true, headers: headers
+  });
+  return {
+    status: response.getResponseCode(),
+    text: response.getContentText(),
+    json: parseJson_(response.getContentText())
+  };
+}
+
+function normalizeCookie_(value) {
+  var text = String(value || '').trim();
+  text = text.replace(/^Cookie\s*:\s*/i, '').trim();
+  if (!text) return '';
+  var parts = text.split(/[;\r\n]+/);
+  var out = [];
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (part && part.indexOf('=') > 0) out.push(part);
+  }
+  return out.join('; ');
+}
+
+function decodePossiblyHex_(value) {
+  var text = String(value || '').trim();
+  if (!text || text.length % 2 || !/^[0-9a-f]+$/i.test(text)) return text;
+  var bytes = [];
+  for (var i = 0; i < text.length; i += 2) bytes.push(parseInt(text.substr(i, 2), 16));
+  try { return Utilities.newBlob(bytes).getDataAsString('UTF-8'); } catch (e) { return text; }
+}
+
+function cleanText_(value) {
+  return String(decodePossiblyHex_(value) || '')
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function extractOrderId_(value) {
+  var text = String(value || '');
+  var patterns = [/[?&]orderId=(\d{8,25})/i, /[?&]order_id=(\d{8,25})/i, /\/order\/(\d{8,25})(?:[\/?#]|$)/i];
+  for (var i = 0; i < patterns.length; i++) {
+    var match = text.match(patterns[i]);
+    if (match) return match[1];
+  }
+  return '';
+}
+
+function extractTracking_(value) {
+  var match = String(value || '').toUpperCase().match(/\bSPX[A-Z0-9]{10,25}\b/);
+  return match ? match[0] : '';
+}
+
+function extractOrderSn_(value, tracking) {
+  var text = String(value || '').toUpperCase();
+  if (tracking) text = text.replace(String(tracking).toUpperCase(), ' ');
+  var matches = text.match(/\b[0-9]{6}[A-Z0-9]{6,20}\b/g) || [];
+  for (var i = 0; i < matches.length; i++) if (!/^SPX/.test(matches[i])) return matches[i];
+  return '';
+}
+
+function firstValue_(obj, names) {
+  if (!obj || typeof obj !== 'object') return '';
+  for (var i = 0; i < names.length; i++) {
+    if (obj[names[i]] !== undefined && obj[names[i]] !== null && String(obj[names[i]]).trim() !== '') return obj[names[i]];
+  }
+  return '';
+}
+
+function firstValueDeep_(obj, names) {
+  if (obj === null || obj === undefined) return '';
+  if (Array.isArray(obj)) {
+    for (var i = 0; i < obj.length; i++) {
+      var av = firstValueDeep_(obj[i], names);
+      if (av !== '') return av;
+    }
+    return '';
+  }
+  if (typeof obj !== 'object') return '';
+  var direct = firstValue_(obj, names);
+  if (direct !== '') return direct;
+  var keys = Object.keys(obj);
+  for (var j = 0; j < keys.length; j++) {
+    var found = firstValueDeep_(obj[keys[j]], names);
+    if (found !== '') return found;
+  }
+  return '';
+}
+
+function apiError_(json) {
+  if (!json || typeof json !== 'object') return '';
+  if (json.error !== undefined && json.error !== null) return json.error;
+  if (json.error_code !== undefined && json.error_code !== null) return json.error_code;
+  if (json.retcode !== undefined && json.retcode !== null) return json.retcode;
+  return '';
+}
+
+function parseJson_(text) {
+  try { return JSON.parse(text); } catch (e) { return null; }
+}
+
+function browserUserAgent_() {
+  return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0 Safari/537.36';
+}
+
+function safeError_(err) {
+  return String((err && err.message) || err || 'không xác định')
+    .replace(/SPC_ST=[^;\s]+/ig, 'SPC_ST=<redacted>')
+    .slice(0, 180);
+}
+
+
+
