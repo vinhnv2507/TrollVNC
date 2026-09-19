@@ -73,7 +73,7 @@ class CookieDumpTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_cookies_reply("NOT_FOUND\n", "com.beeasy.shopee.vn")
 
-    def test_export_dump_writes_three_files(self) -> None:
+    def test_export_dump_writes_cookie_files(self) -> None:
         dump = {
             "bundleId": "com.beeasy.shopee.vn",
             "header": "SPC_ST=st; csrftoken=csrf",
@@ -87,7 +87,8 @@ class CookieDumpTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             written = export_dump(dump, folder)
             names = {path.name for path in written}
-            self.assertEqual(names, {"cookies.txt", "cookie-header.txt", "cookies.json"})
+            self.assertEqual(names, {"cookies.txt", "cookie-header.txt", "cookies.json", "spc-st.txt"})
+            self.assertEqual(Path(folder, "spc-st.txt").read_text(encoding="utf-8").strip(), "st")
             header = Path(folder, "cookie-header.txt").read_text(encoding="utf-8")
             self.assertIn("SPC_ST=st", header)
             payload = json.loads(Path(folder, "cookies.json").read_text(encoding="utf-8"))

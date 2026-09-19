@@ -227,6 +227,44 @@ class WindowTest(unittest.TestCase):
             window.close()
             registry_path.unlink(missing_ok=True)
 
+    def test_note_filter_matches_case_insensitive_note_content(self) -> None:
+        registry_path = Path(__file__).parent / "_note_filter_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        registry.devices[0].note = "Shopee captcha"
+        registry.devices[1].note = "EarnApp"
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            window._on_note_filter_changed("CAPTCHA")
+            self.assertEqual(window.grid.order, ["10.0.0.1:5901"])
+            window._on_note_filter_changed("")
+            self.assertEqual(len(window.grid.order), 3)
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_multi_detail_window_keeps_selected_devices_live(self) -> None:
+        registry_path = Path(__file__).parent / "_multi_detail_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            keys = [device.key for device in window.registry.devices]
+            published = {}
+            window.grid.tiers_changed.connect(published.update)
+            window._open_multi_detail(keys)
+            self.assertIsNotNone(window.multi_detail_window)
+            self.assertEqual(set(window.multi_detail_window.views), set(keys))
+            self.assertTrue(all(published[key] is Tier.LIVE for key in keys))
+            window.multi_detail_window.close()
+            self.assertIsNone(window.multi_detail_window)
+            self.assertFalse(window.grid._extra_live_keys)
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
     def test_ctrl_a_is_scoped_to_the_grid_not_the_window(self) -> None:
         registry_path = Path(__file__).parent / "_ctrla_devices.json"
         registry = Registry()

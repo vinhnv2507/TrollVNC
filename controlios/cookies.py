@@ -1059,6 +1059,16 @@ def parse_cookies_reply(text: str, bundle_id: str = "") -> dict[str, Any]:
     return data
 
 
+def cookie_value(cookies: Iterable[Cookie], name: str) -> str:
+    """Return one cookie value without exposing the whole session in logs."""
+
+    wanted = (name or "").casefold()
+    for cookie in cookies:
+        if cookie.name.casefold() == wanted:
+            return cookie.value
+    return ""
+
+
 def export_dump(dump: dict[str, Any], dest: str | Path) -> list[Path]:
     dest = Path(dest)
     dest.mkdir(parents=True, exist_ok=True)
@@ -1077,6 +1087,21 @@ def export_dump(dump: dict[str, Any], dest: str | Path) -> list[Path]:
         if item.get("name")
     ]
     written = []
+    # Write SPC_ST separately so automation can consume only the session token.
+    # Keep it local and never print the value to logs.
+    spc_st = cookie_value(cookies, "SPC_ST")
+    if not spc_st:
+        # Be tolerant of older/third-party dump payloads that contain only a
+        # Cookie header instead of the normalized cookie list.
+        for part in str(dump.get("header") or "").split(";"):
+            name, separator, value = part.strip().partition("=")
+            if separator and name.casefold() == "spc_st":
+                spc_st = value.strip()
+                break
+    spc_st_file = dest / "spc-st.txt"
+    spc_st_file.write_text((spc_st + "\n") if spc_st else "", encoding="utf-8")
+    written.append(spc_st_file)
+
     txt = dest / "cookies.txt"
     txt.write_text(to_netscape(cookies), encoding="utf-8")
     written.append(txt)

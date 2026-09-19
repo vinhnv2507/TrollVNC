@@ -1009,6 +1009,8 @@ class DevicePool:
                         missing = dump.get("missing") or []
                         if missing:
                             extra += " — thiếu " + ", ".join(str(item) for item in missing)
+                        elif "shopee" in bundle_id.casefold():
+                            extra += " — SPC_ST: có (xem spc-st.txt)"
                         on_event(key, f"đã lấy {count} cookie ra {local}{extra}")
                 except Exception as exc:
                     failures.append((key, str(exc)))

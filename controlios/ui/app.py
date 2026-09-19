@@ -11,7 +11,7 @@ import posixpath
 import re
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional
 
 from PySide6.QtCore import Qt, QObject, QSettings, QThread, QTimer, Signal
 from PySide6.QtGui import QAction, QKeySequence, QShortcut
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
     QPushButton, QSpinBox, QSplitter, QStatusBar, QTableWidget, QTableWidgetItem,
-    QToolBar, QToolButton, QVBoxLayout,
+    QToolBar, QToolButton, QVBoxLayout, QGridLayout,
     QWidget,
 )
 
@@ -2119,6 +2119,114 @@ class ScriptDialog(QDialog):
         super().closeEvent(event)
 
 
+class MultiDetailWindow(QDialog):
+    """Cua so dieu khien 1--5 may, moi o la mot DetailView doc lap."""
+
+    closed = Signal()
+
+    def __init__(self, owner: "MainWindow", keys: Iterable[str]) -> None:
+        super().__init__(owner)
+        self.owner = owner
+        self.pool = owner.pool
+        self.keys = list(dict.fromkeys(keys))
+        self.views: dict[str, DetailView] = {}
+        self.setWindowTitle(f"Control IOS — {len(self.keys)} màn hình lớn")
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        self.resize(1400, 900)
+        self.setMinimumSize(760, 520)
+
+        layout = QGridLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+        for index, key in enumerate(self.keys):
+            device = next((item for item in owner.registry.devices if item.key == key), None)
+            title = owner._device_name(key)
+            host = device.host if device else key.partition(":")[0]
+            if title != host:
+                title = f"{title} — {host}"
+            version = (getattr(device, "ios_version", "") or "").strip().lstrip("vV") if device else ""
+            if version:
+                title += f"  · v{version}"
+
+            pane = QWidget(self)
+            pane_layout = QVBoxLayout(pane)
+            pane_layout.setContentsMargins(0, 0, 0, 0)
+            pane_layout.setSpacing(2)
+            label = QLabel(f"🖥 {title}", pane)
+            label.setAlignment(Qt.AlignCenter)
+            label.setStyleSheet(
+                "font-weight: bold; padding: 3px; background: rgba(0,0,0,0.08);"
+            )
+            view = DetailView(pane)
+            view.set_device(key)
+            pane_layout.addWidget(label)
+            pane_layout.addWidget(view, 1)
+            row, column = divmod(index, 2)
+            layout.addWidget(pane, row, column)
+            self.views[key] = view
+            self._connect_view(key, view)
+
+        layout.setColumnStretch(0, 1)
+        if len(self.keys) > 1:
+            layout.setColumnStretch(1, 1)
+        for row in range((len(self.keys) + 1) // 2):
+            layout.setRowStretch(row, 1)
+
+    def _connect_view(self, key: str, view: DetailView) -> None:
+        view.pointer_pressed.connect(
+            lambda x, y, button, k=key: self.pool.mouse_down(k, x, y, button))
+        view.pointer_moved.connect(
+            lambda x, y, k=key, v=view: self.pool.mouse_move(k, x, y)
+            if v._dragging else None)
+        view.pointer_released.connect(
+            lambda x, y, button, k=key: self.pool.mouse_up(k, x, y, button))
+        view.scrolled.connect(
+            lambda x, y, dx, dy, k=key: self.pool.scroll(k, x, y, dx, dy))
+        view.text_typed.connect(
+            lambda text, k=key: self.pool.type_text(
+                [k], text, on_skipped=self.owner._on_skipped_chars))
+        view.keys_pressed.connect(
+            lambda names, k=key: self.pool.press_keys([k], *names))
+        view.paste_requested.connect(lambda k=key: self._paste(k))
+        view.copy_requested.connect(lambda k=key: self._clipboard(k, "c"))
+        view.cut_requested.connect(lambda k=key: self._clipboard(k, "x"))
+
+    def _paste(self, key: str) -> None:
+        text = QApplication.clipboard().text()
+        if not text:
+            return
+
+        def done(_desc, ok_count: int, _fails) -> None:
+            if ok_count:
+                self.pool.press_keys([key], "Super_L", "v")
+
+        self.pool.set_clipboard(
+            [key], text,
+            on_event=lambda k, m: self.owner.bridge.message.emit(f"[{k}] {m}"),
+            on_done=done,
+        )
+
+    def _clipboard(self, key: str, letter: str) -> None:
+        self.pool.press_keys([key], "Super_L", letter)
+        QTimer.singleShot(
+            450,
+            lambda k=key: self.pool.get_clipboard(
+                k,
+                on_done=lambda kk, text, err: self.owner._on_clipboard_pulled(
+                    kk, text or "", err or ""),
+            ),
+        )
+
+    def on_frame(self, frame: Frame) -> None:
+        view = self.views.get(frame.key)
+        if view is not None:
+            view.on_frame(frame)
+
+    def closeEvent(self, event) -> None:
+        self.closed.emit()
+        super().closeEvent(event)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, registry_path: Path = DEFAULT_REGISTRY) -> None:
         super().__init__()
@@ -2139,7 +2247,9 @@ class MainWindow(QMainWindow):
         self.page_size = 100
         self.page = 0
         self.current_group = ""
+        self.note_query = ""
         self.broadcast = False
+        self.multi_detail_window: MultiDetailWindow | None = None
         self.script_dialog: ScriptDialog | None = None
         self.screen_monitor_dialog: ScreenTextMonitorDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
@@ -2440,6 +2550,18 @@ class MainWindow(QMainWindow):
         self.group_combo.currentIndexChanged.connect(self._on_group_combo_changed)
         bar.addWidget(self.group_combo)
 
+        bar.addWidget(QLabel(" Ghi chú: "))
+        self.note_filter = QLineEdit()
+        self.note_filter.setObjectName("note-filter-edit")
+        self.note_filter.setPlaceholderText("lọc nội dung ghi chú")
+        self.note_filter.setClearButtonEnabled(True)
+        self.note_filter.setFixedWidth(180)
+        self.note_filter.setToolTip(
+            "Chỉ hiển thị máy có ghi chú chứa chuỗi này (không phân biệt hoa thường)"
+        )
+        self.note_filter.textChanged.connect(self._on_note_filter_changed)
+        bar.addWidget(self.note_filter)
+
         bar.addWidget(QLabel(" Trang: "))
         self.page_combo = QComboBox()
         for label, size in PAGE_SIZES:
@@ -2480,6 +2602,11 @@ class MainWindow(QMainWindow):
         clear = QAction("Bỏ chọn", self)
         clear.triggered.connect(self.grid.clear_selection)
         bar.addAction(clear)
+
+        multi_action = QAction("1–5 màn hình lớn", self)
+        multi_action.setToolTip("Mở các máy đang chọn thành cửa sổ điều khiển riêng (tối đa 5)")
+        multi_action.triggered.connect(self._open_multi_detail_selected)
+        bar.addAction(multi_action)
 
         self.grid_control_box = QCheckBox("Điều khiển lưới")
         self.grid_control_box.setToolTip(
@@ -2703,11 +2830,25 @@ class MainWindow(QMainWindow):
         return max(1, (count + self.page_size - 1) // self.page_size)
 
     def _filtered_devices(self) -> List[DeviceSpec]:
+        query = self.note_query.casefold().strip()
+        devices = [d for d in self.registry.devices if d.enabled]
         if self.current_group == UNGROUPED_FILTER:
-            return [d for d in self.registry.devices
-                    if d.enabled and not d.group.strip()]
-        return [d for d in self.registry.devices
-                if d.enabled and (not self.current_group or d.group.strip() == self.current_group)]
+            devices = [d for d in devices if not d.group.strip()]
+        elif self.current_group:
+            devices = [d for d in devices if d.group.strip() == self.current_group]
+        if query:
+            devices = [d for d in devices if query in (getattr(d, "note", "") or "").casefold()]
+        return devices
+
+    def _on_note_filter_changed(self, text: str) -> None:
+        self.note_query = text or ""
+        self.page = 0
+        self._apply_page()
+        query = self.note_query.strip()
+        self.statusBar().showMessage(
+            f"Lọc ghi chú: {len(self._filtered_devices())} máy" if query
+            else "Đã bỏ lọc ghi chú", 2500
+        )
 
     def _page_devices(self) -> List[DeviceSpec]:
         devices = self._filtered_devices()
@@ -2804,6 +2945,12 @@ class MainWindow(QMainWindow):
         note_action.triggered.connect(
             lambda _checked=False, keys=list(targets): self._open_device_note(keys)
         )
+        multi_action = menu.addAction("Mở 1–5 màn hình lớn…")
+        multi_action.setToolTip("Mỗi máy mở thành một màn hình điều khiển độc lập")
+        multi_action.setEnabled(1 <= count <= 5)
+        multi_action.triggered.connect(
+            lambda _checked=False, keys=list(targets): self._open_multi_detail(keys)
+        )
         menu.addSeparator()
         apps_menu = menu.addMenu("Ứng dụng")
         apps_action = apps_menu.addAction("Nạp ứng dụng đã cài…")
@@ -2844,6 +2991,42 @@ class MainWindow(QMainWindow):
         remove_action.triggered.connect(
             lambda _checked=False, k=keys: self._remove_selected_devices(k))
         return menu
+
+    def _open_multi_detail_selected(self) -> None:
+        targets = list(self.grid.selection)
+        if not targets and self.detail.key:
+            targets = [self.detail.key]
+        self._open_multi_detail(targets)
+
+    def _open_multi_detail(self, targets: List[str]) -> None:
+        keys = list(dict.fromkeys(targets))
+        if not keys:
+            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn 1–5 máy ở lưới.")
+            return
+        if len(keys) > 5:
+            QMessageBox.warning(
+                self, "Tối đa 5 máy",
+                "Cửa sổ nhiều màn hình chỉ hỗ trợ tối đa 5 máy mỗi lần.",
+            )
+            return
+        if self.multi_detail_window is not None:
+            self.multi_detail_window.close()
+        self.multi_detail_window = MultiDetailWindow(self, keys)
+        self.multi_detail_window.closed.connect(self._multi_detail_closed)
+        self.grid.set_extra_live_keys(keys)
+        for key in keys:
+            self._ensure_unlocked(key)
+        self.multi_detail_window.show()
+        self.multi_detail_window.raise_()
+        self.multi_detail_window.activateWindow()
+
+    def _multi_detail_closed(self) -> None:
+        window = self.multi_detail_window
+        self.multi_detail_window = None
+        self.grid.set_extra_live_keys([])
+        self.grid.set_focus_key(self.detail.key)
+        if window is not None:
+            window.deleteLater()
 
     def _open_apps_for_selection(self, targets: List[str]) -> None:
         self.grid._apply_selection(list(targets))
@@ -4427,6 +4610,8 @@ class MainWindow(QMainWindow):
     def _on_frame(self, frame: Frame) -> None:
         self.grid.on_frame(frame)
         self.detail.on_frame(frame)
+        if self.multi_detail_window is not None:
+            self.multi_detail_window.on_frame(frame)
         if frame.key == self.detail.key and self.detail.aspect != self._detail_aspect:
             # Biết tỉ lệ thật của máy (kể cả khi máy xoay ngang) -> co lại cho khít.
             self._detail_aspect = self.detail.aspect
@@ -4460,6 +4645,8 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        if self.multi_detail_window is not None:
+            self.multi_detail_window.close()
         self._apps_reload_timer.stop()
         self._stats_timer.stop()
         self._auto_scan_timer.stop()

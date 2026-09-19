@@ -6,7 +6,7 @@ tier — that is what keeps 250 connected phones from costing 250 video streams.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from PySide6.QtCore import QEvent, QPoint, QRect, Qt, QTimer, Signal
 from PySide6.QtWidgets import QApplication, QGridLayout, QRubberBand, QScrollArea, QWidget
@@ -57,6 +57,8 @@ class DeviceGrid(QScrollArea):
         #: chế độ tập trung — khi đang xem/điều khiển 1 máy thì TẮT stream lưới,
         #: dồn băng thông cho máy đó (giảm trễ trên farm WiFi đông máy).
         self._focus_streaming = False
+        # Extra detail windows keep several devices at the LIVE tier at once.
+        self._extra_live_keys: set[str] = set()
         self._columns = 0            # số cột đang dùng
         self._forced_columns = 0     # 0 = tự động
         self._laying_out = False
@@ -126,6 +128,7 @@ class DeviceGrid(QScrollArea):
         self.tiles.clear()
         self.order = []
         self.selection = []
+        self._extra_live_keys.intersection_update({spec.key for spec in specs})
         self._selection_drag_active = False
         self._selection_rubber.hide()
 
@@ -447,6 +450,16 @@ class DeviceGrid(QScrollArea):
         if not self.order:
             return
 
+        # A multi-screen window needs several LIVE streams at once. It wins over
+        # exclusive focus while it is open (MainWindow limits it to five keys).
+        extra_live = [key for key in self.order if key in self._extra_live_keys]
+        if extra_live:
+            tiers = {key: Tier.IDLE for key in self.order}
+            for key in extra_live:
+                tiers[key] = Tier.LIVE
+            self.tiers_changed.emit(tiers)
+            return
+
         live_key = self._control_key or self._focus_key
         exclusive = bool(self._focus_streaming and live_key in self.tiles)
         if exclusive:
@@ -463,6 +476,17 @@ class DeviceGrid(QScrollArea):
         if self._control_key in tiers:
             tiers[self._control_key] = Tier.LIVE
         self.tiers_changed.emit(tiers)
+
+    def set_extra_live_keys(self, keys: Iterable[str]) -> None:
+        """Keep several devices at LIVE tier for the extra DetailView window."""
+
+        requested = {str(key) for key in keys if key}
+        # Discard keys that are not part of the current grid page/filter.
+        normalized = requested.intersection(self.tiles)
+        if normalized == self._extra_live_keys:
+            return
+        self._extra_live_keys = normalized
+        self._publish_tiers()
 
     def set_focus_streaming(self, on: bool) -> None:
         """Bật/tắt chế độ tập trung (chỉ stream máy đang xem)."""
