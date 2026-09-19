@@ -129,18 +129,22 @@ function processRow_(sheet, row) {
   try {
     var voucherResult = getAvailableVouchers_(cookie);
     var voucherText = voucherResult.text || voucherResult.error || '';
+    // Read the account's default delivery address independently of order lookup.
+    // This still works when order notifications/detail are unavailable.
+    var defaultAddress = getDefaultAddress_(cookie);
     var notifications = getNotifications_(cookie);
     var found = pickLatestOrder_(notifications);
     if (!found) {
       sheet.getRange(row, 2, 1, 8).setValues([[
-        '', 'Không tìm thấy thông báo đơn hàng', '', '', '', '', '', voucherText
+        '', 'Không tìm thấy thông báo đơn hàng', defaultAddress.receiver || '',
+        defaultAddress.phone || '', defaultAddress.address || '', '', '', voucherText
       ]]);
       sheet.getRange(row, 3).clearNote();
       return;
     }
 
     var detail = found.orderId ? getOrderDetail_(cookie, found.orderId) : null;
-    var address = getDefaultAddress_(cookie);
+    var address = defaultAddress;
     var shipping = found.tracking ? getCarrierInfo_(found.tracking, found.carrier, found.status) : {};
     var itemCard = detail && detail.blocked ? getNotificationItemCard_(cookie, found.raw) : {};
     var merged = mergeOrderData_(found, detail, address, shipping, itemCard);
