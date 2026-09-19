@@ -30,4 +30,33 @@ eq(unsafe.itemId, '', 'do not trust unpaired notification shop id');
 const merged = ctx.mergeOrderData_({ tracking: 'SPX1', status: 'Delivered', raw: {} }, null, {}, {}, {}, { name: 'Sản phẩm thử', itemid: 123, shopid: 456 });
 eq(merged.product, 'Sản phẩm thử', 'public item name');
 eq(merged.productUrl, 'https://shopee.vn/product/456/123', 'public product link');
+if (code.indexOf('Voucher') < 0) throw new Error('voucher column missing');
+let voucherPage = 0;
+ctx.shopeePost_ = () => {
+  voucherPage += 1;
+  if (voucherPage === 1) return {status: 200, json: {
+    error: 0, data: {user_voucher_list: [
+      {voucher_code: 'VCODE123', reward_percentage: 20, reward_cap: 5000000, min_spend: 20000000}
+    ], next: 'next-page'}
+  }};
+  return {status: 200, json: {
+    error: 0, data: {user_voucher_list: [
+      {voucher_code: 'VCODE123', reward_percentage: 20},
+      {voucher_code: 'VCODE456', reward_value: 5000000}
+    ], next: ''}
+  }};
+};
+const available = ctx.getAvailableVouchers_('SPC_ST=test');
+if (voucherPage !== 2 || available.text.indexOf('VCODE123') < 0 ||
+    available.text.indexOf('VCODE456') < 0 || available.text.split('\n').length !== 2) {
+  throw new Error('voucher API paging/dedupe failed: ' + available.text);
+}
+const voucher = ctx.formatVoucher_({
+  voucher_code: 'VCODE123', icon_text: 'Shopee', reward_percentage: 20,
+  reward_cap: 5000000, min_spend: 20000000
+});
+if (!voucher.startsWith('VCODE123') || voucher.indexOf('20%') < 0 ||
+    voucher.indexOf('tối đa') < 0 || voucher.indexOf('đơn tối thiểu') < 0) {
+  throw new Error('voucher formatting failed: ' + voucher);
+}
 console.log('Simple sheet helper tests: OK');

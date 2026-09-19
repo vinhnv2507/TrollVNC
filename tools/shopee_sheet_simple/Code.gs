@@ -3,7 +3,7 @@
  *
  * Columns:
  * A Cookie | B Mã Vận Đơn | C Trạng thái Đơn | D Người nhận
- * E Số điện thoại nhận | F Địa chỉ | G Sản phẩm | H Link sản phẩm
+ * E Số điện thoại nhận | F Địa chỉ | G Sản phẩm | H Link sản phẩm | I Voucher hiện có
  *
  * Input one cookie per row in column A. Install the edit trigger once from
  * the menu so every pasted cookie row is checked automatically.
@@ -11,7 +11,7 @@
 
 var SIMPLE_HEADERS = [
   'Cookie', 'Mã Vận Đơn', 'Trạng thái Đơn', 'Người nhận',
-  'Số điện thoại nhận', 'Địa chỉ', 'Sản phẩm', 'Link sản phẩm'
+  'Số điện thoại nhận', 'Địa chỉ', 'Sản phẩm', 'Link sản phẩm', 'Voucher hiện có'
 ];
 var SIMPLE_SHEET_NAME = 'Shopee';
 var SIMPLE_TRIGGER_HANDLER = 'onEditInstalled';
@@ -19,6 +19,8 @@ var SIMPLE_ORIGIN = 'https://shopee.vn';
 var SIMPLE_SPX_ORIGIN = 'https://spx.vn';
 var SIMPLE_GHN_ORIGIN = 'https://fe-online-gateway.ghn.vn';
 var SIMPLE_MAX_NOTIFICATIONS = 100;
+var SIMPLE_MAX_VOUCHER_PAGES = 20;
+var SIMPLE_VOUCHER_LIMIT = 50;
 
 function onOpen() {
   SpreadsheetApp.getUi()
@@ -41,7 +43,7 @@ function setupSimpleSheet() {
     .setBackground('#ee4d2d')
     .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 32);
-  var widths = [420, 190, 230, 170, 150, 330, 300, 360];
+  var widths = [420, 190, 230, 170, 150, 330, 300, 360, 520];
   for (var i = 0; i < widths.length; i++) sheet.setColumnWidth(i + 1, widths[i]);
   sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), SIMPLE_HEADERS.length)
     .setVerticalAlignment('top')
@@ -120,16 +122,18 @@ function processRow_(sheet, row) {
     return;
   }
 
-  var output = ['', 'Đang kiểm tra…', '', '', '', '', ''];
+  var output = ['', 'Đang kiểm tra…', '', '', '', '', '', 'Đang tải voucher…'];
   sheet.getRange(row, 2, 1, output.length).setValues([output]);
   SpreadsheetApp.flush();
 
   try {
+    var voucherResult = getAvailableVouchers_(cookie);
+    var voucherText = voucherResult.text || voucherResult.error || '';
     var notifications = getNotifications_(cookie);
     var found = pickLatestOrder_(notifications);
     if (!found) {
-      sheet.getRange(row, 2, 1, 7).setValues([[
-        '', 'Không tìm thấy thông báo đơn hàng', '', '', '', '', ''
+      sheet.getRange(row, 2, 1, 8).setValues([[
+        '', 'Không tìm thấy thông báo đơn hàng', '', '', '', '', '', voucherText
       ]]);
       sheet.getRange(row, 3).clearNote();
       return;
@@ -155,14 +159,15 @@ function processRow_(sheet, row) {
       notes.push('Shopee chặn API chi tiết đơn với mã 90309999. Dữ liệu vận chuyển vẫn lấy từ nhà vận chuyển.');
     }
 
-    sheet.getRange(row, 2, 1, 7).setValues([[
+    sheet.getRange(row, 2, 1, 8).setValues([[
       merged.tracking || '',
       status,
       merged.receiver || '',
       merged.phone || '',
       merged.address || '',
       merged.product || '',
-      merged.productUrl || ''
+      merged.productUrl || '',
+      voucherText
     ]]);
     if (notes.length) sheet.getRange(row, 3).setNote(notes.join('\n\n'));
     else sheet.getRange(row, 3).clearNote();
@@ -173,10 +178,102 @@ function processRow_(sheet, row) {
       sheet.getRange(row, 8).setNote('Không có shop_id và item_id nên chưa thể tạo link sản phẩm chính xác.');
     } else sheet.getRange(row, 8).clearNote();
   } catch (err) {
-    sheet.getRange(row, 2, 1, 7).setValues([[
-      '', 'Lỗi: ' + safeError_(err), '', '', '', '', ''
+    sheet.getRange(row, 2, 1, 8).setValues([[
+      '', 'Lỗi: ' + safeError_(err), '', '', '', '', '', voucherText || ''
     ]]);
   }
+}
+
+function getAvailableVouchers_(cookie) {
+  var cursor = '';
+  var seen = {};
+  var rows = [];
+  var lastError = '';
+  for (var page = 0; page < SIMPLE_MAX_VOUCHER_PAGES; page++) {
+    var payload = {
+      exclude_user_voucher_list_type: [],
+      voucher_status: 1,
+      voucher_sort_flag: 1,
+      cursor: cursor,
+      limit: SIMPLE_VOUCHER_LIMIT,
+      addition: ['voucher_microsite_link'],
+      version: 7,
+      need_statistics: true,
+      user_voucher_list_type: 1
+    };
+    var result = shopeePost_(cookie,
+      SIMPLE_ORIGIN + '/api/v4/voucher_wallet/get_user_voucher_list',
+      payload,
+      SIMPLE_ORIGIN + '/user/voucher-wallet');
+    var error = apiError_(result.json);
+    if (!result.json || result.status < 200 || result.status >= 300 ||
+        (error && String(error) !== '0')) {
+      lastError = 'Không lấy được voucher' + (error ? ' (' + error + ')' : '');
+      break;
+    }
+    var data = (result.json || {}).data || {};
+    var list = data.user_voucher_list || [];
+    for (var i = 0; i < list.length; i++) {
+      var line = formatVoucher_(list[i]);
+      var code = voucherCode_(list[i]);
+      if (!code) code = line;
+      if (!line || seen[code]) continue;
+      seen[code] = true;
+      rows.push(line);
+    }
+    var next = data.next || data.next_cursor || '';
+    if (!next || !list.length || next === cursor) break;
+    cursor = String(next);
+  }
+  if (rows.length) return {text: rows.join('\n'), error: ''};
+  return {text: '', error: lastError || 'Không có voucher đang có'};
+}
+
+function voucherCode_(item) {
+  item = item || {};
+  var info = item.voucher || item.voucher_info || item;
+  return String(firstValue_(info, ['voucher_code', 'code', 'voucherCode']) || '').trim();
+}
+
+function formatVoucher_(item) {
+  item = item || {};
+  var info = item.voucher || item.voucher_info || item;
+  var code = voucherCode_(item);
+  if (!code) return '';
+  var title = firstValue_(info, ['title', 'icon_text', 'customised_label', 'display_shop_name']) || '';
+  var shop = firstValue_(info, ['shop_name', 'customised_mall_name', 'display_shop_name']) || '';
+  var rewardType = Number(firstValue_(info, ['reward_type']));
+  var percentage = firstValue_(info, ['discount_percentage', 'reward_percentage']);
+  var value = firstValue_(info, ['discount_value', 'reward_value']);
+  var cap = firstValue_(info, ['discount_cap', 'reward_cap']);
+  var minSpend = firstValue_(info, ['min_spend', 'min_amount']);
+  var end = firstValue_(info, ['end_time', 'expire_time', 'expired_time']);
+  var parts = [code];
+  if (title && title !== code) parts.push(String(title));
+  if (shop && shop !== title) parts.push(String(shop));
+  if (percentage !== '' && percentage !== null && percentage !== undefined && Number(percentage) > 0) {
+    parts.push(String(percentage) + '%');
+  } else if (value !== '' && value !== null && value !== undefined) {
+    parts.push(formatMoney_(value));
+  } else if (rewardType === 2) {
+    parts.push('Miễn phí vận chuyển');
+  }
+  if (cap !== '' && cap !== null && cap !== undefined && Number(cap)) {
+    parts.push('tối đa ' + formatMoney_(cap));
+  }
+  if (minSpend !== '' && minSpend !== null && minSpend !== undefined && Number(minSpend)) {
+    parts.push('đơn tối thiểu ' + formatMoney_(minSpend));
+  }
+  if (end) parts.push('hết ' + formatUnixTime_(end));
+  return parts.join(' | ');
+}
+
+function formatMoney_(value) {
+  var number = Number(value);
+  if (!isFinite(number)) return String(value || '');
+  // Shopee voucher money fields are commonly stored in VND x 100000.
+  if (Math.abs(number) >= 100000) number = Math.round(number / 100000);
+  return number.toLocaleString('vi-VN') + 'đ';
 }
 
 function getNotifications_(cookie) {

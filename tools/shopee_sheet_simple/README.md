@@ -2,7 +2,7 @@
 
 ## Cột
 
-`Cookie | Mã Vận Đơn | Trạng thái Đơn | Người nhận | Số điện thoại nhận | Địa chỉ | Sản phẩm | Link sản phẩm`
+`Cookie | Mã Vận đơn | Trạng thái đơn | Người nhận | Số điện thoại nhận | Địa chỉ | Sản phẩm | Link sản phẩm | Voucher hiện có`
 
 Mỗi dòng nhập **một cookie Shopee** vào cột A. Sau khi bật trigger, dán cookie vào cột A là dòng đó tự kiểm tra.
 
@@ -44,3 +44,9 @@ Việc tra cứu nhà vận chuyển chỉ bổ sung **trạng thái vận chuy�
 Công cụ thử lần lượt: chi tiết đơn Shopee, thẻ sản phẩm trong thông báo, rồi API sản phẩm công khai nếu tìm được `shop_id` và `item_id`. Khi lấy được hai ID, link được tạo theo dạng `https://shopee.vn/product/<shop_id>/<item_id>`.
 
 Với cookie đã kiểm tra ngày 19/09/2026, Shopee trả `90309999` cho API danh sách/chi tiết đơn; thông báo giao hàng chỉ có mã đơn và mã vận đơn, không có `item_id`, `shop_id` của sản phẩm hay tên sản phẩm. Vì vậy riêng cookie này chưa thể lấy chính xác Sản phẩm/Link chỉ từ cookie. Dữ liệu cache trong bản sao lưu iOS có thể có tên mặt hàng, nhưng đó không phải dữ liệu cookie và Google Apps Script không truy cập được thư mục backup trên PC.
+
+## Voucher hiện có
+
+Mỗi lần kiểm tra cookie, Sheet gọi endpoint ví voucher của chính tài khoản với trạng thái đang còn hiệu lực. Cột **Voucher hiện có** chứa danh sách nhiều dòng trong cùng một ô; mỗi dòng gồm mã voucher, loại/nhãn, mức giảm, giá trị đơn tối thiểu, giới hạn giảm và thời hạn nếu Shopee trả các trường đó.
+
+Danh sách được lấy theo cookie của từng dòng, không dùng chung giữa các tài khoản. Nếu Shopee trả mã lỗi hoặc chặn endpoint voucher, ô này sẽ hiển thị cảnh báo thay vì coi như tài khoản không có voucher.
