@@ -138,16 +138,22 @@ function processRow_(sheet, row) {
     var detail = found.orderId ? getOrderDetail_(cookie, found.orderId) : null;
     var address = getDefaultAddress_(cookie);
     var shipping = found.tracking ? getCarrierInfo_(found.tracking, found.carrier, found.status) : {};
-    var merged = mergeOrderData_(found, detail, address, shipping);
-    var status = shipping && shipping.status
-      ? shipping.status
-      : (merged.status || 'Đã tìm thấy đơn');
-    if (shipping && shipping.carrier && shipping.lookupUrl && shipping.requiresManualLookup) {
-      status += ' | ' + shipping.carrier + ': ' + shipping.lookupUrl;
+    var itemCard = detail && detail.blocked ? getNotificationItemCard_(cookie, found.raw) : {};
+    var merged = mergeOrderData_(found, detail, address, shipping, itemCard);
+    if ((!merged.product || !merged.productUrl) && merged.itemId && merged.shopId) {
+      var publicItem = getPublicItem_(merged.shopId, merged.itemId);
+      merged = mergeOrderData_(found, detail, address, shipping, itemCard, publicItem);
     }
-    var detailWarning = detail && detail.blocked
-      ? 'Không lấy được chi tiết đơn Shopee: mã 90309999. Trạng thái vận chuyển vẫn được lấy từ nhà vận chuyển.'
-      : '';
+    var status = formatShippingStatus_(shipping, merged.status || 'Đã tìm thấy đơn');
+    if (shipping && shipping.carrier && shipping.lookupUrl && shipping.requiresManualLookup) {
+      status += ' | cần xác minh trên trang ' + shipping.carrier;
+    }
+    var notes = [];
+    var shippingNote = buildShippingNote_(shipping, found.tracking);
+    if (shippingNote) notes.push(shippingNote);
+    if (detail && detail.blocked) {
+      notes.push('Shopee chặn API chi tiết đơn với mã 90309999. Dữ liệu vận chuyển vẫn lấy từ nhà vận chuyển.');
+    }
 
     sheet.getRange(row, 2, 1, 7).setValues([[
       merged.tracking || '',
@@ -158,8 +164,14 @@ function processRow_(sheet, row) {
       merged.product || '',
       merged.productUrl || ''
     ]]);
-    if (detailWarning) sheet.getRange(row, 3).setNote(detailWarning);
+    if (notes.length) sheet.getRange(row, 3).setNote(notes.join('\n\n'));
     else sheet.getRange(row, 3).clearNote();
+    if (!merged.product) {
+      sheet.getRange(row, 7).setNote('Cookie này không trả tên sản phẩm qua thông báo; API chi tiết đơn đang bị Shopee chặn 90309999.');
+    } else sheet.getRange(row, 7).clearNote();
+    if (!merged.productUrl) {
+      sheet.getRange(row, 8).setNote('Không có shop_id và item_id nên chưa thể tạo link sản phẩm chính xác.');
+    } else sheet.getRange(row, 8).clearNote();
   } catch (err) {
     sheet.getRange(row, 2, 1, 7).setValues([[
       '', 'Lỗi: ' + safeError_(err), '', '', '', '', ''
@@ -268,6 +280,8 @@ function getSpxInfo_(tracking) {
   return {
     status: latest.tracking_name || latest.description || '',
     carrier: 'SPX',
+    actualTime: Number(latest.actual_time || 0),
+    timeline: records,
     receiver: info.receiver_name || '',
     phone: info.receiver_phone || info.phone || '',
     address: info.receiver_address || '',
@@ -318,17 +332,27 @@ function jsonPost_(url, payload, referer) {
   return {status: response.getResponseCode(), text: response.getContentText(), json: parseJson_(response.getContentText())};
 }
 
-function mergeOrderData_(found, detail, fallbackAddress, shipping) {
+function mergeOrderData_(found, detail, fallbackAddress, shipping, itemCard, publicItem) {
   var data = (detail && detail.data) || {};
   shipping = shipping || {};
+  fallbackAddress = fallbackAddress || {};
+  itemCard = itemCard || {};
+  publicItem = publicItem || {};
+  var rawCard = (found.raw && (found.raw.item_card_info || found.raw.item_card || found.raw.rich_contents)) || {};
   var receiver = firstValueDeep_(data, ['receiver_name', 'recipient_name', 'consignee_name', 'buyer_name', 'name']) || shipping.receiver;
   var phone = firstValueDeep_(data, ['receiver_phone', 'recipient_phone', 'consignee_phone', 'phone']) || shipping.phone;
   var address = firstValueDeep_(data, ['shipping_address', 'receiver_address', 'recipient_address', 'address_text', 'address']) || shipping.address;
-  var actionData = (found.raw && (found.raw.item_card_info || found.raw.item_card || found.raw.rich_contents)) || {};
-  var product = firstValueDeep_(data, ['item_name', 'product_name', 'item_title', 'product_title', 'model_name']) || firstValueDeep_(actionData, ['item_name', 'product_name', 'item_title', 'product_title', 'name']);
-  var productUrl = firstValueDeep_(data, ['product_url', 'item_url', 'url', 'share_url']) || firstValueDeep_(actionData, ['product_url', 'item_url', 'url', 'share_url']);
-  var itemId = firstValueDeep_(data, ['item_id', 'itemid']);
-  var shopId = firstValueDeep_(data, ['shop_id', 'shopid']);
+  var product = firstValueDeep_(data, ['item_name', 'product_name', 'item_title', 'product_title', 'model_name']) ||
+    firstValueDeep_(itemCard, ['item_name', 'product_name', 'item_title', 'product_title', 'model_name', 'name']) ||
+    firstValueDeep_(rawCard, ['item_name', 'product_name', 'item_title', 'product_title', 'model_name', 'name']) ||
+    firstValueDeep_(publicItem, ['item_name', 'product_name', 'item_title', 'product_title', 'name']);
+  var productUrl = firstValueDeep_(data, ['product_url', 'item_url', 'share_url']) ||
+    firstValueDeep_(itemCard, ['product_url', 'item_url', 'share_url']) ||
+    firstValueDeep_(rawCard, ['product_url', 'item_url', 'share_url']) ||
+    firstValueDeep_(publicItem, ['product_url', 'item_url', 'share_url']);
+  var itemRef = extractItemReference_(data, itemCard, rawCard, found.raw || {}, publicItem);
+  var itemId = itemRef.itemId;
+  var shopId = itemRef.shopId;
   if (!productUrl && itemId && shopId) productUrl = 'https://shopee.vn/product/' + shopId + '/' + itemId;
   return {
     tracking: found.tracking,
@@ -337,8 +361,140 @@ function mergeOrderData_(found, detail, fallbackAddress, shipping) {
     phone: phone || fallbackAddress.phone || '',
     address: address || fallbackAddress.address || '',
     product: product || '',
-    productUrl: productUrl || ''
+    productUrl: productUrl || '',
+    itemId: itemId || '',
+    shopId: shopId || ''
   };
+}
+
+function extractItemReference_(detailData, itemCard, rawCard, rawAction, publicItem) {
+  var sources = [detailData, itemCard, rawCard, publicItem];
+  for (var i = 0; i < sources.length; i++) {
+    var itemId = firstValueDeep_(sources[i], ['item_id', 'itemid']);
+    var shopId = firstValueDeep_(sources[i], ['shop_id', 'shopid']);
+    if (itemId && shopId) return {itemId: String(itemId), shopId: String(shopId)};
+  }
+  var pairs = firstValueDeep_(itemCard, ['shop_item_id_list']) || firstValueDeep_(rawCard, ['shop_item_id_list']);
+  if (Array.isArray(pairs) && pairs.length) {
+    var pairItem = firstValue_(pairs[0], ['item_id', 'itemid']);
+    var pairShop = firstValue_(pairs[0], ['shop_id', 'shopid']);
+    if (pairItem && pairShop) return {itemId: String(pairItem), shopId: String(pairShop)};
+  }
+  var idInfo = (rawAction || {}).id_info || {};
+  var actionItem = firstValue_(idInfo, ['itemid', 'item_id']);
+  var actionShop = firstValue_(idInfo, ['shopid', 'shop_id']);
+  // Only trust id_info when both fields are present. Some order notifications put
+  // the buyer's own shop id here while itemid is null.
+  if (actionItem && actionShop) return {itemId: String(actionItem), shopId: String(actionShop)};
+  return {itemId: '', shopId: ''};
+}
+
+function getNotificationItemCard_(cookie, action) {
+  action = action || {};
+  if (action.item_card_info) return action.item_card_info;
+  var actionId = action.action_id;
+  if (!actionId) return {};
+  var result = shopeePost_(cookie,
+    SIMPLE_ORIGIN + '/api/v4/notification/get_action_content_item_card_list',
+    {action_item_id_list: [String(actionId)]},
+    SIMPLE_ORIGIN + '/user/notifications/order');
+  if (!result.json || result.status < 200 || result.status >= 300) return {};
+  if (apiError_(result.json) && String(apiError_(result.json)) !== '0') return {};
+  return (result.json || {}).data || {};
+}
+
+function getPublicItem_(shopId, itemId) {
+  if (!shopId || !itemId) return {};
+  var url = SIMPLE_ORIGIN + '/api/v4/item/get?shopid=' + encodeURIComponent(shopId) +
+    '&itemid=' + encodeURIComponent(itemId);
+  var result = shopeeGet_('', url, SIMPLE_ORIGIN + '/product/' + shopId + '/' + itemId);
+  if (!result.json || result.status < 200 || result.status >= 300) return {};
+  return (result.json || {}).data || {};
+}
+
+function formatShippingStatus_(shipping, fallback) {
+  shipping = shipping || {};
+  var parts = [];
+  var status = translateShippingStatus_(shipping.status || fallback || '');
+  if (status) parts.push(status);
+  if (shipping.carrier) parts.push(shipping.carrier);
+  var timeText = formatUnixTime_(shipping.actualTime);
+  if (timeText) parts.push(timeText);
+  return parts.join(' | ');
+}
+
+function translateShippingStatus_(value) {
+  var text = String(value || '').trim();
+  var lower = text.toLowerCase();
+  if (lower === 'delivered' || lower === 'delivery successful') return 'Đã giao hàng thành công';
+  if (lower === 'out for delivery') return 'Đang giao hàng';
+  if (lower === 'in transit') return 'Đang vận chuyển';
+  if (lower === 'picked up') return 'Đã lấy hàng';
+  return text;
+}
+
+function formatUnixTime_(seconds) {
+  var value = Number(seconds || 0);
+  if (!value) return '';
+  if (value > 999999999999) value = Math.floor(value / 1000);
+  try {
+    return Utilities.formatDate(new Date(value * 1000), 'Asia/Ho_Chi_Minh', 'dd/MM/yyyy HH:mm');
+  } catch (err) {
+    return '';
+  }
+}
+
+function buildShippingNote_(shipping, tracking) {
+  shipping = shipping || {};
+  var lines = [];
+  if (shipping.carrier) lines.push('Đơn vị vận chuyển: ' + shipping.carrier);
+  if (tracking) lines.push('Mã vận đơn: ' + tracking);
+  if (shipping.lookupUrl) lines.push('Trang tra cứu: ' + shipping.lookupUrl);
+  var records = shipping.timeline || [];
+  if (records.length) {
+    lines.push('Hành trình gần nhất:');
+    var copy = records.slice().sort(function (a, b) {
+      return Number(b.actual_time || 0) - Number(a.actual_time || 0);
+    });
+    for (var i = 0; i < Math.min(copy.length, 5); i++) {
+      var record = copy[i] || {};
+      var label = translateShippingStatus_(record.tracking_name || record.description || record.seller_description || '');
+      var timestamp = formatUnixTime_(record.actual_time);
+      lines.push('- ' + (timestamp ? timestamp + ': ' : '') + label);
+    }
+  }
+  return lines.join('\n');
+}
+
+function shopeePost_(cookie, url, payload, referer) {
+  var headers = {
+    'User-Agent': browserUserAgent_(),
+    'Accept': 'application/json, text/plain, */*',
+    'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
+    'Referer': referer || SIMPLE_ORIGIN + '/',
+    'Origin': SIMPLE_ORIGIN,
+    'X-API-SOURCE': 'pc',
+    'X-Shopee-Language': 'vi',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Content-Type': 'application/json'
+  };
+  if (cookie) headers.Cookie = cookie;
+  var csrf = cookieValue_(cookie, 'csrftoken');
+  if (csrf) headers['x-csrftoken'] = csrf;
+  var response = UrlFetchApp.fetch(url, {
+    method: 'post', muteHttpExceptions: true, followRedirects: true,
+    contentType: 'application/json', payload: JSON.stringify(payload || {}), headers: headers
+  });
+  return {status: response.getResponseCode(), text: response.getContentText(), json: parseJson_(response.getContentText())};
+}
+
+function cookieValue_(cookie, name) {
+  var parts = String(cookie || '').split(';');
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i].trim();
+    if (part.indexOf(name + '=') === 0) return part.slice(name.length + 1);
+  }
+  return '';
 }
 
 function shopeeGet_(cookie, url, referer) {

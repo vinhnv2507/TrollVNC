@@ -33,8 +33,14 @@ Cookie có thể tương đương phiên đăng nhập. Chỉ dùng Sheet riêng
 
 Bản đơn giản nhận diện đơn vị vận chuyển từ thông báo Shopee và xử lý như sau:
 
-- **SPX**: gọi dữ liệu tra cứu công khai của SPX để lấy trạng thái mới nhất, người nhận, số điện thoại và địa chỉ nếu SPX trả về.
+- **SPX**: gọi dữ liệu tra cứu công khai của SPX để lấy trạng thái mới nhất, thời gian cập nhật, người nhận, số điện thoại và địa chỉ nếu SPX trả về. Cột trạng thái hiển thị dạng `Đã giao hàng thành công | SPX | dd/MM/yyyy HH:mm`. Di chuột vào ô trạng thái để xem tối đa 5 mốc hành trình gần nhất.
 - **GHN**: gọi endpoint tra cứu công khai của trang GHN. Một số mã sẽ yêu cầu xác minh số điện thoại (`PHONE_VERIFY_REQUIRED`); khi đó cột trạng thái vẫn giữ trạng thái Shopee và ghi kèm link GHN để mở kiểm tra.
 - **Viettel Post**: trang tra cứu có cơ chế chống bot/captcha nên Apps Script không tự vượt qua. Cột trạng thái sẽ giữ trạng thái từ thông báo Shopee và ghi link Viettel Post để mở tra cứu thủ công.
 
 Việc tra cứu nhà vận chuyển chỉ bổ sung **trạng thái vận chuyển**. Nó không mở khóa API chi tiết đơn Shopee. Nếu Shopee trả `90309999`, trạng thái cột C vẫn chỉ hiển thị trạng thái vận chuyển sạch (ví dụ `Delivered`); cảnh báo chi tiết đơn bị chặn được đặt trong ghi chú của ô trạng thái, không làm bẩn nội dung trạng thái.
+
+## Sản phẩm và link sản phẩm
+
+Công cụ thử lần lượt: chi tiết đơn Shopee, thẻ sản phẩm trong thông báo, rồi API sản phẩm công khai nếu tìm được `shop_id` và `item_id`. Khi lấy được hai ID, link được tạo theo dạng `https://shopee.vn/product/<shop_id>/<item_id>`.
+
+Với cookie đã kiểm tra ngày 19/09/2026, Shopee trả `90309999` cho API danh sách/chi tiết đơn; thông báo giao hàng chỉ có mã đơn và mã vận đơn, không có `item_id`, `shop_id` của sản phẩm hay tên sản phẩm. Vì vậy riêng cookie này chưa thể lấy chính xác Sản phẩm/Link chỉ từ cookie. Dữ liệu cache trong bản sao lưu iOS có thể có tên mặt hàng, nhưng đó không phải dữ liệu cookie và Google Apps Script không truy cập được thư mục backup trên PC.
