@@ -3,7 +3,8 @@
  *
  * Columns:
  * A Cookie | B Mã Vận Đơn | C Trạng thái Đơn | D Người nhận
- * E Số điện thoại nhận | F Địa chỉ | G Sản phẩm | H Link sản phẩm | I Voucher hiện có
+ * E Số điện thoại nhận | F Địa chỉ | G Sản phẩm | H Link sản phẩm
+ * I Voucher hiện có | J Địa chỉ mặc định
  *
  * Input one cookie per row in column A. Install the edit trigger once from
  * the menu so every pasted cookie row is checked automatically.
@@ -11,7 +12,8 @@
 
 var SIMPLE_HEADERS = [
   'Cookie', 'Mã Vận Đơn', 'Trạng thái Đơn', 'Người nhận',
-  'Số điện thoại nhận', 'Địa chỉ', 'Sản phẩm', 'Link sản phẩm', 'Voucher hiện có'
+  'Số điện thoại nhận', 'Địa chỉ', 'Sản phẩm', 'Link sản phẩm',
+  'Voucher hiện có', 'Địa chỉ mặc định'
 ];
 var SIMPLE_SHEET_NAME = 'Shopee';
 var SIMPLE_TRIGGER_HANDLER = 'onEditInstalled';
@@ -43,7 +45,7 @@ function setupSimpleSheet() {
     .setBackground('#ee4d2d')
     .setVerticalAlignment('middle');
   sheet.setRowHeight(1, 32);
-  var widths = [420, 190, 230, 170, 150, 330, 300, 360, 520];
+  var widths = [420, 190, 230, 170, 150, 330, 300, 360, 520, 430];
   for (var i = 0; i < widths.length; i++) sheet.setColumnWidth(i + 1, widths[i]);
   sheet.getRange(2, 1, Math.max(sheet.getMaxRows() - 1, 1), SIMPLE_HEADERS.length)
     .setVerticalAlignment('top')
@@ -122,7 +124,8 @@ function processRow_(sheet, row) {
     return;
   }
 
-  var output = ['', 'Đang kiểm tra…', '', '', '', '', '', 'Đang tải voucher…'];
+  var output = ['', 'Đang kiểm tra…', '', '', '', '', '', 'Đang tải voucher…',
+    'Đang tải địa chỉ mặc định…'];
   sheet.getRange(row, 2, 1, output.length).setValues([output]);
   SpreadsheetApp.flush();
 
@@ -132,12 +135,14 @@ function processRow_(sheet, row) {
     // Read the account's default delivery address independently of order lookup.
     // This still works when order notifications/detail are unavailable.
     var defaultAddress = getDefaultAddress_(cookie);
+    var defaultAddressText = formatDefaultAddress_(defaultAddress);
     var notifications = getNotifications_(cookie);
     var found = pickLatestOrder_(notifications);
     if (!found) {
-      sheet.getRange(row, 2, 1, 8).setValues([[
+      sheet.getRange(row, 2, 1, 9).setValues([[
         '', 'Không tìm thấy thông báo đơn hàng', defaultAddress.receiver || '',
-        defaultAddress.phone || '', defaultAddress.address || '', '', '', voucherText
+        defaultAddress.phone || '', defaultAddress.address || '', '', '', voucherText,
+        defaultAddressText
       ]]);
       sheet.getRange(row, 3).clearNote();
       return;
@@ -163,7 +168,7 @@ function processRow_(sheet, row) {
       notes.push('Shopee chặn API chi tiết đơn với mã 90309999. Dữ liệu vận chuyển vẫn lấy từ nhà vận chuyển.');
     }
 
-    sheet.getRange(row, 2, 1, 8).setValues([[
+    sheet.getRange(row, 2, 1, 9).setValues([[
       merged.tracking || '',
       status,
       merged.receiver || '',
@@ -171,7 +176,8 @@ function processRow_(sheet, row) {
       merged.address || '',
       merged.product || '',
       merged.productUrl || '',
-      voucherText
+      voucherText,
+      defaultAddressText
     ]]);
     if (notes.length) sheet.getRange(row, 3).setNote(notes.join('\n\n'));
     else sheet.getRange(row, 3).clearNote();
@@ -182,8 +188,9 @@ function processRow_(sheet, row) {
       sheet.getRange(row, 8).setNote('Không có shop_id và item_id nên chưa thể tạo link sản phẩm chính xác.');
     } else sheet.getRange(row, 8).clearNote();
   } catch (err) {
-    sheet.getRange(row, 2, 1, 8).setValues([[
-      '', 'Lỗi: ' + safeError_(err), '', '', '', '', '', voucherText || ''
+    sheet.getRange(row, 2, 1, 9).setValues([[
+      '', 'Lỗi: ' + safeError_(err), '', '', '', '', '', voucherText || '',
+      defaultAddressText || ''
     ]]);
   }
 }
@@ -327,6 +334,13 @@ function getOrderDetail_(cookie, orderId) {
   if (String(error) === '90309999' || result.status === 403) return {blocked: true, data: {}};
   if (!result.json || error && String(error) !== '0') return {blocked: false, data: {}};
   return {blocked: false, data: (result.json || {}).data || {}};
+}
+
+function formatDefaultAddress_(address) {
+  address = address || {};
+  return [address.receiver, address.phone, address.address]
+    .filter(function (value) { return value !== undefined && value !== null && String(value).trim() !== ''; })
+    .join(' | ');
 }
 
 function getDefaultAddress_(cookie) {

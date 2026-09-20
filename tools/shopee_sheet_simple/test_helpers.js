@@ -30,7 +30,10 @@ eq(unsafe.itemId, '', 'do not trust unpaired notification shop id');
 const merged = ctx.mergeOrderData_({ tracking: 'SPX1', status: 'Delivered', raw: {} }, null, {}, {}, {}, { name: 'Sản phẩm thử', itemid: 123, shopid: 456 });
 eq(merged.product, 'Sản phẩm thử', 'public item name');
 eq(merged.productUrl, 'https://shopee.vn/product/456/123', 'public product link');
-if (code.indexOf('Voucher') < 0) throw new Error('voucher column missing');
+if (code.indexOf('Voucher') < 0 || code.indexOf('\u0110\u1ecba ch\u1ec9 m\u1eb7c đ\u1ecbnh') < 0) {
+  throw new Error('address/voucher columns missing');
+}
+eq(ctx.formatDefaultAddress_({receiver: 'A', phone: 'B', address: 'C'}), 'A | B | C', 'default address formatting');
 let voucherPage = 0;
 ctx.shopeePost_ = () => {
   voucherPage += 1;

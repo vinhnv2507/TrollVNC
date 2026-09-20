@@ -2,7 +2,7 @@
 
 ## Cột
 
-`Cookie | Mã Vận đơn | Trạng thái đơn | Người nhận | Số điện thoại nhận | Địa chỉ | Sản phẩm | Link sản phẩm | Voucher hiện có`
+`Cookie | Mã Vận đơn | Trạng thái đơn | Người nhận | Số điện thoại nhận | Địa chỉ | Sản phẩm | Link sản phẩm | Voucher hiện có | Địa chỉ mặc định`
 
 Mỗi dòng nhập **một cookie Shopee** vào cột A. Sau khi bật trigger, dán cookie vào cột A là dòng đó tự kiểm tra.
 
@@ -51,12 +51,14 @@ Mỗi lần kiểm tra cookie, Sheet gọi endpoint ví voucher của chính tà
 
 Danh sách được lấy theo cookie của từng dòng, không dùng chung giữa các tài khoản. Nếu Shopee trả mã lỗi hoặc chặn endpoint voucher, ô này sẽ hiển thị cảnh báo thay vì coi như tài khoản không có voucher.
 
-## ??a ch? m?c ??nh
+## Địa chỉ mặc định
 
-Sheet lu?n g?i danh s?ch ??a ch? c?a t?i kho?n qua cookie. ??a ch? ???c ??nh d?u `is_delivery_address` ho?c `is_default` s? ???c ?u ti?n; n?u kh?ng c? ??n/th?ng b?o ho?c chi ti?t ??n b? Shopee ch?n, t?n ng??i nh?n, s? ?i?n tho?i v? ??a ch? m?c ??nh v?n ???c ?i?n l?m d? li?u d? ph?ng.
+Sheet luôn gọi danh sách địa chỉ của tài khoản qua cookie. Địa chỉ được đánh dấu `is_delivery_address` hoặc `is_default` sẽ được ưu tiên. Cột **Địa chỉ mặc định** luôn được điền độc lập với việc tìm đơn, theo định dạng `Tên người nhận | Số điện thoại | Địa chỉ`; vì vậy vẫn có thể hiển thị khi Shopee chặn chi tiết đơn hoặc không tìm thấy thông báo đơn hàng.
 
-## IP v? proxy
+Cột **Địa chỉ** vẫn là địa chỉ gắn với đơn/được nhà vận chuyển trả về (khi có). Hai cột này không thay thế cho nhau.
 
-C?c d?ng cookie hi?n ???c ki?m tra b?ng `UrlFetchApp` c?a Google Apps Script. T?t c? request ?i qua h? t?ng v? nh?m IP c?a Google; m?i d?ng kh?ng t? c? m?t IP ri?ng. Apps Script kh?ng c? t?y ch?n proxy HTTP/SOCKS theo t?ng l?n g?i, v? v?y th?m m?t ? ch?a proxy d?ng `host:port:user:pass` s? kh?ng l?m request ??i IP.
+## IP và proxy
 
-Mu?n d?ng proxy th?t cho t?ng d?ng c?n m?t HTTPS relay do b?n ki?m so?t: Sheet g?i request t?i relay, relay d?ng proxy t??ng ?ng r?i chuy?n ph?n h?i v? Sheet. Kh?ng n?n g?i cookie qua relay c?ng c?ng. Khi c? ??a ch? relay v? format x?c th?c c? th?, c? th? n?i c?t Proxy v?o relay m? kh?ng ??a cookie v?o log.
+Các dòng cookie hiện được kiểm tra bằng `UrlFetchApp` của Google Apps Script. Tất cả request đi qua hạ tầng và nhóm IP của Google; mỗi dòng không tự có một IP riêng. Vì vậy nhiều dòng cookie trong cùng Sheet **không có nghĩa là mỗi tài khoản dùng một IP khác nhau**.
+
+Apps Script không có tùy chọn proxy HTTP/SOCKS theo từng lần gọi. Do đó không nên thêm cột Proxy nếu chưa có HTTPS relay thật; cột đó sẽ không tự làm đổi IP. Muốn dùng proxy theo từng dòng cần một relay HTTPS do bạn kiểm soát, nhận cookie và proxy đã chọn, rồi chuyển request qua proxy tương ứng. Không gửi cookie qua relay công cộng và không ghi cookie vào log.
