@@ -179,8 +179,8 @@ class AppsPanel(QWidget):
 
         self.cookies_button = QPushButton("Lấy cookie")
         self.cookies_button.setToolTip(
-            "Lấy cookie HTTP thật (Cookies.binarycookies / HTTPStorages) về PC. "
-            "Cần ControlIOS 4.14+ trên máy. Token dựng lại từ login không thay cookie jar.")
+            "Lấy cookie vào bộ nhớ tạm của ControlIOS PC để xem và copy; không lưu file."
+        )
         self.cookies_button.clicked.connect(
             lambda: self._emit_for_selected(self.cookies_requested))
         layout.addWidget(self.cookies_button)
@@ -327,7 +327,7 @@ class AppsPanel(QWidget):
         restore_action.triggered.connect(lambda: self.restore_requested.emit(bundle))
         menu.addAction(restore_action)
 
-        cookies_action = QAction("Lấy cookie về PC…", menu)
+        cookies_action = QAction("Lấy cookie", menu)
         cookies_action.triggered.connect(lambda: self.cookies_requested.emit(bundle))
         menu.addAction(cookies_action)
 

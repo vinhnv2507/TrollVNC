@@ -982,11 +982,11 @@ class DevicePool:
         self._call_coro(run())
 
     def dump_cookies_to_pc(self, keys: Iterable[str], bundle_id: str,
-                           destination: Path | str, on_event=None, on_done=None) -> None:
-        """Lấy cookie HTTP của app về PC cho toàn bộ máy đang chọn."""
+                           destination: Path | str = "", on_event=None,
+                           on_cookie=None, on_done=None) -> None:
+        """Lấy cookie và trả kết quả cho UI; không lưu file lâu dài trên PC."""
 
         key_list = list(keys)
-        destination = Path(destination)
         succeeded: List[str] = []
         failures: List[tuple] = []
 
@@ -996,10 +996,10 @@ class DevicePool:
             async def one(key: str) -> None:
                 session = self._sessions.get(key)
                 label = session.spec.name if session and session.spec.name else key
-                local = destination / f"{_slug(label)}_{_slug(key)}" / _slug(bundle_id)
                 try:
                     async with transfer_slots:
-                        dump = await self._channel(key).dump_cookies(bundle_id, local)
+                        dump = await self._channel(key).dump_cookies(
+                            bundle_id, destination, persist=False)
                     succeeded.append(key)
                     if on_event:
                         count = len(dump.get("cookies") or [])
@@ -1011,7 +1011,9 @@ class DevicePool:
                             extra += " — thiếu " + ", ".join(str(item) for item in missing)
                         elif "shopee" in bundle_id.casefold():
                             extra += " — SPC_ST: có (xem spc-st.txt)"
-                        on_event(key, f"đã lấy {count} cookie ra {local}{extra}")
+                        on_event(key, f"đã lấy {count} cookie vào ControlIOS PC{extra}")
+                    if on_cookie:
+                        on_cookie(key, dump)
                 except Exception as exc:
                     failures.append((key, str(exc)))
                     if on_event:

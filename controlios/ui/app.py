@@ -1,4 +1,4 @@
-﻿"""Control IOS — main window."""
+"""Control IOS — main window."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QSpinBox, QSplitter, QStatusBar, QTableWidget, QTableWidgetItem,
+    QPushButton, QScrollArea, QSpinBox, QSplitter, QStatusBar, QTableWidget, QTableWidgetItem,
     QToolBar, QToolButton, QVBoxLayout, QGridLayout,
     QWidget,
 )
@@ -51,6 +51,9 @@ UNGROUPED_FILTER = "\x00"
 COLUMN_CHOICES = [("Cột: tự động", 0), ("4 cột", 4), ("6 cột", 6), ("8 cột", 8),
                   ("10 cột", 10), ("12 cột", 12)]
 CAPTURES_DIR = PROJECT_ROOT / "captures"
+# Cookie exports stay in the private ControlIOS PC data directory.
+# Only an explicit app backup asks the user for an external folder.
+COOKIE_STORE_DIR = PROJECT_ROOT / "cookies"
 # Chu kỳ tự canh Keeper. 5 phút: keeperd chết là chuyện hiếm (chỉ khi cài đè hoặc
 # hết RAM), soát dày hơn chỉ tốn thêm một vòng control socket cho ~250 máy.
 KEEPER_WATCH_INTERVAL_MS = 5 * 60 * 1000
@@ -735,6 +738,38 @@ class BulkResultDialog(QDialog):
                 self.log.appendPlainText(f"  ✗ {key}: {reason}")
         else:
             self.status.setText(f"{describe}: xong cả {ok}/{self._total} máy ✓")
+
+
+class CookieDialog(QDialog):
+    """Hiển thị cookie vừa lấy để người dùng xem và copy trực tiếp."""
+
+    def __init__(self, window, device_key: str, bundle_id: str, dump: dict) -> None:
+        super().__init__(window)
+        self.setWindowTitle(f"Lấy cookie — {bundle_id}")
+        self.resize(760, 520)
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(f"Cookie từ {device_key} ({bundle_id}) — không lưu thành file"))
+        self.editor = QPlainTextEdit()
+        self.editor.setReadOnly(True)
+        header = str(dump.get("header") or "").strip()
+        if not header:
+            rows = []
+            for item in dump.get("cookies") or []:
+                name = str(item.get("name") or "")
+                value = str(item.get("value") or "")
+                if name:
+                    rows.append(f"{name}={value}")
+            header = "; ".join(rows)
+        self.editor.setPlainText(header)
+        layout.addWidget(self.editor, 1)
+        buttons = QHBoxLayout()
+        copy_button = QPushButton("Copy cookie")
+        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(self.editor.toPlainText()))
+        buttons.addWidget(copy_button)
+        close_button = QPushButton("Đóng")
+        close_button.clicked.connect(self.close)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
 
 
 class SnapshotDialog(QDialog):
@@ -2120,7 +2155,7 @@ class ScriptDialog(QDialog):
 
 
 class MultiDetailWindow(QDialog):
-    """Cua so dieu khien 1--5 may, moi o la mot DetailView doc lap."""
+    """Show up to five full-size device views stacked vertically."""
 
     closed = Signal()
 
@@ -2128,49 +2163,85 @@ class MultiDetailWindow(QDialog):
         super().__init__(owner)
         self.owner = owner
         self.pool = owner.pool
-        self.keys = list(dict.fromkeys(keys))
+        self.keys = list(dict.fromkeys(keys))[:5]
         self.views: dict[str, DetailView] = {}
-        self.setWindowTitle(f"Control IOS — {len(self.keys)} màn hình lớn")
+        self._restored = False
+        self._previous_selection = list(owner.grid.selection)
+        self._previous_apps_panel = owner.apps_panel
+        self._previous_apps_key = owner._apps_for_key
+        self.setWindowTitle(f"Control IOS - {len(self.keys)} large screens")
         self.setAttribute(Qt.WA_DeleteOnClose, True)
-        self.resize(1400, 900)
-        self.setMinimumSize(760, 520)
+        self.resize(1450, 1100)
+        self.setMinimumSize(980, 650)
 
-        layout = QGridLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(8)
-        for index, key in enumerate(self.keys):
+        # Five screens are stacked vertically so each keeps the same tall-phone
+        # aspect as the current one-device view. A scroll area is intentional.
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        scroll.setMinimumWidth(720)
+        content = QWidget(scroll)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(8, 8, 8, 8)
+        content_layout.setSpacing(10)
+
+        for key in self.keys:
             device = next((item for item in owner.registry.devices if item.key == key), None)
             title = owner._device_name(key)
             host = device.host if device else key.partition(":")[0]
             if title != host:
-                title = f"{title} — {host}"
+                title = f"{title} - {host}"
             version = (getattr(device, "ios_version", "") or "").strip().lstrip("vV") if device else ""
             if version:
-                title += f"  · v{version}"
+                title += f"  - v{version}"
 
-            pane = QWidget(self)
+            pane = QWidget(content)
             pane_layout = QVBoxLayout(pane)
             pane_layout.setContentsMargins(0, 0, 0, 0)
             pane_layout.setSpacing(2)
-            label = QLabel(f"🖥 {title}", pane)
+            label = QLabel(f"Screen: {title}", pane)
             label.setAlignment(Qt.AlignCenter)
             label.setStyleSheet(
                 "font-weight: bold; padding: 3px; background: rgba(0,0,0,0.08);"
             )
             view = DetailView(pane)
             view.set_device(key)
+            view.setMinimumHeight(520)
             pane_layout.addWidget(label)
             pane_layout.addWidget(view, 1)
-            row, column = divmod(index, 2)
-            layout.addWidget(pane, row, column)
+            content_layout.addWidget(pane)
             self.views[key] = view
             self._connect_view(key, view)
 
-        layout.setColumnStretch(0, 1)
-        if len(self.keys) > 1:
-            layout.setColumnStretch(1, 1)
-        for row in range((len(self.keys) + 1) // 2):
-            layout.setRowStretch(row, 1)
+        content_layout.addStretch(1)
+        scroll.setWidget(content)
+
+        # Keep the application panel beside the vertically stacked screens.
+        # The existing MainWindow action handlers are reused and target all keys.
+        self.apps_panel = AppsPanel(self)
+        self.apps_panel.refresh_requested.connect(self._reload_apps)
+        self.apps_panel.launch_requested.connect(owner._launch_app)
+        self.apps_panel.terminate_requested.connect(owner._terminate_app)
+        self.apps_panel.restart_requested.connect(owner._restart_app)
+        self.apps_panel.wipe_requested.connect(owner._wipe_app)
+        self.apps_panel.snapshot_requested.connect(owner._snapshot_app)
+        self.apps_panel.backup_pc_requested.connect(owner._backup_app_to_pc)
+        self.apps_panel.cookies_requested.connect(owner._dump_cookies_to_pc)
+        self.apps_panel.restore_requested.connect(owner._restore_app)
+        self.apps_panel.setMinimumWidth(270)
+        self.apps_panel.setMaximumWidth(360)
+
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(scroll, 1)
+        root.addWidget(self.apps_panel, 0)
+
+        # MainWindow handlers deliberately use its apps_panel and grid selection.
+        # Point them at this panel and these devices while the dialog is open.
+        owner.apps_panel = self.apps_panel
+        owner.grid._apply_selection(self.keys)
+        self.apps_panel.set_targets(len(self.keys))
+        self._reload_apps()
 
     def _connect_view(self, key: str, view: DetailView) -> None:
         view.pointer_pressed.connect(
@@ -2190,6 +2261,23 @@ class MultiDetailWindow(QDialog):
         view.paste_requested.connect(lambda k=key: self._paste(k))
         view.copy_requested.connect(lambda k=key: self._clipboard(k, "c"))
         view.cut_requested.connect(lambda k=key: self._clipboard(k, "x"))
+
+    def _reload_apps(self) -> None:
+        key = self.keys[0] if self.keys else ""
+        if not key:
+            self.apps_panel.set_error("No device selected.")
+            return
+        if not self.owner.registry.settings.control_token:
+            self.apps_panel.set_error(
+                "control_token is missing in config/devices.json."
+            )
+            return
+        self.apps_panel.set_loading()
+        self.pool.list_apps(
+            key,
+            on_done=lambda k, apps, error: self.owner.bridge.apps_loaded.emit(
+                k, apps, error or ""),
+        )
 
     def _paste(self, key: str) -> None:
         text = QApplication.clipboard().text()
@@ -2222,7 +2310,16 @@ class MultiDetailWindow(QDialog):
         if view is not None:
             view.on_frame(frame)
 
+    def _restore_owner_state(self) -> None:
+        if self._restored:
+            return
+        self._restored = True
+        self.owner.apps_panel = self._previous_apps_panel
+        self.owner._apps_for_key = self._previous_apps_key
+        self.owner.grid._apply_selection(self._previous_selection)
+
     def closeEvent(self, event) -> None:
+        self._restore_owner_state()
         self.closed.emit()
         super().closeEvent(event)
 
@@ -4234,23 +4331,29 @@ class MainWindow(QMainWindow):
         )
 
     def _dump_cookies_to_pc(self, bundle_id: str) -> None:
-        targets = self._confirmed_action_targets(f"lấy cookie {bundle_id}")
+        targets = self._confirmed_action_targets(f"get cookie {bundle_id}")
         if targets is None:
             return
         if not targets:
-            QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn các máy ở lưới.")
-            return
-        folder = QFileDialog.getExistingDirectory(
-            self, "Chọn thư mục lưu cookie", str(Path.home()))
-        if not folder:
+            QMessageBox.information(self, "No device", "Select devices in the grid first.")
             return
         self.apps_panel.set_busy(
             f"Đang lấy cookie {bundle_id} từ {len(targets)} máy…")
         self.pool.dump_cookies_to_pc(
-            targets, bundle_id, folder,
+            targets, bundle_id,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
+            on_cookie=lambda k, dump: self._show_cookie_dump(k, bundle_id, dump),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )
+
+    def _show_cookie_dump(self, device_key: str, bundle_id: str, dump: dict) -> None:
+        dialog = CookieDialog(self, device_key, bundle_id, dump)
+        dialog.setAttribute(Qt.WA_DeleteOnClose, True)
+        dialog.show()
+        self._cookie_dialogs = getattr(self, "_cookie_dialogs", [])
+        self._cookie_dialogs.append(dialog)
+        dialog.destroyed.connect(lambda: self._cookie_dialogs.remove(dialog)
+                                if dialog in self._cookie_dialogs else None)
 
     def _restore_app(self, bundle_id: str) -> None:
         """Mở trình quản lý snapshot: liệt kê các bản (từ máy đầu tiên) rồi chọn

@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -838,13 +839,23 @@ class ControlChannel:
             except Exception:
                 pass
 
-    async def dump_cookies(self, bundle_id: str, dest: Path | str) -> dict:
-        """Lấy cookie HTTP thật (và token dựng lại nếu thiếu) về PC."""
+    async def dump_cookies(self, bundle_id: str, dest: Path | str,
+                           persist: bool = True) -> dict:
+        """Lấy cookie HTTP thật; ``persist=False`` giữ kết quả chỉ trong RAM."""
 
         from .cookies import dump_from_folder, export_dump, parse_cookies_reply
 
-        dest = Path(dest)
-        dest.mkdir(parents=True, exist_ok=True)
+        work = Path(dest) if persist else Path(tempfile.mkdtemp(prefix="controlios-cookies-"))
+        work.mkdir(parents=True, exist_ok=True)
+        try:
+            return await self._dump_cookies_to(work, bundle_id, export=persist)
+        finally:
+            if not persist:
+                import shutil
+                shutil.rmtree(work, ignore_errors=True)
+
+    async def _dump_cookies_to(self, dest: Path, bundle_id: str,
+                               export: bool = True) -> dict:
         await self.terminate(bundle_id)
         text = await self.command(f"cookies {bundle_id}", read_timeout=180)
         head = text.strip()
@@ -863,7 +874,8 @@ class ControlChannel:
         if reply.get("groupContainers"):
             dump["groupContainers"] = reply["groupContainers"]
         dump["staging"] = staging
-        export_dump(dump, dest)
+        if export:
+            export_dump(dump, dest)
         return dump
 
     async def download_tree(self, remote: str, local: Path | str) -> int:
