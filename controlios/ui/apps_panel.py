@@ -93,13 +93,16 @@ class AppsPanel(QWidget):
     wipe_requested = Signal(str)         # xoá dữ liệu app (như cài lại)
     snapshot_requested = Signal(str)     # lưu snapshot dữ liệu app
     backup_pc_requested = Signal(str)    # tạo snapshot hàng loạt rồi tải về PC
-    cookies_requested = Signal(str)      # lấy cookie HTTP thật về PC
+    cookies_requested = Signal(str)      # lấy cookie vào bộ nhớ tool, không lưu thư mục PC
     restore_requested = Signal(str)      # khôi phục dữ liệu app từ snapshot
     refresh_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._apps: List[AppInfo] = []
+        self._target_keys: List[str] = []
+        # (device_key, bundle_id) -> cookie header stored inside ControlIOS PC
+        self._cookie_headers: dict[tuple[str, str], str] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 6, 6, 6)
@@ -177,14 +180,6 @@ class AppsPanel(QWidget):
             lambda: self._emit_for_selected(self.backup_pc_requested))
         layout.addWidget(self.backup_pc_button)
 
-        self.cookies_button = QPushButton("Lấy cookie")
-        self.cookies_button.setToolTip(
-            "Lấy cookie vào bộ nhớ tạm của ControlIOS PC để xem và copy; không lưu file."
-        )
-        self.cookies_button.clicked.connect(
-            lambda: self._emit_for_selected(self.cookies_requested))
-        layout.addWidget(self.cookies_button)
-
         self.status = QLabel("Chọn một máy rồi bấm Nạp danh sách.")
         self.status.setWordWrap(True)
         self.status.setStyleSheet("color: #9aa4b2;")
@@ -213,13 +208,45 @@ class AppsPanel(QWidget):
         else:
             self.status.setText("Hãy chọn một app trong danh sách trước.")
 
-    def set_targets(self, count: int) -> None:
+    def set_targets(self, count: int, keys: Optional[List[str]] = None) -> None:
+        if keys is not None:
+            self._target_keys = list(keys)
         self.target_label.setText(
             f"Thao tác sẽ áp cho <b>{count} máy</b> đang chọn."
             if count > 1 else
             "Thao tác áp cho máy đang mở." if count == 1 else
             "Chưa chọn máy nào."
         )
+
+    def remember_cookie(self, device_key: str, bundle_id: str, header: str) -> None:
+        header = (header or "").strip()
+        if not device_key or not bundle_id or not header:
+            return
+        self._cookie_headers[(device_key, bundle_id)] = header
+
+    def load_cookie_headers(self, stored: dict) -> None:
+        self._cookie_headers = {
+            (str(device_key), str(bundle_id)): str(header)
+            for (device_key, bundle_id), header in (stored or {}).items()
+            if device_key and bundle_id and header
+        }
+
+    def cookie_header(self, device_key: str, bundle_id: str) -> str:
+        return self._cookie_headers.get((device_key, bundle_id), "")
+
+    def cookies_for_bundle(self, bundle_id: str) -> list[tuple[str, str]]:
+        found = []
+        seen = set()
+        for key in list(self._target_keys):
+            header = self._cookie_headers.get((key, bundle_id), "")
+            if header and key not in seen:
+                found.append((key, header))
+                seen.add(key)
+        for (key, bundle), header in self._cookie_headers.items():
+            if bundle == bundle_id and header and key not in seen:
+                found.append((key, header))
+                seen.add(key)
+        return found
 
     def set_loading(self) -> None:
         self.status.setText("Đang hỏi máy…")
@@ -327,9 +354,31 @@ class AppsPanel(QWidget):
         restore_action.triggered.connect(lambda: self.restore_requested.emit(bundle))
         menu.addAction(restore_action)
 
-        cookies_action = QAction("Lấy cookie", menu)
+        cookies_action = QAction("Get cookie", menu)
+        cookies_action.setToolTip(
+            "Lấy cookie vào ControlIOS PC cho từng máy; có thể copy ngay, không lưu thư mục PC."
+        )
         cookies_action.triggered.connect(lambda: self.cookies_requested.emit(bundle))
         menu.addAction(cookies_action)
+
+        stored = self.cookies_for_bundle(bundle)
+        if len(stored) == 1:
+            copy_cookie = QAction("Copy cookie", menu)
+            copy_cookie.triggered.connect(
+                lambda _checked=False, k=stored[0][0]: self._copy_cookie(bundle, k))
+            menu.addAction(copy_cookie)
+        elif stored:
+            copy_menu = QMenu("Copy cookie", menu)
+            for key, _header in stored:
+                action = copy_menu.addAction(key)
+                action.triggered.connect(
+                    lambda _checked=False, k=key: self._copy_cookie(bundle, k))
+            menu.addMenu(copy_menu)
+        else:
+            copy_cookie = QAction("Copy cookie", menu)
+            copy_cookie.setEnabled(False)
+            copy_cookie.setToolTip("Chưa lấy cookie cho app này trên máy đang chọn.")
+            menu.addAction(copy_cookie)
 
         menu.addSeparator()
         copy_action = QAction("Chép bundle id", menu)
@@ -343,3 +392,11 @@ class AppsPanel(QWidget):
         from PySide6.QtWidgets import QApplication
 
         QApplication.clipboard().setText(text)
+
+    def _copy_cookie(self, bundle_id: str, device_key: str) -> None:
+        header = self.cookie_header(device_key, bundle_id)
+        if not header:
+            self.status.setText(f"Chưa có cookie {bundle_id} trên {device_key}.")
+            return
+        self._copy(header)
+        self.status.setText(f"Đã copy cookie {bundle_id} của {device_key}.")

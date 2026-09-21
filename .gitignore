@@ -23,3 +23,6 @@ tests/_*.json
 
 # Khoa RIENG cap license — TUYET DOI khong commit
 tools/controlios_private.pem
+
+# Cookie dumps stored inside ControlIOS PC
+cookies/

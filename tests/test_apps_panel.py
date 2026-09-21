@@ -76,7 +76,6 @@ class AppsPanelTest(unittest.TestCase):
         got = {}
         self.panel.snapshot_requested.connect(lambda b: got.setdefault("snap", b))
         self.panel.backup_pc_requested.connect(lambda b: got.setdefault("backup", b))
-        self.panel.cookies_requested.connect(lambda b: got.setdefault("cookies", b))
         self.panel.restore_requested.connect(lambda b: got.setdefault("restore", b))
         self.panel.wipe_requested.connect(lambda b: got.setdefault("wipe", b))
 
@@ -85,11 +84,11 @@ class AppsPanelTest(unittest.TestCase):
 
         self.panel.snapshot_button.click()
         self.panel.backup_pc_button.click()
-        self.panel.cookies_button.click()
         self.panel.restore_button.click()
         self.panel.wipe_button.click()
-        self.assertEqual(got, {"snap": bundle, "backup": bundle, "cookies": bundle,
+        self.assertEqual(got, {"snap": bundle, "backup": bundle,
                                "restore": bundle, "wipe": bundle})
+        self.assertFalse(hasattr(self.panel, "cookies_button"))
 
     def test_data_buttons_without_selection_hint_instead_of_emitting(self) -> None:
         fired = []
@@ -160,6 +159,24 @@ class AppsPanelTest(unittest.TestCase):
         first = letter_icon(SAMPLE[0]).pixmap(34, 34).toImage()
         again = letter_icon(SAMPLE[0]).pixmap(34, 34).toImage()
         self.assertEqual(first, again, "cùng app phải ra cùng biểu tượng")
+
+    def test_get_cookie_lives_in_the_app_context_menu(self) -> None:
+        fired = []
+        self.panel.cookies_requested.connect(fired.append)
+        self.panel.list.setCurrentRow(0)
+        bundle = self.panel.list.item(0).data(Qt.UserRole)
+        self.panel.cookies_requested.emit(bundle)
+        self.assertEqual(fired, [bundle])
+        self.assertFalse(hasattr(self.panel, "cookies_button"))
+
+    def test_copy_cookie_uses_in_tool_header_not_a_pc_folder(self) -> None:
+        bundle = SAMPLE[0].bundle_id
+        self.panel.set_targets(1, ["10.0.0.1:5901"])
+        self.panel.remember_cookie("10.0.0.1:5901", bundle, "SPC_ST=token-1")
+        self.panel._copy_cookie(bundle, "10.0.0.1:5901")
+        self.assertEqual(QApplication.clipboard().text(), "SPC_ST=token-1")
+        stored = self.panel.cookies_for_bundle(bundle)
+        self.assertEqual(stored, [("10.0.0.1:5901", "SPC_ST=token-1")])
 
     def test_icon_colour_survives_a_restart(self) -> None:
         """Màu phải cố định theo bundle id.

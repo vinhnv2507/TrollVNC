@@ -750,6 +750,24 @@ def cookie_header(cookies: Iterable[Cookie]) -> str:
     return "; ".join(f"{c.name}={c.value}" for c in cookies if c.name)
 
 
+def header_from_dump(dump: dict[str, Any] | None) -> str:
+    """Cookie header string from a dump payload, without writing files."""
+
+    payload = dump or {}
+    header = str(payload.get("header") or "").strip()
+    if header:
+        return header
+    rows = []
+    for item in payload.get("cookies") or []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "")
+        value = str(item.get("value") or "")
+        if name:
+            rows.append(f"{name}={value}")
+    return "; ".join(rows)
+
+
 def to_netscape(cookies: Iterable[Cookie]) -> str:
     lines = [
         "# Netscape HTTP Cookie File",

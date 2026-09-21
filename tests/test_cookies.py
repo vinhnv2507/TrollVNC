@@ -10,6 +10,7 @@ from pathlib import Path
 
 from controlios.cookies import (
     Cookie,
+    header_from_dump,
     dump_from_folder,
     encode_binarycookies,
     export_dump,
@@ -62,6 +63,15 @@ class CookieCodecTest(unittest.TestCase):
 
 
 class CookieDumpTest(unittest.TestCase):
+    def test_header_from_dump_prefers_header_then_pairs(self) -> None:
+        self.assertEqual(header_from_dump({"header": "SPC_ST=st"}), "SPC_ST=st")
+        self.assertEqual(
+            header_from_dump({"cookies": [{"name": "SPC_ST", "value": "st"},
+                                          {"name": "SPC_U", "value": "1"}]}),
+            "SPC_ST=st; SPC_U=1",
+        )
+        self.assertEqual(header_from_dump({}), "")
+
     def test_parse_cookies_reply(self) -> None:
         payload = {
             "bundleId": "com.beeasy.shopee.vn",

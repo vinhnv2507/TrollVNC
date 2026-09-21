@@ -6,6 +6,8 @@ from pathlib import Path
 from PyInstaller.utils.hooks import collect_submodules
 from PyInstaller.utils.hooks import collect_all
 
+import PySide6
+
 datas = []
 binaries = []
 hiddenimports = []
@@ -35,6 +37,24 @@ for tool_name, env_name in (
     binaries.append((tool_path, '.'))
 
 
+# PySide6 6.11 is built with a newer MSVC runtime than the Python 3.11
+# installation used by the packager. PyInstaller otherwise keeps Python's old
+# VCRUNTIME140*.dll at _internal root; Windows loads that copy before Qt's own
+# runtime and QtCore fails with "The specified procedure could not be found".
+# Replace all root C++ runtime entries with the matching copies shipped by
+# PySide6. Newer VC runtimes remain backward-compatible with python311.dll.
+pyside_dir = Path(PySide6.__file__).resolve().parent
+qt_runtime_names = {
+    'msvcp140.dll', 'msvcp140_1.dll', 'msvcp140_2.dll',
+    'vcruntime140.dll', 'vcruntime140_1.dll',
+}
+for runtime_name in sorted(qt_runtime_names):
+    runtime_path = pyside_dir / runtime_name
+    if not runtime_path.is_file():
+        raise RuntimeError(f'Missing PySide6 runtime: {runtime_path}')
+    binaries.append((str(runtime_path), '.'))
+
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -48,6 +68,13 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
+# Explicit binaries have priority only after duplicate destinations are removed.
+a.binaries = [entry for entry in a.binaries
+              if Path(entry[0]).name.casefold() not in qt_runtime_names]
+for runtime_name in sorted(qt_runtime_names):
+    runtime_path = pyside_dir / runtime_name
+    a.binaries.append((runtime_path.name, str(runtime_path), 'BINARY'))
+
 pyz = PYZ(a.pure)
 
 exe = EXE(

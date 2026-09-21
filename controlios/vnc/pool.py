@@ -1010,7 +1010,7 @@ class DevicePool:
                         if missing:
                             extra += " — thiếu " + ", ".join(str(item) for item in missing)
                         elif "shopee" in bundle_id.casefold():
-                            extra += " — SPC_ST: có (xem spc-st.txt)"
+                            extra += " — SPC_ST: có"
                         on_event(key, f"đã lấy {count} cookie vào ControlIOS PC{extra}")
                     if on_cookie:
                         on_cookie(key, dump)

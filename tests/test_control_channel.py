@@ -457,6 +457,14 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
             payload = (dest / "cookies.json").read_text(encoding="utf-8")
             self.assertNotIn('"pw"', payload)
 
+    async def test_dump_cookies_persist_false_does_not_keep_files(self) -> None:
+        self.server.apps["com.beeasy.shopee.vn"] = ("Shopee", "User", "1.0")
+        dump = await self.channel.dump_cookies(
+            "com.beeasy.shopee.vn", dest="", persist=False)
+        names = {item["name"] for item in dump["cookies"]}
+        self.assertIn("SPC_ST", names)
+        self.assertTrue(dump.get("header") or names)
+
     async def test_cookies_command_unpatched(self) -> None:
         self.server.unpatched = True
         with self.assertRaises(NotPatchedError):

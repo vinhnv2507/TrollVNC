@@ -265,6 +265,65 @@ class WindowTest(unittest.TestCase):
             window.close()
             registry_path.unlink(missing_ok=True)
 
+    def test_multi_detail_window_is_vertical_full_screens_with_apps_panel(self) -> None:
+        from controlios.ui.app import DeviceScreenPane
+
+        registry_path = Path(__file__).parent / "_multi_detail_layout.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2", "10.0.0.3"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            keys = [device.key for device in window.registry.devices]
+            window._open_multi_detail(keys)
+            md = window.multi_detail_window
+            self.assertIsNotNone(md)
+            md.show()
+            app.processEvents()
+            md._fit_panes()
+            self.assertEqual(list(md.panes), keys)
+            for pane in md.panes.values():
+                self.assertIsInstance(pane, DeviceScreenPane)
+                self.assertGreaterEqual(pane.minimumHeight(), 760)
+                self.assertIn("home", pane.buttons)
+                self.assertIn("switcher", pane.buttons)
+            ys = [pane.y() for pane in md.panes.values()]
+            self.assertEqual(ys, sorted(ys), "screens must stack vertically")
+            self.assertIs(window.apps_panel, md.apps_panel)
+            self.assertFalse(hasattr(md.apps_panel, "cookies_button"))
+            md.close()
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_get_cookie_is_remembered_inside_the_tool(self) -> None:
+        import tempfile
+        from controlios.ui.app import COOKIE_STORE_DIR
+
+        registry_path = Path(__file__).parent / "_cookie_store_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            with tempfile.TemporaryDirectory() as folder:
+                with unittest.mock.patch("controlios.ui.app.COOKIE_STORE_DIR", Path(folder)):
+                    window._remember_cookie(
+                        "10.0.0.1:5901", "com.beeasy.shopee.vn", "SPC_ST=abc")
+                    stored = Path(folder).glob("*/*.json")
+                    self.assertTrue(any(stored))
+                    self.assertEqual(
+                        window.apps_panel.cookie_header(
+                            "10.0.0.1:5901", "com.beeasy.shopee.vn"),
+                        "SPC_ST=abc",
+                    )
+                    window.apps_panel._copy_cookie(
+                        "com.beeasy.shopee.vn", "10.0.0.1:5901")
+                    self.assertEqual(QApplication.clipboard().text(), "SPC_ST=abc")
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
     def test_ctrl_a_is_scoped_to_the_grid_not_the_window(self) -> None:
         registry_path = Path(__file__).parent / "_ctrla_devices.json"
         registry = Registry()

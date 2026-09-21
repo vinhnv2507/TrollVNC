@@ -843,8 +843,6 @@ class ControlChannel:
                            persist: bool = True) -> dict:
         """Lấy cookie HTTP thật; ``persist=False`` giữ kết quả chỉ trong RAM."""
 
-        from .cookies import dump_from_folder, export_dump, parse_cookies_reply
-
         work = Path(dest) if persist else Path(tempfile.mkdtemp(prefix="controlios-cookies-"))
         work.mkdir(parents=True, exist_ok=True)
         try:
@@ -856,6 +854,8 @@ class ControlChannel:
 
     async def _dump_cookies_to(self, dest: Path, bundle_id: str,
                                export: bool = True) -> dict:
+        from .cookies import dump_from_folder, export_dump, parse_cookies_reply
+
         await self.terminate(bundle_id)
         text = await self.command(f"cookies {bundle_id}", read_timeout=180)
         head = text.strip()
