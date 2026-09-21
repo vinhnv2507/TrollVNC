@@ -422,6 +422,7 @@ class Bridge(QObject):
     color_read = Signal(str, float, float, str, str)  # key, rx, ry, "RRGGBB", lỗi (đều rỗng nếu trượt)
     clipboard_pulled = Signal(str, str, str)     # key, nội dung clipboard iOS, lỗi
     bulk_done = Signal(str, int, object)     # mô tả, số máy thành công, danh sách lỗi
+    cookie_dump = Signal(str, str, object)
     ssh_result = Signal(str, int, str)       # key, mã trả về, kết quả
     ssh_done = Signal(int, object)
     monitor_event = Signal(str, str)
@@ -2534,6 +2535,7 @@ class MainWindow(QMainWindow):
         self.bridge.script_done.connect(self._on_script_done)
         self.bridge.apps_loaded.connect(self._apply_apps)
         self.bridge.bulk_done.connect(self._on_bulk_done)
+        self.bridge.cookie_dump.connect(self._show_cookie_dump)
         self.bridge.ssh_result.connect(self._on_ssh_result)
         self.bridge.ssh_done.connect(self._on_ssh_done)
         self.grid.tiers_changed.connect(self.pool.set_tiers)
@@ -4342,7 +4344,7 @@ class MainWindow(QMainWindow):
         self.pool.dump_cookies_to_pc(
             targets, bundle_id,
             on_event=lambda k, m: self.bridge.message.emit(f"[{k}] {m}"),
-            on_cookie=lambda k, dump: self._show_cookie_dump(k, bundle_id, dump),
+            on_cookie=lambda k, dump: self.bridge.cookie_dump.emit(k, bundle_id, dump),
             on_done=lambda d, ok, fails: self.bridge.bulk_done.emit(d, ok, fails),
         )
 
