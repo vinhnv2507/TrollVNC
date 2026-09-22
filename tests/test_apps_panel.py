@@ -187,6 +187,18 @@ class AppsPanelTest(unittest.TestCase):
         self.panel._copy_cookie(bundle, "10.0.0.1:5901")
         self.assertEqual(QApplication.clipboard().text(), "SPC_ST=token-1")
 
+    def test_copy_cookie_only_uses_the_selected_machine(self) -> None:
+        bundle = SAMPLE[0].bundle_id
+        self.panel.set_targets(1, ["10.0.0.1:5901"])
+        self.panel.remember_cookie("10.0.0.1:5901", bundle, "SPC_ST=a")
+        self.panel.remember_cookie("10.0.0.2:5901", bundle, "SPC_ST=b")
+        self.assertEqual(
+            self.panel.cookies_for_bundle(bundle),
+            [("10.0.0.1:5901", "SPC_ST=a")],
+        )
+        self.panel._copy_cookie(bundle, "10.0.0.1:5901")
+        self.assertEqual(QApplication.clipboard().text(), "SPC_ST=a")
+
     def test_copy_cookie_without_spc_st_keeps_clipboard(self) -> None:
         bundle = SAMPLE[0].bundle_id
         self.panel.set_targets(1, ["10.0.0.1:5901"])

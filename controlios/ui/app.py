@@ -1245,18 +1245,20 @@ class JsAutoClickDialog(QDialog):
 
     # ------------------------------------------------- lấy màu (get color)
     def _begin_pick(self, kind: str) -> None:
-        if not self.window.detail.key:
-            self.status.setText("Hãy mở 1 máy ra khung điều khiển lớn trước khi lấy màu.")
+        key, _view = self.window._active_view()
+        if not key:
+            self.status.setText(
+                "Hãy chọn 1 máy trên màn hình lớn (hoặc cửa sổ 1–5 máy) trước khi lấy màu.")
             return
         self._pick_kind = kind
-        self.status.setText("👉 Bấm 1 điểm trên MÀN HÌNH LỚN để lấy màu tại đó…")
+        self.status.setText("👉 Bấm 1 điểm trên MÀN HÌNH LỚN đang chọn để lấy màu tại đó…")
         self.window.begin_color_pick(self._finish_pick)
 
     def _finish_pick(self, rx: float, ry: float, hexcolor: Optional[str]) -> None:
         # Màu ở PC (hexcolor) chỉ gần đúng vì khung bị thu nhỏ/nén. Hỏi THẲNG máy
         # để lấy pixel gốc — đúng cái auto-click (getColor/matchColor) dùng.
         self._pick_pc_hex = hexcolor
-        key = self.window.detail.key
+        key, _view = self.window._active_view()
         if key:
             self.status.setText("Đang hỏi màu thật từ máy (tối đa 3s)…")
             self.window.pool.read_color(
@@ -2189,6 +2191,14 @@ class DeviceScreenPane(QWidget):
         self.title.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         layout.addWidget(self.title)
 
+        self.note_button = QPushButton(self)
+        self.note_button.setFlat(True)
+        self.note_button.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        self.note_button.setStyleSheet("text-align: center; padding: 2px 4px;")
+        self.note_button.clicked.connect(self._edit_note)
+        layout.addWidget(self.note_button)
+        self.refresh_note()
+
         self.view = DetailView(self)
         self.view.set_device(key)
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -2284,6 +2294,27 @@ class DeviceScreenPane(QWidget):
 
     def _activate(self) -> None:
         self.activated.emit(self.key)
+
+    def refresh_note(self) -> None:
+        device = next((item for item in self.owner.registry.devices
+                       if item.key == self.key), None)
+        note = (getattr(device, "note", "") or "").strip() if device else ""
+        if note:
+            one_line = " ".join(note.split())
+            self.note_button.setText(one_line)
+            self.note_button.setToolTip(note)
+            self.note_button.setStyleSheet(
+                "text-align: center; padding: 2px 4px; color: #f0b429;")
+        else:
+            self.note_button.setText("✎ Ghi chú")
+            self.note_button.setToolTip("Bấm để thêm ghi chú cho máy này")
+            self.note_button.setStyleSheet(
+                "text-align: center; padding: 2px 4px; color: #9aa4b2;")
+
+    def _edit_note(self) -> None:
+        self._activate()
+        self.owner._open_device_note([self.key])
+        self.refresh_note()
 
     def set_active(self, active: bool) -> None:
         self._active = bool(active)
@@ -2428,10 +2459,21 @@ class MultiDetailWindow(QDialog):
         self.apps_panel.setMaximumWidth(360)
         self.apps_panel.load_cookie_headers(owner._cookie_headers)
 
+        side = QWidget(self)
+        side_layout = QVBoxLayout(side)
+        side_layout.setContentsMargins(0, 6, 6, 6)
+        side_layout.setSpacing(6)
+        self.js_button = QPushButton("Auto-click JS")
+        self.js_button.setToolTip(
+            "Mở kịch bản Auto-click JS cho máy đang chọn trên cửa sổ này")
+        self.js_button.clicked.connect(self._open_js_autoclick)
+        side_layout.addWidget(self.js_button)
+        side_layout.addWidget(self.apps_panel, 1)
+
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.addWidget(self._screens, 1)
-        root.addWidget(self.apps_panel, 0)
+        root.addWidget(side, 0)
 
         owner.apps_panel = self.apps_panel
         if self.keys:
@@ -2475,6 +2517,7 @@ class MultiDetailWindow(QDialog):
         self.active_key = key
         for item_key, pane in self.panes.items():
             pane.set_active(item_key == key)
+            pane.refresh_note()
         if list(self.owner.grid.selection) != [key]:
             self.owner.grid._apply_selection([key])
         self.apps_panel.set_targets(1, [key])
@@ -2500,8 +2543,19 @@ class MultiDetailWindow(QDialog):
         view.copy_requested.connect(lambda k=key: self._clipboard(k, "c"))
         view.cut_requested.connect(lambda k=key: self._clipboard(k, "x"))
 
+    def _open_js_autoclick(self) -> None:
+        self.owner._open_js_autoclick()
+
     def _on_view_pressed(self, key: str, x: int, y: int, button: int) -> None:
         self._select_key(key)
+        cb = getattr(self.owner, "_pick_color_cb", None)
+        if cb is not None:
+            self.owner._end_color_pick()
+            view = self.views.get(key)
+            fb_w, fb_h = view.fb_size if view is not None else (0, 0)
+            if view is not None and fb_w and fb_h:
+                cb(x / fb_w, y / fb_h, view.color_at_fb(x, y))
+            return
         self.pool.mouse_down(key, x, y, button)
 
     def _reload_apps(self) -> None:
@@ -2557,6 +2611,13 @@ class MultiDetailWindow(QDialog):
         if self._restored:
             return
         self._restored = True
+        dialog = getattr(self.owner, "js_autoclick_dialog", None)
+        if dialog is not None and dialog.parent() is self:
+            flags = dialog.windowFlags()
+            dialog.setParent(self.owner)
+            dialog.setWindowFlags(flags | Qt.Window)
+            if dialog.isVisible():
+                dialog.show()
         self.owner.apps_panel = self._previous_apps_panel
         self.owner._apps_for_key = self._previous_apps_key
         if hasattr(self.owner.apps_panel, "load_cookie_headers"):
@@ -3615,6 +3676,11 @@ class MainWindow(QMainWindow):
             tile.update()
         if self.detail.key == device.key:
             self._update_detail_title(device.key)
+        md = getattr(self, "multi_detail_window", None)
+        if md is not None:
+            pane = md.panes.get(device.key)
+            if pane is not None:
+                pane.refresh_note()
 
     def _copy_device_ips(self, targets: List[str]) -> None:
         hosts = []
@@ -4729,11 +4795,29 @@ class MainWindow(QMainWindow):
         self.screen_monitor_dialog.show()
         self.screen_monitor_dialog.raise_()
 
+    def _active_view(self):
+        """View đang thao tác: cửa sổ 1–5 máy nếu mở, không thì khung lớn chính."""
+
+        md = getattr(self, "multi_detail_window", None)
+        if md is not None and md.active_key and md.active_key in md.views:
+            return md.active_key, md.views[md.active_key]
+        if self.detail.key:
+            return self.detail.key, self.detail
+        return None, None
+
     def _open_js_autoclick(self) -> None:
-        if getattr(self, "js_autoclick_dialog", None) is None:
-            self.js_autoclick_dialog = JsAutoClickDialog(self)
-        self.js_autoclick_dialog.show()
-        self.js_autoclick_dialog.raise_()
+        parent = self.multi_detail_window if self.multi_detail_window is not None else self
+        dialog = getattr(self, "js_autoclick_dialog", None)
+        if dialog is None:
+            dialog = JsAutoClickDialog(self)
+            self.js_autoclick_dialog = dialog
+        if dialog.parent() is not parent:
+            flags = dialog.windowFlags()
+            dialog.setParent(parent)
+            dialog.setWindowFlags(flags | Qt.Window)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def start_script(self, steps, targets: List[str]) -> None:
         self.pool.run_script(
@@ -4775,11 +4859,22 @@ class MainWindow(QMainWindow):
     def begin_color_pick(self, callback) -> None:
         """Bật chế độ lấy màu: cú BẤM kế trên khung điều khiển lớn sẽ gọi
         callback(rx, ry, "RRGGBB") thay vì chạm — để chèn lệnh vào kịch bản."""
+        self._end_color_pick()
         self._pick_color_cb = callback
-        self.detail.setCursor(Qt.CrossCursor)
+        _key, view = self._active_view()
+        self._pick_view = view
+        if view is not None:
+            view.setCursor(Qt.CrossCursor)
 
     def _end_color_pick(self) -> None:
         self._pick_color_cb = None
+        view = getattr(self, "_pick_view", None)
+        if view is not None:
+            try:
+                view.unsetCursor()
+            except RuntimeError:
+                pass
+        self._pick_view = None
         self.detail.unsetCursor()
 
     def _on_pointer_pressed(self, x: int, y: int, button: int) -> None:

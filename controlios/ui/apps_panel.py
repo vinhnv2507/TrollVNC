@@ -236,15 +236,16 @@ class AppsPanel(QWidget):
         return self._cookie_headers.get((device_key, bundle_id), "")
 
     def cookies_for_bundle(self, bundle_id: str) -> list[tuple[str, str]]:
+        """Cookies of the currently selected machine(s) only.
+
+        Never list other devices that happen to have a stored cookie.
+        """
+
         found = []
         seen = set()
         for key in list(self._target_keys):
             header = self._cookie_headers.get((key, bundle_id), "")
             if header and key not in seen:
-                found.append((key, header))
-                seen.add(key)
-        for (key, bundle), header in self._cookie_headers.items():
-            if bundle == bundle_id and header and key not in seen:
                 found.append((key, header))
                 seen.add(key)
         return found
@@ -362,24 +363,18 @@ class AppsPanel(QWidget):
         cookies_action.triggered.connect(lambda: self.cookies_requested.emit(bundle))
         menu.addAction(cookies_action)
 
-        stored = self.cookies_for_bundle(bundle)
-        if len(stored) == 1:
-            copy_cookie = QAction("Copy cookie", menu)
+        copy_cookie = QAction("Copy cookie", menu)
+        selected_key = self._target_keys[0] if self._target_keys else ""
+        selected_header = self.cookie_header(selected_key, bundle) if selected_key else ""
+        if selected_key and selected_header:
             copy_cookie.triggered.connect(
-                lambda _checked=False, k=stored[0][0]: self._copy_cookie(bundle, k))
-            menu.addAction(copy_cookie)
-        elif stored:
-            copy_menu = QMenu("Copy cookie", menu)
-            for key, _header in stored:
-                action = copy_menu.addAction(key)
-                action.triggered.connect(
-                    lambda _checked=False, k=key: self._copy_cookie(bundle, k))
-            menu.addMenu(copy_menu)
+                lambda _checked=False, k=selected_key: self._copy_cookie(bundle, k))
+            copy_cookie.setToolTip(
+                f"Copy SPC_ST của máy đang chọn ({selected_key}).")
         else:
-            copy_cookie = QAction("Copy cookie", menu)
             copy_cookie.setEnabled(False)
             copy_cookie.setToolTip("Chưa lấy cookie cho app này trên máy đang chọn.")
-            menu.addAction(copy_cookie)
+        menu.addAction(copy_cookie)
 
         menu.addSeparator()
         copy_action = QAction("Chép bundle id", menu)

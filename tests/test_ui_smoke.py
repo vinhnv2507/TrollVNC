@@ -303,6 +303,31 @@ class WindowTest(unittest.TestCase):
             self.assertEqual(md.apps_panel._target_keys, [keys[1]])
             self.assertTrue(md.panes[keys[1]]._active)
             self.assertFalse(md.panes[keys[0]]._active)
+            self.assertTrue(hasattr(md, "js_button"))
+            md.js_button.click()
+            self.assertIsNotNone(window.js_autoclick_dialog)
+            self.assertTrue(window.js_autoclick_dialog.isVisible())
+            window.js_autoclick_dialog.close()
+            md.close()
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+
+    def test_multi_detail_window_shows_per_device_notes(self) -> None:
+        registry_path = Path(__file__).parent / "_multi_detail_notes.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1", "10.0.0.2"])
+        registry.devices[0].note = "nick shopee A"
+        registry.devices[1].note = "nick shopee B"
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            keys = [device.key for device in window.registry.devices]
+            window._open_multi_detail(keys)
+            md = window.multi_detail_window
+            self.assertIn("nick shopee A", md.panes[keys[0]].note_button.text())
+            self.assertIn("nick shopee B", md.panes[keys[1]].note_button.text())
             md.close()
         finally:
             window.close()
