@@ -278,19 +278,31 @@ class WindowTest(unittest.TestCase):
             window._open_multi_detail(keys)
             md = window.multi_detail_window
             self.assertIsNotNone(md)
-            md.show()
+            md.showMaximized()
+            md.resize(1600, 900)
             app.processEvents()
             md._fit_panes()
+            app.processEvents()
             self.assertEqual(list(md.panes), keys)
             for pane in md.panes.values():
                 self.assertIsInstance(pane, DeviceScreenPane)
-                self.assertGreaterEqual(pane.minimumHeight(), 760)
                 self.assertIn("home", pane.buttons)
                 self.assertIn("switcher", pane.buttons)
+                self.assertLess(pane.height(), md.height())
+            xs = [pane.x() for pane in md.panes.values()]
             ys = [pane.y() for pane in md.panes.values()]
-            self.assertEqual(ys, sorted(ys), "screens must stack vertically")
+            self.assertEqual(xs, sorted(xs), "screens must sit side by side")
+            self.assertLess(max(ys) - min(ys), 40, "screens must share one row")
             self.assertIs(window.apps_panel, md.apps_panel)
             self.assertFalse(hasattr(md.apps_panel, "cookies_button"))
+            self.assertEqual(md.active_key, keys[0])
+            self.assertEqual(list(window.grid.selection), [keys[0]])
+            md._select_key(keys[1])
+            self.assertEqual(md.active_key, keys[1])
+            self.assertEqual(list(window.grid.selection), [keys[1]])
+            self.assertEqual(md.apps_panel._target_keys, [keys[1]])
+            self.assertTrue(md.panes[keys[1]]._active)
+            self.assertFalse(md.panes[keys[0]]._active)
             md.close()
         finally:
             window.close()
@@ -320,6 +332,32 @@ class WindowTest(unittest.TestCase):
                     window.apps_panel._copy_cookie(
                         "com.beeasy.shopee.vn", "10.0.0.1:5901")
                     self.assertEqual(QApplication.clipboard().text(), "SPC_ST=abc")
+                    window._remember_cookie(
+                        "10.0.0.1:5901", "com.beeasy.shopee.vn",
+                        "SPC_U=1; SPC_ST=abc; csrftoken=x")
+                    window.apps_panel._copy_cookie(
+                        "com.beeasy.shopee.vn", "10.0.0.1:5901")
+                    self.assertEqual(QApplication.clipboard().text(), "SPC_ST=abc")
+        finally:
+            window.close()
+            registry_path.unlink(missing_ok=True)
+
+    def test_cookie_dialog_copy_uses_spc_st_only(self) -> None:
+        from controlios.ui.app import CookieDialog
+
+        registry_path = Path(__file__).parent / "_cookie_dialog_devices.json"
+        registry = Registry()
+        registry.merge_hosts(["10.0.0.1"])
+        registry.save(registry_path)
+        window = MainWindow(registry_path)
+        try:
+            dialog = CookieDialog(
+                window, "10.0.0.1:5901", "com.beeasy.shopee.vn",
+                {"header": "SPC_U=1; SPC_ST=abc; csrftoken=x"},
+            )
+            dialog._copy_spc_st()
+            self.assertEqual(QApplication.clipboard().text(), "SPC_ST=abc")
+            dialog.close()
         finally:
             window.close()
             registry_path.unlink(missing_ok=True)

@@ -178,6 +178,25 @@ class AppsPanelTest(unittest.TestCase):
         stored = self.panel.cookies_for_bundle(bundle)
         self.assertEqual(stored, [("10.0.0.1:5901", "SPC_ST=token-1")])
 
+    def test_copy_cookie_copies_only_spc_st_from_full_header(self) -> None:
+        bundle = SAMPLE[0].bundle_id
+        self.panel.set_targets(1, ["10.0.0.1:5901"])
+        self.panel.remember_cookie(
+            "10.0.0.1:5901", bundle,
+            "SPC_U=1; SPC_ST=token-1; csrftoken=x")
+        self.panel._copy_cookie(bundle, "10.0.0.1:5901")
+        self.assertEqual(QApplication.clipboard().text(), "SPC_ST=token-1")
+
+    def test_copy_cookie_without_spc_st_keeps_clipboard(self) -> None:
+        bundle = SAMPLE[0].bundle_id
+        self.panel.set_targets(1, ["10.0.0.1:5901"])
+        self.panel.remember_cookie(
+            "10.0.0.1:5901", bundle, "SPC_U=1; csrftoken=x")
+        QApplication.clipboard().setText("keep-me")
+        self.panel._copy_cookie(bundle, "10.0.0.1:5901")
+        self.assertEqual(QApplication.clipboard().text(), "keep-me")
+        self.assertIn("SPC_ST", self.panel.status.text())
+
     def test_icon_colour_survives_a_restart(self) -> None:
         """Màu phải cố định theo bundle id.
 

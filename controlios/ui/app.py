@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDockWidget,
     QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QPushButton, QScrollArea, QSizePolicy, QSpinBox, QSplitter, QStatusBar, QTableWidget,
+    QPushButton, QSizePolicy, QSpinBox, QSplitter, QStatusBar, QTableWidget,
     QTableWidgetItem, QToolBar, QToolButton, QVBoxLayout, QGridLayout,
     QWidget,
 )
@@ -34,7 +34,7 @@ from ..config import (
     save_earnapp_monitor_code, save_named_scripts,
 )
 from ..control_channel import ControlChannel, ControlError
-from ..cookies import header_from_dump
+from ..cookies import header_from_dump, spc_st_from_header
 from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import BRIGHTNESS_STEPS, Frame, State, Tier
@@ -761,12 +761,25 @@ class CookieDialog(QDialog):
         layout.addWidget(self.editor, 1)
         buttons = QHBoxLayout()
         copy_button = QPushButton("Copy cookie")
-        copy_button.clicked.connect(lambda: QApplication.clipboard().setText(self.editor.toPlainText()))
+        copy_button.setToolTip("Chỉ copy SPC_ST=..., không copy toàn bộ cookie.")
+        copy_button.clicked.connect(self._copy_spc_st)
         buttons.addWidget(copy_button)
         close_button = QPushButton("Đóng")
         close_button.clicked.connect(self.close)
         buttons.addWidget(close_button)
         layout.addLayout(buttons)
+        self.status = QLabel("")
+        self.status.setWordWrap(True)
+        self.status.setStyleSheet("color: #9aa4b2;")
+        layout.addWidget(self.status)
+
+    def _copy_spc_st(self) -> None:
+        text = spc_st_from_header(self.editor.toPlainText())
+        if not text:
+            self.status.setText("Cookie này không có SPC_ST.")
+            return
+        QApplication.clipboard().setText(text)
+        self.status.setText("Đã copy SPC_ST.")
 
 
 class SnapshotDialog(QDialog):
@@ -2152,13 +2165,17 @@ class ScriptDialog(QDialog):
 
 
 class DeviceScreenPane(QWidget):
-    """One tall phone view plus the same device buttons as the main large screen."""
+    """One portrait phone view plus the same device buttons as the main large screen."""
+
+    activated = Signal(str)
 
     def __init__(self, owner: "MainWindow", key: str, title: str, parent=None) -> None:
         super().__init__(parent)
         self.owner = owner
         self.key = key
         self.buttons: dict[str, QWidget] = {}
+        self._active = False
+        self.setAttribute(Qt.WA_StyledBackground, True)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -2187,6 +2204,8 @@ class DeviceScreenPane(QWidget):
         ]:
             btn = QPushButton(label)
             btn.setToolTip(tip)
+            btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            btn.setStyleSheet("padding: 2px 4px;")
             btn.clicked.connect(lambda _checked=False, g=gesture: self._run_gesture(g))
             gesture_row.addWidget(btn)
             self.buttons[gesture] = btn
@@ -2254,8 +2273,38 @@ class DeviceScreenPane(QWidget):
         extra_row.addStretch(1)
         self.buttons["assistivetouch"] = at_button
         layout.addLayout(extra_row)
+        for widget in self.buttons.values():
+            widget.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+            widget.setStyleSheet("padding: 2px 4px;")
+        self.set_active(False)
+
+    def mousePressEvent(self, event) -> None:
+        self._activate()
+        super().mousePressEvent(event)
+
+    def _activate(self) -> None:
+        self.activated.emit(self.key)
+
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        if self._active:
+            self.setStyleSheet(
+                "DeviceScreenPane { border: 3px solid #3d8bfd; border-radius: 6px; }"
+            )
+            self.title.setStyleSheet(
+                "font-weight: bold; padding: 4px; background: #3d8bfd; color: white;"
+            )
+        else:
+            self.setStyleSheet(
+                "DeviceScreenPane { border: 1px solid rgba(255,255,255,0.14); "
+                "border-radius: 6px; }"
+            )
+            self.title.setStyleSheet(
+                "font-weight: bold; padding: 4px; background: rgba(0,0,0,0.08);"
+            )
 
     def _run_gesture(self, gesture: str) -> None:
+        self._activate()
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
                   "lock": "Khoá máy"}
         try:
@@ -2268,6 +2317,7 @@ class DeviceScreenPane(QWidget):
         self.owner.start_script(steps, [self.key])
 
     def _open_control_center(self) -> None:
+        self._activate()
         self.owner.pool.control_center(
             [self.key],
             on_event=lambda k, m: self.owner.bridge.message.emit(f"[{k}] {m}"),
@@ -2275,6 +2325,7 @@ class DeviceScreenPane(QWidget):
         )
 
     def _free_ram(self) -> None:
+        self._activate()
         answer = QMessageBox.question(
             self, "Giải phóng RAM",
             f"Đóng hết app đang chạy trên <b>{self.key}</b> để giải phóng RAM?<br><br>"
@@ -2289,6 +2340,7 @@ class DeviceScreenPane(QWidget):
             [self.key], on_event=dialog.on_event, on_done=dialog.on_done)
 
     def _set_rotation_lock(self, state: str) -> None:
+        self._activate()
         self.owner.pool.rotation_lock(
             [self.key], state,
             on_event=lambda k, m: self.owner.bridge.message.emit(f"[{k}] {m}"),
@@ -2296,6 +2348,7 @@ class DeviceScreenPane(QWidget):
         )
 
     def _set_touch_lock(self, state: str) -> None:
+        self._activate()
         self.owner.pool.touch_lock(
             [self.key], state,
             on_event=lambda k, m: self.owner.bridge.message.emit(f"[{k}] {m}"),
@@ -2303,6 +2356,7 @@ class DeviceScreenPane(QWidget):
         )
 
     def _set_assistive_touch(self, state: str) -> None:
+        self._activate()
         self.owner.pool.assistive_touch(
             [self.key], state,
             on_event=lambda k, m: self.owner.bridge.message.emit(f"[{k}] {m}"),
@@ -2311,7 +2365,7 @@ class DeviceScreenPane(QWidget):
 
 
 class MultiDetailWindow(QDialog):
-    """Up to five full-size portrait screens stacked vertically, apps panel beside."""
+    """Up to five portrait screens side by side, maximized, apps panel beside."""
 
     closed = Signal()
 
@@ -2322,24 +2376,26 @@ class MultiDetailWindow(QDialog):
         self.keys = list(dict.fromkeys(keys))[:5]
         self.panes: dict[str, DeviceScreenPane] = {}
         self.views: dict[str, DetailView] = {}
+        self.active_key = ""
         self._restored = False
         self._previous_selection = list(owner.grid.selection)
         self._previous_apps_panel = owner.apps_panel
         self._previous_apps_key = owner._apps_for_key
         self.setWindowTitle(f"Control IOS — {len(self.keys)} màn hình lớn")
         self.setAttribute(Qt.WA_DeleteOnClose, True)
-        self.resize(980, 980)
-        self.setMinimumSize(820, 760)
+        self.setWindowFlags(
+            Qt.Window
+            | Qt.WindowTitleHint
+            | Qt.WindowSystemMenuHint
+            | Qt.WindowMinMaxButtonsHint
+            | Qt.WindowCloseButtonHint
+        )
+        self.setMinimumSize(960, 700)
 
-        self._scroll = QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self._scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self._content = QWidget(self._scroll)
-        content_layout = QVBoxLayout(self._content)
-        content_layout.setContentsMargins(8, 8, 8, 8)
-        content_layout.setSpacing(12)
-        content_layout.setAlignment(Qt.AlignHCenter | Qt.AlignTop)
+        self._screens = QWidget(self)
+        screens_layout = QHBoxLayout(self._screens)
+        screens_layout.setContentsMargins(6, 6, 6, 6)
+        screens_layout.setSpacing(8)
 
         for key in self.keys:
             device = next((item for item in owner.registry.devices if item.key == key), None)
@@ -2350,14 +2406,13 @@ class MultiDetailWindow(QDialog):
             version = (getattr(device, "ios_version", "") or "").strip().lstrip("vV") if device else ""
             if version:
                 title += f"  · v{version}"
-            pane = DeviceScreenPane(owner, key, title, self._content)
-            content_layout.addWidget(pane)
+            pane = DeviceScreenPane(owner, key, title, self._screens)
+            pane.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+            pane.activated.connect(self._select_key)
+            screens_layout.addWidget(pane, 1)
             self.panes[key] = pane
             self.views[key] = pane.view
             self._connect_view(key, pane.view)
-
-        content_layout.addStretch(1)
-        self._scroll.setWidget(self._content)
 
         self.apps_panel = AppsPanel(self)
         self.apps_panel.refresh_requested.connect(self._reload_apps)
@@ -2375,13 +2430,14 @@ class MultiDetailWindow(QDialog):
 
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.addWidget(self._scroll, 1)
+        root.addWidget(self._screens, 1)
         root.addWidget(self.apps_panel, 0)
 
         owner.apps_panel = self.apps_panel
-        owner.grid._apply_selection(self.keys)
-        self.apps_panel.set_targets(len(self.keys), self.keys)
-        self._reload_apps()
+        if self.keys:
+            self._select_key(self.keys[0])
+        else:
+            self.apps_panel.set_targets(0, [])
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
         self._fit_timer.timeout.connect(self._fit_panes)
@@ -2396,21 +2452,38 @@ class MultiDetailWindow(QDialog):
         self._fit_panes()
 
     def _fit_panes(self) -> None:
-        if self._restored or not self.isVisible():
+        """Keep every selected phone visible in the maximized window."""
+
+        if self._restored or not self.isVisible() or not self.panes:
             return
-        viewport_h = max(1, self._scroll.viewport().height())
-        height = max(760, viewport_h - 8)
-        width = max(390, min(520, int(height * 9 / 19.5) + 48))
+        count = len(self.panes)
+        avail_w = max(200, self._screens.width())
+        avail_h = max(240, self._screens.height())
+        pane_w = max(160, (avail_w - 8 * (count + 1)) // count)
+        pane_h = max(240, avail_h - 12)
         for pane in self.panes.values():
-            pane.setMinimumHeight(height)
-            pane.setMaximumHeight(height)
-            pane.setFixedWidth(width)
-        self._content.setMinimumWidth(width + 16)
-        self._content.setMinimumHeight(height * max(1, len(self.panes)) + 24)
+            pane.setMinimumWidth(160)
+            pane.setMaximumWidth(16777215)
+            pane.setMinimumHeight(200)
+            pane.setMaximumHeight(16777215)
+            pane.resize(pane_w, pane_h)
+
+    def _select_key(self, key: str) -> None:
+        if key not in self.panes:
+            return
+        changed = key != self.active_key
+        self.active_key = key
+        for item_key, pane in self.panes.items():
+            pane.set_active(item_key == key)
+        if list(self.owner.grid.selection) != [key]:
+            self.owner.grid._apply_selection([key])
+        self.apps_panel.set_targets(1, [key])
+        if changed or self.owner._apps_for_key != key:
+            self._reload_apps()
 
     def _connect_view(self, key: str, view: DetailView) -> None:
         view.pointer_pressed.connect(
-            lambda x, y, button, k=key: self.pool.mouse_down(k, x, y, button))
+            lambda x, y, button, k=key: self._on_view_pressed(k, x, y, button))
         view.pointer_moved.connect(
             lambda x, y, k=key, v=view: self.pool.mouse_move(k, x, y)
             if v._dragging else None)
@@ -2427,8 +2500,12 @@ class MultiDetailWindow(QDialog):
         view.copy_requested.connect(lambda k=key: self._clipboard(k, "c"))
         view.cut_requested.connect(lambda k=key: self._clipboard(k, "x"))
 
+    def _on_view_pressed(self, key: str, x: int, y: int, button: int) -> None:
+        self._select_key(key)
+        self.pool.mouse_down(key, x, y, button)
+
     def _reload_apps(self) -> None:
-        key = self.keys[0] if self.keys else ""
+        key = self.active_key or (self.keys[0] if self.keys else "")
         if not key:
             self.apps_panel.set_error("Chưa chọn máy nào.")
             return
@@ -2437,6 +2514,7 @@ class MultiDetailWindow(QDialog):
                 "Chưa đặt control_token trong config/devices.json."
             )
             return
+        self.owner._apps_for_key = key
         self.apps_panel.set_loading()
         self.pool.list_apps(
             key,
@@ -3285,7 +3363,7 @@ class MainWindow(QMainWindow):
         self.grid.set_extra_live_keys(keys)
         for key in keys:
             self._ensure_unlocked(key)
-        self.multi_detail_window.show()
+        self.multi_detail_window.showMaximized()
         self.multi_detail_window.raise_()
         self.multi_detail_window.activateWindow()
 

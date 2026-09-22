@@ -750,6 +750,19 @@ def cookie_header(cookies: Iterable[Cookie]) -> str:
     return "; ".join(f"{c.name}={c.value}" for c in cookies if c.name)
 
 
+def spc_st_from_header(header: str) -> str:
+    """Return only the SPC_ST=... pair from a Cookie header.
+
+    Copy-cookie in the PC tool must never put the full jar on the clipboard.
+    """
+
+    for part in str(header or "").split(";"):
+        name, separator, value = part.strip().partition("=")
+        if separator and name.casefold() == "spc_st" and value.strip():
+            return f"SPC_ST={value.strip()}"
+    return ""
+
+
 def header_from_dump(dump: dict[str, Any] | None) -> str:
     """Cookie header string from a dump payload, without writing files."""
 

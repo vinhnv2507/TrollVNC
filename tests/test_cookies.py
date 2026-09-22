@@ -18,6 +18,7 @@ from controlios.cookies import (
     parse_binarycookies,
     parse_cookies_reply,
     reconstruct_shopee_cookies,
+    spc_st_from_header,
 )
 
 
@@ -63,6 +64,16 @@ class CookieCodecTest(unittest.TestCase):
 
 
 class CookieDumpTest(unittest.TestCase):
+    def test_spc_st_from_header_extracts_only_that_pair(self) -> None:
+        self.assertEqual(
+            spc_st_from_header("SPC_U=1; SPC_ST=abc+/=; csrftoken=x"),
+            "SPC_ST=abc+/=",
+        )
+        self.assertEqual(spc_st_from_header("spc_st=token"), "SPC_ST=token")
+        self.assertEqual(spc_st_from_header("SPC_ST=only"), "SPC_ST=only")
+        self.assertEqual(spc_st_from_header("SPC_U=1; csrftoken=x"), "")
+        self.assertEqual(spc_st_from_header(""), "")
+
     def test_header_from_dump_prefers_header_then_pairs(self) -> None:
         self.assertEqual(header_from_dump({"header": "SPC_ST=st"}), "SPC_ST=st")
         self.assertEqual(

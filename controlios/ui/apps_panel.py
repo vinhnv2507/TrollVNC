@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..control_channel import AppInfo
+from ..cookies import spc_st_from_header
 
 ICON_SIZE = 34
 
@@ -398,5 +399,10 @@ class AppsPanel(QWidget):
         if not header:
             self.status.setText(f"Chưa có cookie {bundle_id} trên {device_key}.")
             return
-        self._copy(header)
-        self.status.setText(f"Đã copy cookie {bundle_id} của {device_key}.")
+        text = spc_st_from_header(header)
+        if not text:
+            self.status.setText(
+                f"{device_key}: cookie {bundle_id} không có SPC_ST.")
+            return
+        self._copy(text)
+        self.status.setText(f"Đã copy SPC_ST của {bundle_id} trên {device_key}.")
