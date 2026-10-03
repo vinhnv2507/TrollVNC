@@ -169,6 +169,9 @@ class DeviceSpec:
     note: str = ""
     # Phiên bản IPA ControlIOS đang chạy (cache từ control socket).
     ios_version: str = ""
+    # Tên đọc từ iPhone; tên hiển thị tự đặt trên PC được giữ riêng.
+    device_name: str = ""
+    custom_name: bool = False
     # Chất lượng riêng của màn hình lớn. None = dùng mặc định toàn cục.
     live_fps: Optional[float] = None
     live_long_edge: Optional[int] = None

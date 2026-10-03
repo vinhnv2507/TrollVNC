@@ -39,12 +39,14 @@ class RegistryPersistenceTest(unittest.TestCase):
             path = Path(folder) / "devices.json"
             registry = Registry(devices=[DeviceSpec(
                 "172.30.2.51", name="May A", note="keo captcha",
-                ios_version="4.13")])
+                ios_version="4.13", device_name="iPhone A", custom_name=True)])
             registry.save(path)
             loaded = Registry.load(path).devices[0]
             self.assertEqual(loaded.note, "keo captcha")
             self.assertEqual(loaded.ios_version, "4.13")
             self.assertEqual(loaded.name, "May A")
+            self.assertEqual(loaded.device_name, "iPhone A")
+            self.assertTrue(loaded.custom_name)
 
     def test_device_quality_round_trips(self) -> None:
         with tempfile.TemporaryDirectory() as folder:

@@ -482,16 +482,37 @@ class DeviceNameWorker(QThread):
     found = Signal(str, str)
     version = Signal(str, str)
     failed = Signal(str, str)
+    refreshed = Signal(str)
 
     def __init__(self, devices: List[DeviceSpec], port: int, token: str, parent=None) -> None:
         super().__init__(parent)
         self.devices = devices
         self.port = port
         self.token = token
+        self._lookup_loop = None
+        self._lookup_task = None
+
+    def stop(self) -> None:
+        self.requestInterruption()
+        loop, task = self._lookup_loop, self._lookup_task
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass
 
     def run(self) -> None:
         async def lookup() -> None:
+            self._lookup_loop = asyncio.get_running_loop()
+            self._lookup_task = asyncio.current_task()
+            slots = asyncio.Semaphore(12)
+
             async def one(device: DeviceSpec) -> None:
+                async with slots:
+                    if not self.isInterruptionRequested():
+                        await read_metadata(device)
+
+            async def read_metadata(device: DeviceSpec) -> None:
                 channel = ControlChannel(
                     device.host,
                     device.control_port or self.port,
@@ -499,29 +520,34 @@ class DeviceNameWorker(QThread):
                     timeout=2.0,
                     loopback=device.is_usb,
                 )
-                need_name = (
-                    not device.name.strip()
-                    or device.name.strip() in {device.host, device.udid[:8]}
-                )
-                need_version = not (getattr(device, "ios_version", "") or "").strip()
-                if need_version:
-                    try:
-                        version = await channel.server_version()
-                    except (ControlError, ValueError):
-                        pass
-                    else:
-                        self.version.emit(device.key, version)
-                if need_name:
-                    try:
-                        name = await channel.device_name()
-                    except (ControlError, ValueError) as error:
-                        self.failed.emit(device.key, str(error))
-                        return
+                errors = []
+                # Read both fields on every launch, including populated caches.
+                # Bound the legacy diagnostics fallback as well as the sockets.
+                try:
+                    version = await asyncio.wait_for(channel.server_version(), 5.0)
+                except (ControlError, ValueError, TimeoutError) as error:
+                    errors.append(str(error) or "Hết thời gian đọc version")
+                else:
+                    self.version.emit(device.key, version)
+                try:
+                    name = await asyncio.wait_for(channel.device_name(), 3.0)
+                except (ControlError, ValueError, TimeoutError) as error:
+                    errors.append(str(error) or "Hết thời gian đọc tên")
+                else:
                     self.found.emit(device.key, name)
+                if errors:
+                    self.failed.emit(device.key, "; ".join(errors))
+                else:
+                    self.refreshed.emit(device.key)
 
             await asyncio.gather(*(one(device) for device in self.devices))
 
-        asyncio.run(lookup())
+        try:
+            asyncio.run(lookup())
+        except asyncio.CancelledError:
+            pass
+        finally:
+            self._lookup_loop = self._lookup_task = None
 
 
 class DeviceNoteDialog(QDialog):
@@ -2903,6 +2929,11 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(5000, self._start_auto_scan)
 
         self._device_name_worker: DeviceNameWorker | None = None
+        self._metadata_pending = {d.key for d in self.registry.devices if d.enabled}
+        self._metadata_retry_timer = QTimer(self)
+        self._metadata_retry_timer.setInterval(30000)
+        self._metadata_retry_timer.timeout.connect(lambda: self._refresh_device_names(force=False))
+        self._metadata_retry_timer.start()
         QTimer.singleShot(1500, self._refresh_device_names)
 
     # ---------------------------------------------------------------- toolbar
@@ -3615,16 +3646,14 @@ class MainWindow(QMainWindow):
             f"Quét nền tìm thấy và kết nối thêm {added} máy mới", 6000)
         self._refresh_device_names()
 
-    def _refresh_device_names(self) -> None:
+    def _refresh_device_names(self, force: bool = True) -> None:
+        if force:
+            self._metadata_pending.update(d.key for d in self.registry.devices if d.enabled)
         if self._device_name_worker and self._device_name_worker.isRunning():
             return
         devices = [
             d for d in self.registry.devices
-            if d.enabled and (
-                not d.name.strip()
-                or d.name.strip() in {d.host, d.udid[:8]}
-                or not (getattr(d, "ios_version", "") or "").strip()
-            )
+            if d.enabled and d.key in self._metadata_pending
         ]
         if not devices:
             return
@@ -3638,6 +3667,7 @@ class MainWindow(QMainWindow):
         worker.found.connect(self._on_device_name_found)
         worker.version.connect(self._on_device_version_found)
         worker.failed.connect(self._on_device_name_failed)
+        worker.refreshed.connect(self._on_metadata_refreshed)
         worker.finished.connect(lambda w=worker: self._device_name_worker_finished(w))
         worker.finished.connect(worker.deleteLater)
         worker.start()
@@ -3646,16 +3676,19 @@ class MainWindow(QMainWindow):
         if self._device_name_worker is worker:
             self._device_name_worker = None
 
+    def _on_metadata_refreshed(self, key: str) -> None:
+        self._metadata_pending.discard(key)
+
     def _on_device_name_found(self, key: str, name: str) -> None:
         device = next((d for d in self.registry.devices if d.key == key), None)
         if not device or not name.strip():
             return
-        current = device.name.strip()
-        if current and current not in {device.host, device.udid[:8]}:
+        value = name.strip()
+        if device.device_name == value and (device.custom_name or device.name == value):
             return
-        if current == name.strip():
-            return
-        device.name = name.strip()
+        device.device_name = value
+        if not device.custom_name:
+            device.name = value
         self.registry.save(self.registry_path)
         self._sync_tile_spec(device)
 
@@ -3716,6 +3749,9 @@ class MainWindow(QMainWindow):
         if not ok:
             return
         device.name = name.strip()
+        device.custom_name = bool(device.name)
+        if not device.custom_name:
+            device.name = device.device_name or device.host
         self.registry.save(self.registry_path)
         self._sync_tile_spec(device)
         self.statusBar().showMessage(
@@ -5114,6 +5150,8 @@ class MainWindow(QMainWindow):
 
     def _on_status(self, key: str, state: State, detail: str) -> None:
         self.grid.on_status(key, state, detail)
+        if state is State.ONLINE and hasattr(self, "_metadata_pending"):
+            self._metadata_pending.add(key)
         if state is State.ONLINE and key not in self._scale_initialized:
             device = next((d for d in self.registry.devices if d.key == key), None)
             scale = (device.device_scale if device and device.device_scale is not None
@@ -5145,6 +5183,10 @@ class MainWindow(QMainWindow):
         self._apps_reload_timer.stop()
         self._stats_timer.stop()
         self._auto_scan_timer.stop()
+        self._metadata_retry_timer.stop()
+        if self._device_name_worker and self._device_name_worker.isRunning():
+            self._device_name_worker.stop()
+            self._device_name_worker.wait(3000)
         if self._auto_scan_worker and self._auto_scan_worker.isRunning():
             self._auto_scan_worker.requestInterruption()
             self._auto_scan_worker.wait(3000)
