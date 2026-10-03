@@ -1,5 +1,12 @@
 # Changelog
 
+## [4.15] - 2026-10-03
+
+- Run service monitoring off the UI thread so a busy manager cannot freeze the app.
+- Bound all app/server loopback probes with a nonblocking connect deadline.
+- Show connection diagnostics promptly without scanning crash logs or querying
+  SpringBoard; bound the entire response read and prevent overlapping checks.
+
 ## [4.14] - 2026-09-18
 
 - Add `cookies <bundle>` to copy real HTTP cookies (binarycookies, HTTPStorages

@@ -83,6 +83,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Test loopback connection deadlines
+        run: |
+          clang -Wall -Wextra -Werror tests/socket_deadline.c -o /tmp/controlios-socket-test
+          /tmp/controlios-socket-test
+
       - name: Install dependencies
         run: |
           # Install xcbeautify for build output formatting

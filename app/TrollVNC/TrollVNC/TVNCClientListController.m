@@ -30,6 +30,7 @@
 
 #import "Control.h"
 #import "TVNCUtil.h"
+#import "../../../include-spi/TVNCSocket.h"
 
 #pragma mark - Networking
 
@@ -42,12 +43,16 @@ static inline BOOL TVNCIsEmptyItemId(NSString *_Nullable itemId) {
 
 static NSData *TVNCReadAll(int fd, double timeoutSec) {
     NSMutableData *md = [NSMutableData data];
-    struct timeval tv;
-    tv.tv_sec = (int)timeoutSec;
-    tv.tv_usec = (int)((timeoutSec - tv.tv_sec) * 1e6);
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    double deadline = TVNCMonotonicSeconds() + timeoutSec;
     uint8_t buf[2048];
     for (;;) {
+        double left = deadline - TVNCMonotonicSeconds();
+        if (left <= 0)
+            break;
+        struct timeval tv;
+        tv.tv_sec = (int)left;
+        tv.tv_usec = MAX(1, (int)((left - tv.tv_sec) * 1e6));
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
         ssize_t n = recv(fd, buf, sizeof(buf), 0);
         if (n < 0) {
             // EAGAIN/EWOULDBLOCK means timeout fired — no more data available
@@ -85,37 +90,15 @@ static int TVNCSendLine(int fd, NSString *line) {
 }
 
 static int TVNCConnect(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-        return -1;
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_len = sizeof(addr);
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(kTvDefaultCtlPort);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        close(fd);
-        return -1;
-    }
-    return fd;
+    return TVNCConnectLoopback(kTvDefaultCtlPort, 0.75);
 }
 
 static BOOL TVNCProbeLoopbackPort(int port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = TVNCConnectLoopback(port, 0.75);
     if (fd < 0)
         return NO;
-    struct timeval timeout = {2, 0};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_len = sizeof(addr);
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    BOOL ok = connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0;
     close(fd);
-    return ok;
+    return YES;
 }
 
 static NSString *TVNCLocalIPv4Address(void) {
@@ -1176,6 +1159,7 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
 @interface TVNCDiagnosticsController ()
 @property(nonatomic, copy) NSArray<NSDictionary *> *rows;
 @property(nonatomic, assign) BOOL healthy;
+@property(nonatomic, assign) BOOL checking;
 @end
 
 @implementation TVNCDiagnosticsController
@@ -1215,6 +1199,12 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
 }
 
 - (void)refreshDiagnostics {
+    if (self.checking)
+        return;
+    self.checking = YES;
+    self.rows = @[@{@"title": @"Đang kiểm tra kết nối…",
+                   @"detail": @"Mỗi cổng có thời hạn kiểm tra; bạn vẫn có thể đóng màn hình."}];
+    [self.tableView reloadData];
     for (UIBarButtonItem *item in self.navigationItem.rightBarButtonItems)
         item.enabled = NO;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
@@ -1232,7 +1222,8 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
         BOOL keeper = TVNCProbeLoopbackPort(46753);
         NSString *countReply = control ? TVNCLoopbackCommand(@"count") : nil;
         BOOL controlReplies = countReply.length > 0 && ![countReply hasPrefix:@"ERR"];
-        NSString *reply = controlReplies ? TVNCLoopbackCommand(@"diagnostics") : nil;
+        // The full diagnostics command scans crash logs and queries SpringBoard.
+        // Connection health must remain available while either of those is busy.
         BOOL healthy = enabled && manager && vnc && control && controlReplies;
 
         NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
@@ -1264,16 +1255,12 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
                                                                keeper ? @"✓" : @"○"],
                           @"detail": keeper ? @"keeperd đang chạy · cổng 46753"
                                              : @"Keeper chưa cài hoặc keeperd chưa chạy"}];
-        if (reply.length && ![reply hasPrefix:@"ERR"]) {
-            NSString *clean = [reply stringByTrimmingCharactersInSet:
-                                      [NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            [rows addObject:@{@"title": @"Báo cáo daemon", @"detail": clean}];
-        }
         if (!healthy) {
             [rows addObject:@{@"title": @"Cách khôi phục",
                               @"detail": @"Bấm Khởi động lại ở góc phải, chờ 3 giây rồi kéo xuống kiểm tra lại. Nếu vẫn đỏ, mở View Logs trong menu Công cụ."}];
         }
         dispatch_async(dispatch_get_main_queue(), ^{
+            self.checking = NO;
             self.rows = rows;
             self.healthy = healthy;
             [self.tableView reloadData];

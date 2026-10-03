@@ -25,6 +25,7 @@
 #import <sys/socket.h>
 
 #import "Control.h"
+#import "../../../include-spi/TVNCSocket.h"
 
 NSNotificationName const TVNCServiceStatusDidChangeNotification = @"TVNCServiceStatusDidChangeNotification";
 
@@ -37,6 +38,7 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
 @interface TVNCServiceCoordinator ()
 @property(nonatomic, strong) NSTimer *checkTimer;
 @property(nonatomic, strong) NSUserDefaults *userDefaults;
+@property(nonatomic, assign) BOOL checking;
 @end
 
 @implementation TVNCServiceCoordinator
@@ -112,7 +114,13 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
 #pragma mark - Private Methods
 
 - (void)checkTimerFired:(NSTimer *_Nullable)timer {
-    [self ensureServiceRunning];
+    if (self.checking)
+        return;
+    self.checking = YES;
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        [self ensureServiceRunning];
+        dispatch_async(dispatch_get_main_queue(), ^{ self.checking = NO; });
+    });
 }
 
 - (void)ensureServiceRunning {
@@ -121,31 +129,25 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
         [self checkPrebootDependencies];
         [self spawnService];
     }
-    if (_serviceRunning != running) {
-        _serviceRunning = running;
-        [[NSNotificationCenter defaultCenter] postNotificationName:TVNCServiceStatusDidChangeNotification object:self];
-    }
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if (self->_serviceRunning != running) {
+            self->_serviceRunning = running;
+            [[NSNotificationCenter defaultCenter] postNotificationName:TVNCServiceStatusDidChangeNotification object:self];
+        }
+    });
 }
 
 - (BOOL)_isServiceRunning {
 #if TARGET_IPHONE_SIMULATOR
     return YES;
 #else
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    int sockfd = TVNCConnectLoopback(kTvAlivePort, 0.75);
     if (sockfd < 0) {
         return NO;
     }
 
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(kTvAlivePort);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-
-    int result = connect(sockfd, (struct sockaddr *)&addr, sizeof(addr));
     close(sockfd);
-
-    return result == 0;
+    return YES;
 #endif
 }
 

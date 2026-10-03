@@ -18,6 +18,7 @@
 #import "AppDelegate.h"
 #import "TVNCHotspotManager.h"
 #import "TVNCServiceCoordinator.h"
+#import "../../../include-spi/TVNCSocket.h"
 #import <arpa/inet.h>
 #import <dlfcn.h>
 #import <netinet/in.h>
@@ -42,19 +43,11 @@ static dispatch_queue_t TVKeeperQueue(void) {
 }
 
 static BOOL TVControlIOSKeeperdRunning(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = TVNCConnectLoopback(kControlIOSKeeperPort, 0.75);
     if (fd < 0)
         return NO;
-    struct timeval timeout = {1, 0};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_port = htons((uint16_t)kControlIOSKeeperPort);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    BOOL running = connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0;
     close(fd);
-    return running;
+    return YES;
 }
 
 static void TVEnsureControlIOSKeeperRunning(void) {

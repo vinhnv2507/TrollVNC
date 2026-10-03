@@ -63,6 +63,7 @@
 #import "BulletinManager.h"
 #import "ClipboardManager.h"
 #import "Control.h"
+#import "TVNCSocket.h"
 #import "FBSOrientationObserver.h"
 #import "IOKitSPI.h"
 #import "Logging.h"
@@ -3727,7 +3728,7 @@ static void tvStartControlSocketIfNeeded(void) {
         exit(EXIT_FAILURE);
     }
 
-    if (listen(fd, 8) < 0) {
+    if (listen(fd, SOMAXCONN) < 0) {
         TVPrintError("Control socket: listen() failed: %s", strerror(errno));
         close(fd);
         exit(EXIT_FAILURE);
@@ -5274,20 +5275,11 @@ static NSString *const kTvKeeperBundleID = @"com.controlios.keeper";
 static CFAbsoluteTime gKeeperLastLaunchAttempt = 0;
 
 static BOOL tvKeeperdRunning(void) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = TVNCConnectLoopback(kTvKeeperdPort, 0.75);
     if (fd < 0)
         return NO;
-    struct timeval timeout = {1, 0};
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    struct sockaddr_in address;
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    address.sin_port = htons((uint16_t)kTvKeeperdPort);
-    address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    BOOL running = connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0;
     close(fd);
-    return running;
+    return YES;
 }
 
 static BOOL tvLaunchKeeperApp(void) {
