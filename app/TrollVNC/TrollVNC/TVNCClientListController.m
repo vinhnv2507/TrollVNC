@@ -1224,9 +1224,21 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
         BOOL keeper = TVNCProbeLoopbackPort(46753);
         NSString *countReply = control ? TVNCLoopbackCommand(@"count") : nil;
         BOOL controlReplies = countReply.length > 0 && ![countReply hasPrefix:@"ERR"];
+        NSString *touchReply = controlReplies ? TVNCLoopbackCommand(@"touchlock details") : nil;
+        NSMutableDictionary<NSString *, NSString *> *touch = [NSMutableDictionary dictionary];
+        if ([touchReply hasPrefix:@"OK\n"]) {
+            for (NSString *line in [touchReply componentsSeparatedByString:@"\n"]) {
+                NSRange equal = [line rangeOfString:@"="];
+                if (equal.location != NSNotFound)
+                    touch[[line substringToIndex:equal.location]] = [line substringFromIndex:equal.location + 1];
+            }
+        }
+        BOOL touchRequested = [touch[@"requested"] boolValue];
+        BOOL touchVerified = [touch[@"filter_verified"] boolValue];
         // The full diagnostics command scans crash logs and queries SpringBoard.
         // Connection health must remain available while either of those is busy.
-        BOOL healthy = enabled && manager && vnc && control && controlReplies;
+        BOOL healthy = enabled && manager && vnc && control && controlReplies &&
+            !(touchRequested && !touchVerified);
 
         NSMutableArray<NSDictionary *> *rows = [NSMutableArray array];
         [rows addObject:@{@"title": healthy ? @"✓ Dịch vụ hoạt động" : @"⚠ Có lỗi cần xử lý",
@@ -1257,6 +1269,14 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
         [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Control/truyền file",
                                                                controlReplies ? @"✓" : @"✗"],
                           @"detail": controlDetail}];
+        NSString *touchDetail = touch.count
+            ? [NSString stringWithFormat:@"%@ · %@\nĐã chặn: %@ · Nhận từ PC: %@",
+                touchRequested ? @"Đang bật" : @"Đang tắt",
+                touchVerified ? @"Bộ lọc phản hồi" : @"Bộ lọc KHÔNG phản hồi",
+                touch[@"blocked"] ?: @"0", touch[@"remote_seen"] ?: @"0"]
+            : @"Không đọc được trạng thái bộ lọc cảm ứng";
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Khóa cảm ứng",
+            touchRequested ? (touchVerified ? @"✓" : @"✗") : @"○"], @"detail": touchDetail}];
         [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Keeper",
                                                                keeper ? @"✓" : @"○"],
                           @"detail": keeper ? @"keeperd đang chạy · cổng 46753"

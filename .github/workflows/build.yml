@@ -89,6 +89,8 @@ jobs:
           /tmp/controlios-socket-test
           clang -Wall -Wextra -Werror -pthread tests/rfb_health.c -o /tmp/controlios-rfb-test
           /tmp/controlios-rfb-test
+          clang++ -std=c++17 -Wall -Wextra -Werror tests/touch_lock_policy.cpp -o /tmp/controlios-touch-test
+          /tmp/controlios-touch-test
 
       - name: Install dependencies
         run: |

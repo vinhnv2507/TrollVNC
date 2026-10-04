@@ -1,5 +1,17 @@
 # Changelog
 
+## [4.17] - 2026-10-04
+
+- Move touch locking to an explicitly activated HID monitor on a dedicated
+  queue, independent of the app/main runloop. Cache the lock notification state
+  and remove synchronous notification registration and per-touch file logging.
+- Block physical digitizer and Home events from all hardware sender IDs while
+  preserving tagged PC input, including nested event sources.
+- Verify filter callback delivery with a consumed vendor marker before accepting
+  `touchlock on`; report an error instead of claiming success if unavailable.
+- Add `touchlock details` with filter verification and physical/blocked/remote
+  counters for checking ghost touches on a real device.
+
 ## [4.16] - 2026-10-04
 
 - Probe the RFB security exchange and shared ServerInit before declaring VNC

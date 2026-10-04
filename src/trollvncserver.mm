@@ -64,6 +64,7 @@
 #import "ClipboardManager.h"
 #import "Control.h"
 #import "TVNCSocket.h"
+#import "TVNCTouchLockPolicy.h"
 #import "FBSOrientationObserver.h"
 #import "IOKitSPI.h"
 #import "Logging.h"
@@ -5063,26 +5064,46 @@ static NSData *tvCtlFrontmostApp(void) {
 
 static const char *kTvTouchLockNotification = "com.controlios.touchlock.changed";
 static NSString *const kTvControlIOSBundleID = @"com.controlios.app";
+static int gTvTouchLockStateToken = -1;
+static std::atomic<bool> gTvTouchLockEnabled{false};
+
+static void tvInitializeTouchLockState(void) {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        if (notify_register_check(kTvTouchLockNotification, &gTvTouchLockStateToken) != NOTIFY_STATUS_OK)
+            gTvTouchLockStateToken = -1;
+        uint64_t state = 0;
+        if (gTvTouchLockStateToken >= 0 &&
+            notify_get_state(gTvTouchLockStateToken, &state) == NOTIFY_STATUS_OK)
+            gTvTouchLockEnabled.store(state != 0, std::memory_order_release);
+    });
+}
 
 static BOOL tvSetTouchLockNotifyState(BOOL enabled) {
-    int token = 0;
-    if (notify_register_check(kTvTouchLockNotification, &token) != NOTIFY_STATUS_OK)
+    tvInitializeTouchLockState();
+    if (gTvTouchLockStateToken < 0)
         return NO;
-    int status = notify_set_state(token, enabled ? 1 : 0);
-    if (status == NOTIFY_STATUS_OK)
+    BOOL previous = gTvTouchLockEnabled.load(std::memory_order_acquire);
+    int status = notify_set_state(gTvTouchLockStateToken, enabled ? 1 : 0);
+    if (status == NOTIFY_STATUS_OK) {
+        // Enforce immediately; the UI overlay follows the notification later.
+        gTvTouchLockEnabled.store(enabled, std::memory_order_release);
         status = notify_post(kTvTouchLockNotification);
-    notify_cancel(token);
+        if (status != NOTIFY_STATUS_OK) {
+            notify_set_state(gTvTouchLockStateToken, previous ? 1 : 0);
+            gTvTouchLockEnabled.store(previous, std::memory_order_release);
+        }
+    }
     return status == NOTIFY_STATUS_OK;
 }
 
 static BOOL tvGetTouchLockNotifyState(void) {
-    int token = 0;
+    tvInitializeTouchLockState();
     uint64_t state = 0;
-    if (notify_register_check(kTvTouchLockNotification, &token) != NOTIFY_STATUS_OK)
-        return NO;
-    int status = notify_get_state(token, &state);
-    notify_cancel(token);
-    return status == NOTIFY_STATUS_OK && state != 0;
+    if (gTvTouchLockStateToken >= 0 &&
+        notify_get_state(gTvTouchLockStateToken, &state) == NOTIFY_STATUS_OK)
+        gTvTouchLockEnabled.store(state != 0, std::memory_order_release);
+    return gTvTouchLockEnabled.load(std::memory_order_acquire);
 }
 
 static NSData *tvCtlHomeAudit(BOOL clear) {
@@ -5098,47 +5119,101 @@ static NSData *tvCtlHomeAudit(BOOL clear) {
     }
 }
 
-typedef boolean_t (^TVIOHIDEventFilterBlock)(void *, void *, void *, IOHIDEventRef);
-
-static BOOL tvHIDEventContainsHome(IOHIDEventRef event) {
-    if (!event)
-        return NO;
-    if (IOHIDEventGetType(event) == kIOHIDEventTypeKeyboard &&
-        IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsagePage) == kHIDPage_Consumer &&
-        IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsage) == kHIDUsage_Csmr_Menu)
-        return YES;
-
-    CFArrayRef children = IOHIDEventGetChildren(event);
-    if (!children)
-        return NO;
-    for (CFIndex index = 0; index < CFArrayGetCount(children); ++index) {
-        if (tvHIDEventContainsHome((IOHIDEventRef)CFArrayGetValueAtIndex(children, index)))
-            return YES;
-    }
-    return NO;
-}
-
-static BOOL tvHIDEventContainsDigitizer(IOHIDEventRef event) {
-    if (!event)
-        return NO;
-    if (IOHIDEventGetType(event) == kIOHIDEventTypeDigitizer)
-        return YES;
-    CFArrayRef children = IOHIDEventGetChildren(event);
-    if (!children)
-        return NO;
-    for (CFIndex index = 0; index < CFArrayGetCount(children); ++index) {
-        if (tvHIDEventContainsDigitizer((IOHIDEventRef)CFArrayGetValueAtIndex(children, index)))
-            return YES;
-    }
-    return NO;
-}
-
 static IOHIDEventSystemClientRef gTvTouchLockHIDClient = NULL;
-static const uint64_t kTvBlockedPhysicalHomeSenderID = 0x1000001d4ULL;
-static const uint64_t kTvRemoteSenderLegacy = 0x8000000817319371ULL;
-static const uint64_t kTvRemoteSenderModern = 0x8000000817319372ULL;
+static IOHIDEventSystemClientRef gTvTouchLockProbeHIDClient = NULL;
+static dispatch_queue_t gTvTouchLockQueue = nil;
+static int gTvTouchLockChangeToken = -1;
+static std::atomic<bool> gTvTouchLockFilterVerified{false};
+static std::atomic<uint64_t> gTvTouchLockProbeReplies{0};
+static std::atomic<uint64_t> gTvTouchLockPhysicalSeen{0};
+static std::atomic<uint64_t> gTvTouchLockBlocked{0};
+static std::atomic<uint64_t> gTvTouchLockRemoteSeen{0};
+static std::atomic<uint64_t> gTvTouchLockLastPhysicalSender{0};
+static const uint64_t kTvTouchLockProbeSender = 0x8000000817319373ULL;
+static const char *gTvTouchLockFilterMode = "unavailable";
+
+struct TVTouchEventAdapter {
+    uint64_t (*getSender)(IOHIDEventRef);
+    uint64_t sender(IOHIDEventRef event) const { return getSender(event); }
+    bool digitizer(IOHIDEventRef event) const {
+        return IOHIDEventGetType(event) == kIOHIDEventTypeDigitizer;
+    }
+    bool home(IOHIDEventRef event) const {
+        return IOHIDEventGetType(event) == kIOHIDEventTypeKeyboard &&
+            IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsagePage) == kHIDPage_Consumer &&
+            IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsage) == kHIDUsage_Csmr_Menu;
+    }
+    unsigned childCount(IOHIDEventRef event) const {
+        CFArrayRef children = IOHIDEventGetChildren(event);
+        return children ? (unsigned)CFArrayGetCount(children) : 0;
+    }
+    IOHIDEventRef child(IOHIDEventRef event, unsigned index) const {
+        return (IOHIDEventRef)CFArrayGetValueAtIndex(IOHIDEventGetChildren(event), index);
+    }
+};
+
+static boolean_t tvTouchLockFilter(void *target, void *refcon, void *sender, IOHIDEventRef event) {
+    (void)target;
+    auto getSender = (uint64_t (*)(IOHIDEventRef))refcon;
+    if (!event) return false;
+    uint64_t senderID = getSender(event);
+    // A private vendor marker tests callback delivery without generating a tap
+    // or key. Always consume it, even while touch lock is off.
+    if (senderID == kTvTouchLockProbeSender &&
+        IOHIDEventGetType(event) == kIOHIDEventTypeVendorDefined) {
+        gTvTouchLockProbeReplies.fetch_add(1, std::memory_order_relaxed);
+        gTvTouchLockFilterVerified.store(true, std::memory_order_release);
+        return true;
+    }
+    unsigned sources = TVNCTouchLockSources(event, TVTouchEventAdapter{getSender});
+    BOOL enabled = gTvTouchLockEnabled.load(std::memory_order_acquire);
+    BOOL consumed = TVNCTouchLockBlocks(enabled, sources);
+    if (sources & (TVNCTouchSourcePhysical | TVNCTouchSourcePhysicalHome)) {
+        gTvTouchLockPhysicalSeen.fetch_add(1, std::memory_order_relaxed);
+        gTvTouchLockLastPhysicalSender.store(senderID, std::memory_order_relaxed);
+    }
+    if (sources & TVNCTouchSourceRemote)
+        gTvTouchLockRemoteSeen.fetch_add(1, std::memory_order_relaxed);
+    if (consumed) gTvTouchLockBlocked.fetch_add(1, std::memory_order_relaxed);
+    // No notify registration, file logging or synchronous main-queue work on
+    // the HID filter path: ghost touches can arrive hundreds of times/second.
+    static CFAbsoluteTime lastHomeAudit = 0;
+    CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+    if ((sources & TVNCTouchSourceHome) && now - lastHomeAudit >= 0.25) {
+        lastHomeAudit = now;
+        long long down = (long long)IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardDown);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            tvRecordHomeAudit(@"hid-home",
+                [NSString stringWithFormat:@"sender=%p senderID=0x%llx down=%lld physicalTarget=%d consumed=%d",
+                    sender, (unsigned long long)senderID, down,
+                    (sources & TVNCTouchSourcePhysicalHome) != 0, consumed]);
+        });
+    }
+    return consumed;
+}
+
+static BOOL tvVerifyTouchLockFilter(void) {
+    if (!gTvTouchLockHIDClient || !gTvTouchLockProbeHIDClient) return NO;
+    uint64_t before = gTvTouchLockProbeReplies.load(std::memory_order_relaxed);
+    uint8_t marker = 0;
+    IOHIDEventRef event = IOHIDEventCreateVendorDefinedEvent(kCFAllocatorDefault,
+        mach_absolute_time(), kHIDPage_VendorDefinedStart + 101, 0, 1, &marker, 1, 0);
+    if (!event) return NO;
+    IOHIDEventSetSenderID(event, kTvTouchLockProbeSender);
+    IOHIDEventSystemClientDispatchEvent(gTvTouchLockProbeHIDClient, event);
+    CFRelease(event);
+    // Called by a control worker, never by the filter queue/main runloop.
+    double deadline = TVNCMonotonicSeconds() + 0.75;
+    while (TVNCMonotonicSeconds() < deadline) {
+        if (gTvTouchLockProbeReplies.load(std::memory_order_relaxed) != before) return YES;
+        usleep(10000);
+    }
+    gTvTouchLockFilterVerified.store(false, std::memory_order_release);
+    return NO;
+}
 
 static void tvInstallTouchLockHIDFilter(void) {
+    tvInitializeTouchLockState();
     void *handle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit",
                           RTLD_LAZY | RTLD_LOCAL);
     if (!handle) {
@@ -5146,59 +5221,59 @@ static void tvInstallTouchLockHIDFilter(void) {
         return;
     }
 
-    auto createClient = (IOHIDEventSystemClientRef (*)(CFAllocatorRef))
-        dlsym(handle, "IOHIDEventSystemClientCreate");
-    auto registerFilter = (void (*)(IOHIDEventSystemClientRef, TVIOHIDEventFilterBlock,
-                                    void *, void *))
-        dlsym(handle, "IOHIDEventSystemClientRegisterEventFilterBlock");
-    auto scheduleClient = (void (*)(IOHIDEventSystemClientRef, CFRunLoopRef, CFStringRef))
-        dlsym(handle, "IOHIDEventSystemClientScheduleWithRunLoop");
+    auto createClient = (IOHIDEventSystemClientRef (*)(CFAllocatorRef, int, CFDictionaryRef))
+        dlsym(handle, "IOHIDEventSystemClientCreateWithType");
+    auto registerFilter = (void (*)(IOHIDEventSystemClientRef,
+        boolean_t (*)(void *, void *, void *, IOHIDEventRef), void *, void *))
+        dlsym(handle, "IOHIDEventSystemClientRegisterEventFilterCallback");
+    auto setQueue = (void (*)(IOHIDEventSystemClientRef, dispatch_queue_t))
+        dlsym(handle, "IOHIDEventSystemClientSetDispatchQueue");
+    auto activate = (void (*)(IOHIDEventSystemClientRef))
+        dlsym(handle, "IOHIDEventSystemClientActivate");
+    auto scheduleQueue = (void (*)(IOHIDEventSystemClientRef, dispatch_queue_t))
+        dlsym(handle, "IOHIDEventSystemClientScheduleWithDispatchQueue");
     auto getSenderID = (uint64_t (*)(IOHIDEventRef))
         dlsym(handle, "IOHIDEventGetSenderID");
-    if (!createClient || !registerFilter || !scheduleClient) {
+    auto setMatching = (void (*)(IOHIDEventSystemClientRef, CFDictionaryRef))
+        dlsym(handle, "IOHIDEventSystemClientSetMatching");
+    if (!createClient || !registerFilter || !getSenderID || !setMatching ||
+        ((!setQueue || !activate) && !scheduleQueue)) {
         TVLog(@"Touch lock HID filter: required API unavailable");
         return;
     }
 
-    gTvTouchLockHIDClient = createClient(kCFAllocatorDefault);
+    // Monitor=1 in Apple's HIDEventSystemClientType; explicitly request the
+    // event-receiving client rather than relying on Create's default type.
+    gTvTouchLockHIDClient = createClient(kCFAllocatorDefault, 1, NULL);
     if (!gTvTouchLockHIDClient) {
         TVLog(@"Touch lock HID filter: client creation failed");
         return;
     }
+    gTvTouchLockProbeHIDClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
 
-    registerFilter(gTvTouchLockHIDClient,
-                   ^boolean_t(void *target, void *refcon, void *sender, IOHIDEventRef event) {
-        (void)target;
-        (void)refcon;
-        BOOL containsHome = tvHIDEventContainsHome(event);
-        BOOL containsDigitizer = tvHIDEventContainsDigitizer(event);
-        uint64_t senderID = (containsHome || containsDigitizer) && getSenderID
-            ? getSenderID(event) : 0;
-        BOOL remoteEvent = senderID == kTvRemoteSenderLegacy ||
-            senderID == kTvRemoteSenderModern;
-        BOOL blockedPhysicalHome = containsHome &&
-            senderID == kTvBlockedPhysicalHomeSenderID;
-        BOOL blockedPhysicalTouch = containsDigitizer && !remoteEvent;
-        BOOL consumed = (blockedPhysicalHome || blockedPhysicalTouch) &&
-            tvGetTouchLockNotifyState();
-        if (containsHome) {
-            tvRecordHomeAudit(@"hid-home",
-                              [NSString stringWithFormat:@"sender=%p senderID=0x%llx down=%lld physicalTarget=%d consumed=%d",
-                               sender, (unsigned long long)senderID,
-                               (long long)IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardDown),
-                               blockedPhysicalHome, consumed]);
-        }
-        if (containsDigitizer && tvGetTouchLockNotifyState() && !remoteEvent) {
-            TVLog(@"Touch lock: physical digitizer blocked senderID=0x%llx",
-                  (unsigned long long)senderID);
-        }
-        // Block only the noisy physical Home source while touch lock is on.
-        // Synthetic Home from the authenticated VNC client remains available.
-        return consumed;
-    }, NULL, NULL);
-    scheduleClient(gTvTouchLockHIDClient, CFRunLoopGetMain(), kCFRunLoopCommonModes);
-    TVLog(@"Touch lock HID filter installed (local touch + physical Home sender 0x%llx)",
-          (unsigned long long)kTvBlockedPhysicalHomeSenderID);
+    gTvTouchLockQueue = dispatch_queue_create("com.controlios.touchlock.hid",
+        dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0));
+    notify_register_dispatch(kTvTouchLockNotification, &gTvTouchLockChangeToken,
+        gTvTouchLockQueue, ^(int token) {
+            uint64_t state = 0;
+            if (notify_get_state(token, &state) == NOTIFY_STATUS_OK)
+                gTvTouchLockEnabled.store(state != 0, std::memory_order_release);
+        });
+    registerFilter(gTvTouchLockHIDClient, tvTouchLockFilter, NULL, (void *)getSenderID);
+    setMatching(gTvTouchLockHIDClient, NULL); // Receive all physical and injected sources.
+    if (setQueue && activate) {
+        setQueue(gTvTouchLockHIDClient, gTvTouchLockQueue);
+        activate(gTvTouchLockHIDClient);
+        gTvTouchLockFilterMode = "monitor-dispatch";
+    } else {
+        scheduleQueue(gTvTouchLockHIDClient, gTvTouchLockQueue);
+        gTvTouchLockFilterMode = "monitor-scheduled";
+    }
+    dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+        BOOL verified = tvVerifyTouchLockFilter();
+        TVLog(@"Touch lock HID filter callback verified=%d", verified);
+    });
+    TVLog(@"Touch lock HID filter installed on dedicated queue; physical touch/Home blocked, remote input preserved");
 }
 
 static int gTvLockResetToken = 0;
@@ -5236,15 +5311,29 @@ static NSString *tvFrontmostBundleID(void) {
 static NSData *tvCtlTouchLock(NSString *argument) {
     NSString *state = [[argument stringByTrimmingCharactersInSet:
                         [NSCharacterSet whitespaceAndNewlineCharacterSet]] lowercaseString];
+    if ([state isEqualToString:@"details"]) {
+        (void)tvVerifyTouchLockFilter();
+        return [[NSString stringWithFormat:
+            @"OK\nrequested=%d\nfilter_installed=%d\nfilter_verified=%d\nfilter_mode=%s\nphysical_seen=%llu\nblocked=%llu\nremote_seen=%llu\nlast_physical_sender=0x%llx\n",
+            tvGetTouchLockNotifyState(), gTvTouchLockHIDClient != NULL,
+            gTvTouchLockFilterVerified.load(std::memory_order_acquire), gTvTouchLockFilterMode,
+            (unsigned long long)gTvTouchLockPhysicalSeen.load(std::memory_order_relaxed),
+            (unsigned long long)gTvTouchLockBlocked.load(std::memory_order_relaxed),
+            (unsigned long long)gTvTouchLockRemoteSeen.load(std::memory_order_relaxed),
+            (unsigned long long)gTvTouchLockLastPhysicalSender.load(std::memory_order_relaxed)]
+            dataUsingEncoding:NSUTF8StringEncoding];
+    }
     if ([state isEqualToString:@"status"]) {
         return [[NSString stringWithFormat:@"OK %@\n",
                  tvGetTouchLockNotifyState() ? @"on" : @"off"]
                 dataUsingEncoding:NSUTF8StringEncoding];
     }
     if (![state isEqualToString:@"on"] && ![state isEqualToString:@"off"])
-        return [@"ERR Usage touchlock on|off|status\n" dataUsingEncoding:NSUTF8StringEncoding];
+        return [@"ERR Usage touchlock on|off|status|details\n" dataUsingEncoding:NSUTF8StringEncoding];
 
     BOOL enabled = [state isEqualToString:@"on"];
+    if (enabled && !tvVerifyTouchLockFilter())
+        return [@"ERR TouchLockFilterUnresponsive\n" dataUsingEncoding:NSUTF8StringEncoding];
     NSString *previousBundleID = tvFrontmostBundleID();
     if (!tvSetTouchLockNotifyState(enabled))
         return [@"ERR TouchLockNotifyFailed\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -8900,10 +8989,10 @@ int main(int argc, const char *argv[]) {
         installSignalHandlers();
         installTerminationHandlers();
 
-        tvStartControlSocketIfNeeded();
         // Keep touch-lock state across a daemon restart. notifyd resets it on a
         // real device reboot, so reboot still starts safely with touch lock off.
         tvInstallTouchLockHIDFilter();
+        tvStartControlSocketIfNeeded();
         tvInstallLockTouchResetObservers();
         tvInstallBKSFrontmostMonitor();
         tvEnsureKeeperAtStartup();
