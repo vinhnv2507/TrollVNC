@@ -56,6 +56,7 @@ CAPTURES_DIR = PROJECT_ROOT / "captures"
 # Cookie dumps stay inside ControlIOS PC (AppData / project), never a user folder.
 # Only an explicit app backup asks the user for an external PC directory.
 COOKIE_STORE_DIR = PROJECT_ROOT / "cookies"
+SHOPEE_STORE_PATH = PROJECT_ROOT / "config" / "shopee_accounts.json"
 # Chu kỳ tự canh Keeper. 5 phút: keeperd chết là chuyện hiếm (chỉ khi cài đè hoặc
 # hết RAM), soát dày hơn chỉ tốn thêm một vòng control socket cho ~250 máy.
 KEEPER_WATCH_INTERVAL_MS = 5 * 60 * 1000
@@ -2682,6 +2683,8 @@ class MainWindow(QMainWindow):
         self.broadcast = False
         self.multi_detail_window: MultiDetailWindow | None = None
         self._cookie_headers: dict[tuple[str, str], str] = {}
+        self.shopee_dialog = None
+        self._shopee_store = None
         self.script_dialog: ScriptDialog | None = None
         self.screen_monitor_dialog: ScreenTextMonitorDialog | None = None
         self.ssh_console: SshConsoleDialog | None = None
@@ -3086,6 +3089,11 @@ class MainWindow(QMainWindow):
             "QCheckBox { font-size: 10px; }")
         self.addToolBar(actions_bar)
         bar = actions_bar
+
+        shopee = QAction("Shopee", self)
+        shopee.setToolTip("Danh sách cookie Shopee, proxy, đơn hàng và voucher")
+        shopee.triggered.connect(self._open_shopee)
+        bar.addAction(shopee)
 
         self.broadcast_box = QCheckBox("Phát đa máy")
         self.broadcast_box.setToolTip(
@@ -4734,6 +4742,46 @@ class MainWindow(QMainWindow):
             )
         except OSError as exc:
             log.warning("Could not persist cookie for %s %s: %s", device_key, bundle_id, exc)
+        if "shopee" in bundle_id.lower():
+            try:
+                from ..shopee import ShopeeError
+                store = self._get_shopee_store()
+                store.upsert(header, label=device_key, source=f"{device_key}|{bundle_id}")
+                store.save()
+                if self.shopee_dialog is not None:
+                    self.shopee_dialog._refresh()
+            except (OSError, ShopeeError):
+                self.statusBar().showMessage("Không thêm được cookie vào bảng Shopee; cookie gốc vẫn được giữ trong Lấy cookie.", 8000)
+
+    def _get_shopee_store(self):
+        if self._shopee_store is None:
+            from ..shopee import AccountStore, ShopeeError
+            path = SHOPEE_STORE_PATH
+            store = AccountStore(path)
+            if not path.exists():
+                for (device_key, bundle_id), header in self._cookie_headers.items():
+                    if "shopee" not in bundle_id.lower():
+                        continue
+                    try:
+                        store.upsert(header, label=device_key, source=f"{device_key}|{bundle_id}")
+                    except ShopeeError:
+                        continue
+                store.save()
+            self._shopee_store = store
+        return self._shopee_store
+
+    def _open_shopee(self):
+        from ..shopee import ShopeeError
+        from .shopee_panel import ShopeeDialog
+        try:
+            if self.shopee_dialog is None:
+                self.shopee_dialog = ShopeeDialog(self._get_shopee_store(), self)
+            self.shopee_dialog.show()
+            self.shopee_dialog.raise_()
+            self.shopee_dialog.activateWindow()
+        except (OSError, ShopeeError) as exc:
+            message = str(exc) if isinstance(exc, ShopeeError) else "Không đọc/ghi được dữ liệu Shopee."
+            QMessageBox.warning(self, "Shopee", message)
 
     def _load_cookie_store(self) -> None:
         stored: dict[tuple[str, str], str] = {}
@@ -5178,6 +5226,11 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        if self.shopee_dialog is not None and not self.shopee_dialog.shutdown():
+            event.ignore()
+            self.statusBar().showMessage("Đang dừng kiểm tra Shopee trước khi đóng…")
+            QTimer.singleShot(250, self.close)
+            return
         if self.multi_detail_window is not None:
             self.multi_detail_window.close()
         self._apps_reload_timer.stop()

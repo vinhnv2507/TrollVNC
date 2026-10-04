@@ -9,3 +9,4 @@ zeroconf>=0.130
 # SSH toi may da jailbreak (muc 2). Thieu thi phan SSH khong dung duoc,
 # cac kenh khac van chay.
 asyncssh>=2.14
+requests[socks]>=2.32

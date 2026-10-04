@@ -10,7 +10,7 @@ import PySide6
 
 datas = []
 binaries = []
-hiddenimports = []
+hiddenimports = ['socks', 'urllib3.contrib.socks']
 hiddenimports += collect_submodules('zeroconf')
 hiddenimports += collect_submodules('tornado')
 tmp_ret = collect_all('tidevice')

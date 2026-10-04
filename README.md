@@ -7,6 +7,9 @@ máy** trong dải `172.30.x.x:5901`.
 Phần mềm nói chuyện thẳng bằng giao thức RFB (VNC) nên nó vừa *xem* được màn
 hình vừa *bơm* được thao tác chuột/phím — không cần TightVNC viewer nữa.
 
+Nút **Shopee** mở bảng lưu cookie và proxy riêng từng tài khoản, kiểm tra đơn
+gần đây và voucher ngay trong tool. Xem [hướng dẫn bảng Shopee](docs/shopee-pc.md).
+
 ```powershell
 D:\ControlIOS\.venv\Scripts\python.exe main.py
 ```

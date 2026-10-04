@@ -26,3 +26,4 @@ tools/controlios_private.pem
 
 # Cookie dumps stored inside ControlIOS PC
 cookies/
+config/shopee_accounts.json

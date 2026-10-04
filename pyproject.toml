@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "controlios"
-version = "0.2.34"
+version = "0.2.35"
 description = "Control IOS PC — điều khiển nhiều thiết bị iOS qua TrollVNC, control socket và SSH"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -15,6 +15,7 @@ dependencies = [
     "Pillow>=10.0",
     "zeroconf>=0.130",
     "asyncssh>=2.14",
+    "requests[socks]>=2.32",
     "tidevice>=0.11",          # chế độ USB: forward cổng qua usbmuxd (iproxy-like)
 ]
 

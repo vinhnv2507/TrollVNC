@@ -14,7 +14,7 @@ try {
 catch { }
 $python = $null
 foreach ($candidate in ($candidates | Select-Object -Unique)) {
-    & $candidate -c "import xml.parsers.expat, PyInstaller, PySide6" 2>$null
+    & $candidate -c "import xml.parsers.expat, PyInstaller, PySide6, requests, socks" 2>$null
     if ($LASTEXITCODE -eq 0) {
         $python = $candidate
         break

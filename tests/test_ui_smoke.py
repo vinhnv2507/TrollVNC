@@ -344,7 +344,7 @@ class WindowTest(unittest.TestCase):
         window = MainWindow(registry_path)
         try:
             with tempfile.TemporaryDirectory() as folder:
-                with unittest.mock.patch("controlios.ui.app.COOKIE_STORE_DIR", Path(folder)):
+                with unittest.mock.patch("controlios.ui.app.COOKIE_STORE_DIR", Path(folder)), unittest.mock.patch("controlios.ui.app.SHOPEE_STORE_PATH", Path(folder) / "accounts.json"):
                     window._remember_cookie(
                         "10.0.0.1:5901", "com.beeasy.shopee.vn", "SPC_ST=abc")
                     stored = Path(folder).glob("*/*.json")
