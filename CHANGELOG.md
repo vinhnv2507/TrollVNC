@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.16] - 2026-10-04
+
+- Probe the RFB security exchange and shared ServerInit before declaring VNC
+  healthy. A listener banner alone no longer masks stalled protocol workers.
+- Automatically restart an unresponsive VNC daemon after three failed
+  15-second checks, with bounded probe deadlines and startup grace.
+- Show stalled VNC handshakes in connection diagnostics rather than marking
+  an open TCP port as a working viewer; preserve password/refusal policy.
+
 ## [4.15] - 2026-10-03
 
 - Run service monitoring off the UI thread so a busy manager cannot freeze the app.

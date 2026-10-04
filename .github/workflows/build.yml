@@ -87,6 +87,8 @@ jobs:
         run: |
           clang -Wall -Wextra -Werror tests/socket_deadline.c -o /tmp/controlios-socket-test
           /tmp/controlios-socket-test
+          clang -Wall -Wextra -Werror -pthread tests/rfb_health.c -o /tmp/controlios-rfb-test
+          /tmp/controlios-rfb-test
 
       - name: Install dependencies
         run: |

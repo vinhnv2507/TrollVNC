@@ -31,6 +31,7 @@
 #import "Control.h"
 #import "TVNCUtil.h"
 #import "../../../include-spi/TVNCSocket.h"
+#import "../../../include-spi/TVNCRFBHealth.h"
 
 #pragma mark - Networking
 
@@ -1217,7 +1218,8 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
         NSString *token = [defaults stringForKey:@"CtlToken"] ?: @"";
 
         BOOL manager = TVNCProbeLoopbackPort(kTvAlivePort);
-        BOOL vnc = TVNCProbeLoopbackPort((int)vncPort);
+        TVNCRFBHealth vncHealth = TVNCProbeRFBLoopback((int)vncPort, 3.0);
+        BOOL vnc = vncHealth == TVNCRFBReady || vncHealth == TVNCRFBAuthRequired;
         BOOL control = TVNCProbeLoopbackPort(kTvDefaultCtlPort);
         BOOL keeper = TVNCProbeLoopbackPort(46753);
         NSString *countReply = control ? TVNCLoopbackCommand(@"count") : nil;
@@ -1243,7 +1245,11 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
                           @"detail": @"Alive socket nội bộ · cổng 46751"}];
         [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ VNC",
                                                                vnc ? @"✓" : @"✗"],
-                          @"detail": [NSString stringWithFormat:@"Cổng %ld", (long)vncPort]}];
+                          @"detail": [NSString stringWithFormat:@"Cổng %ld · %@", (long)vncPort,
+                              vncHealth == TVNCRFBReady ? @"Bắt tay VNC thành công"
+                              : vncHealth == TVNCRFBAuthRequired ? @"VNC phản hồi; cần xác thực"
+                              : vncHealth == TVNCRFBRefused ? @"VNC từ chối phiên xem; kiểm tra quyền/bản quyền"
+                              : @"Không hoàn tất bắt tay VNC; manager sẽ thử tự phục hồi"]}];
         NSString *controlDetail = control
             ? (controlReplies ? @"Cổng 46752 phản hồi lệnh bình thường"
                               : @"Cổng 46752 mở nhưng KHÔNG trả lời — có thể lượt truyền cũ đang kẹt")

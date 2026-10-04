@@ -34,6 +34,7 @@
 #import <unistd.h>
 
 #import "Control.h"
+#import "../include-spi/TVNCRFBHealth.h"
 #import "Logging.h"
 #import "TRWatchDog.h"
 #import "libproc.h"
@@ -46,32 +47,13 @@ BOOL tvncVerboseLoggingEnabled = NO;
 static TRWatchDog *gWatchDog = nil;
 static dispatch_source_t gHealthTimer = nil;
 
-// Kết nối loopback và chờ banner RFB. Chỉ connect TCP là chưa đủ: daemon treo
-// vẫn có thể còn listen socket trong kernel. Banner chứng minh event loop VNC
-// đã accept và xử lý kết nối.
+// Negotiate RFB, not just its listener banner. A stalled protocol worker can
+// still emit banners and grow the client list without ever serving a viewer.
 static BOOL probeVNCService(uint16_t port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-        return NO;
-    struct timeval timeout;
-    timeout.tv_sec = 3;
-    timeout.tv_usec = 0;
-    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
-    struct sockaddr_in addr;
-    memset(&addr, 0, sizeof(addr));
-    addr.sin_len = sizeof(addr);
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-    BOOL healthy = NO;
-    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) == 0) {
-        char banner[12] = {};
-        ssize_t count = recv(fd, banner, sizeof(banner), MSG_WAITALL);
-        healthy = count == sizeof(banner) && memcmp(banner, "RFB ", 4) == 0;
-    }
-    close(fd);
-    return healthy;
+    TVNCRFBHealth health = TVNCProbeRFBLoopback(port, 3.0);
+    // An explicit refusal/auth challenge is a responsive service, not a
+    // reason to repeatedly restart a password-protected/unactivated server.
+    return health != TVNCRFBUnresponsive;
 }
 
 static void startServerHealthMonitor(void) {
@@ -93,10 +75,11 @@ static void startServerHealthMonitor(void) {
     dispatch_queue_t queue = dispatch_queue_create(
         "com.controlios.trollvnc.health", DISPATCH_QUEUE_SERIAL);
     gHealthTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
-    // Cho server 30 giây khởi động; sau đó kiểm tra mỗi 30 giây.
+    // Allow a 30-second startup grace, then detect stalled handshakes within
+    // three 15-second samples without requiring the iOS app in foreground.
     dispatch_source_set_timer(gHealthTimer,
                               dispatch_time(DISPATCH_TIME_NOW, 30ull * NSEC_PER_SEC),
-                              30ull * NSEC_PER_SEC, 2ull * NSEC_PER_SEC);
+                              15ull * NSEC_PER_SEC, 1ull * NSEC_PER_SEC);
     __block unsigned failures = 0;
     dispatch_source_set_event_handler(gHealthTimer, ^{
         if (probeVNCService((uint16_t)port)) {
