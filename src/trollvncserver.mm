@@ -5829,7 +5829,7 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
     NSString *updater = [app stringByAppendingPathComponent:@"controliosupdater"];
     NSString *helper = nil;
     for (LSApplicationProxy *proxy in [tvAppWorkspace() allApplications]) {
-        if ([proxy.bundleIdentifier.lowercaseString containsString:@"trollstore"] ||
+        if ([proxy.applicationIdentifier.lowercaseString containsString:@"trollstore"] ||
             [proxy.localizedName.lowercaseString isEqualToString:@"trollstore"]) {
             NSString *candidate = [proxy.bundleURL.path stringByAppendingPathComponent:@"trollstorehelper"];
             if (access(candidate.fileSystemRepresentation, X_OK) == 0) { helper = candidate; break; }
