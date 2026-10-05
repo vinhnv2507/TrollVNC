@@ -35,6 +35,10 @@ static void report(NSString *state, NSString *message) {
                            @"version": targetVersion};
     NSData *data = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
     [data writeToFile:[jobDirectory stringByAppendingPathComponent:@"status.json"] atomically:YES];
+    if ([state isEqualToString:@"error"]) {
+        unlink([jobDirectory stringByAppendingPathComponent:@"ControlIOS.tipa"].fileSystemRepresentation);
+        unlink([jobDirectory stringByAppendingPathComponent:@"updater"].fileSystemRepresentation);
+    }
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:statusURL];
     request.HTTPMethod = @"POST";
     request.HTTPBody = data;

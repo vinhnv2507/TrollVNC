@@ -5850,10 +5850,15 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
     if ([@PACKAGE_VERSION compare:parts[1] options:NSNumericSearch] != NSOrderedAscending)
         return [@"ERR UpdateNotNewer\n" dataUsingEncoding:NSUTF8StringEncoding];
     // A root-only, unpredictable directory protects the executable from replacement.
-    NSString *directory = [@"/var/tmp/controlios-update-" stringByAppendingString:parts[0]];
+    NSString *directory = [NSString stringWithFormat:@"/var/tmp/controlios-update-%@.app", parts[0]];
     if (mkdir(directory.fileSystemRepresentation, 0700) != 0)
         return [@"ERR UpdateAlreadyRequested\n" dataUsingEncoding:NSUTF8StringEncoding];
     NSString *detached = [directory stringByAppendingPathComponent:@"updater"];
+    NSDictionary *updaterInfo = @{@"CFBundleIdentifier": @"com.controlios.localupdater",
+        @"CFBundleExecutable": @"updater", @"CFBundlePackageType": @"APPL",
+        @"NSAppTransportSecurity": @{@"NSAllowsArbitraryLoads": @YES}};
+    if (![updaterInfo writeToFile:[directory stringByAppendingPathComponent:@"Info.plist"] atomically:YES])
+        return [@"ERR CannotStageUpdaterInfo\n" dataUsingEncoding:NSUTF8StringEncoding];
     if (![[NSFileManager defaultManager] copyItemAtPath:updater toPath:detached error:nil] ||
         chmod(detached.fileSystemRepresentation, 0700) != 0)
         return [@"ERR CannotStageUpdater\n" dataUsingEncoding:NSUTF8StringEncoding];
