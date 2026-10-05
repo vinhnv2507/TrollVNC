@@ -284,6 +284,7 @@ class TableTest(unittest.TestCase):
             return []
         with tempfile.TemporaryDirectory() as tmp, patch("controlios.ui.app.DevicePool"), patch("controlios.ui.app.discover_bonjour", bonjour):
             window = MainWindow(Path(tmp) / "devices.json")
+            window.pool.updating_ios = set()
             worker = ScanWorker([], 5901, use_arp=False, use_bonjour=True, parent=window)
             window._auto_scan_worker = worker
             window.show()
@@ -404,6 +405,7 @@ class TableTest(unittest.TestCase):
             root = Path(tmp)
             with patch("controlios.ui.app.SHOPEE_STORE_PATH", root / "accounts.json"), patch("controlios.ui.app.DevicePool"):
                 window = MainWindow(root / "devices.json")
+                window.pool.updating_ios = set()
                 try:
                     window._open_shopee()
                     dialog = window.shopee_dialog
@@ -536,6 +538,7 @@ class TableTest(unittest.TestCase):
             root = Path(tmp)
             with patch("controlios.ui.app.COOKIE_STORE_DIR", root / "cookies"), patch("controlios.ui.app.SHOPEE_STORE_PATH", root / "accounts.json"), patch("controlios.ui.app.DevicePool"):
                 window = MainWindow(root / "devices.json")
+                window.pool.updating_ios = set()
                 try:
                     window._cookie_headers[("phone", "com.shopee.vn")] = "SPC_ST=old"
                     store = window._get_shopee_store()

@@ -3105,6 +3105,8 @@ class MainWindow(QMainWindow):
         install_ipa.setToolTip(
             "Phục vụ file .ipa từ PC rồi nhờ TrollStore trên các máy đang chọn tải về cài")
         install_ipa.triggered.connect(self._install_ipa)
+        update_ios = file_menu.addAction("Cập nhật ControlIOS qua LAN…")
+        update_ios.triggered.connect(self._update_ios)
         file_menu.addAction("PC → Ảnh iOS").triggered.connect(self._push_photo)
         # Alias rõ ràng cho việc duyệt và tải dữ liệu từ iOS (giữ nguyên hành vi
         # cũ của nút iOS → PC nhưng không chiếm thêm chỗ trên thanh chính).
@@ -4190,6 +4192,23 @@ class MainWindow(QMainWindow):
             f"{label} độ sáng {repeat} nấc trên {len(targets)} máy", 4000
         )
 
+    def _update_ios(self) -> None:
+        dialog = getattr(self, "ios_update_dialog", None)
+        if dialog is not None and dialog.running:
+            dialog.showNormal()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        targets = self._confirmed_action_targets("cập nhật ControlIOS")
+        if not targets:
+            if targets is not None:
+                QMessageBox.information(self, "Chưa chọn máy", "Hãy chọn máy ở lưới.")
+            return
+        from .ios_update import IOSUpdateDialog
+        self.ios_update_dialog = IOSUpdateDialog(self.pool, targets, self)
+        self.ios_update_dialog.completed.connect(self._refresh_device_names)
+        self.ios_update_dialog.show()
+
     def _install_ipa(self) -> None:
         targets = self._confirmed_action_targets("cài app")
         if targets is None:
@@ -5265,6 +5284,11 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        if getattr(self.pool, "updating_ios", None):
+            event.ignore()
+            self.statusBar().showMessage("Đang cập nhật iPhone; chờ hoàn tất để server LAN không bị ngắt.")
+            self._update_ios()
+            return
         self._closing = True
         self._auto_scan_timer.stop()
         self._metadata_retry_timer.stop()

@@ -73,6 +73,7 @@ class DevicePool:
         self._janitor: Optional[asyncio.Task] = None
         #: key -> đường dẫn Tải về (Tệp → Trên iPhone), cache theo máy
         self._files_downloads_cache: Dict[str, str] = {}
+        self.updating_ios: set[str] = set()
 
     # --------------------------------------------------------------- lifecycle
 
@@ -1626,6 +1627,58 @@ class DevicePool:
             await asyncio.gather(*(one(k) for k in key_list), return_exceptions=True)
             if on_done:
                 on_done(f"Xuất {remote}", len(succeeded), failures)
+
+        self._call_coro(run())
+
+    def update_ios(self, keys: Iterable[str], package, on_event=None, on_done=None) -> None:
+        """Serve one immutable local package, update at most three phones at once."""
+        import tempfile
+        from ..ios_update import UpdateServer, stage_package, update_one
+
+        key_list = list(dict.fromkeys(keys))
+        if self.updating_ios:
+            raise RuntimeError("Đang có một lượt cập nhật ControlIOS; chờ lượt hiện tại xong")
+        if not self._loop:
+            raise RuntimeError("Kênh kết nối chưa khởi động")
+        channels = {key: self._channel(key) for key in key_list}
+        ports = {key: self._spec_for(key).port if self._spec_for(key) else 5901 for key in key_list}
+        self.updating_ios.update(key_list)
+
+        async def run() -> None:
+            failures = []
+            succeeded = []
+            server = None
+            try:
+                with tempfile.TemporaryDirectory(prefix="ControlIOS-update-") as temporary:
+                    staged = await asyncio.to_thread(stage_package, package, Path(temporary))
+                    server = UpdateServer(staged)
+                    await server.start()
+                    slots = asyncio.Semaphore(3)
+
+                    async def one(key):
+                        try:
+                            async with slots:
+                                await update_one(channels[key], staged, server, ports[key],
+                                    lambda message: on_event(key, message) if on_event else None)
+                            succeeded.append(key)
+                        except Exception as exc:
+                            failures.append((key, str(exc)))
+                            if on_event:
+                                on_event(key, f"LỖI {exc}")
+
+                    try:
+                        await asyncio.gather(*(one(key) for key in key_list))
+                    finally:
+                        await server.stop()
+                        server = None
+            except Exception as exc:
+                failures = [(key, str(exc)) for key in key_list if key not in succeeded]
+            finally:
+                if server:
+                    await server.stop()
+                self.updating_ios.difference_update(key_list)
+                if on_done:
+                    on_done(f"ControlIOS {package.version}", len(succeeded), failures)
 
         self._call_coro(run())
 
