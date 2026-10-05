@@ -91,6 +91,8 @@ jobs:
           /tmp/controlios-rfb-test
           clang++ -std=c++17 -Wall -Wextra -Werror tests/touch_lock_policy.cpp -o /tmp/controlios-touch-test
           /tmp/controlios-touch-test
+          clang++ -std=c++17 -Wall -Wextra -Werror tests/local_update.cpp -o /tmp/controlios-local-update-test
+          /tmp/controlios-local-update-test
 
       - name: Install dependencies
         run: |

@@ -66,6 +66,8 @@
 #import "Control.h"
 #import "TVNCSocket.h"
 #import "TVNCTouchLockPolicy.h"
+#import "TVNCLocalUpdate.h"
+#import <spawn.h>
 #import "FBSOrientationObserver.h"
 #import "IOKitSPI.h"
 #import "Logging.h"
@@ -5818,6 +5820,61 @@ static void tvCtlSendMobileFile(int cfd, NSString *path) {
 /// Cần thiết vì `apple-magnifier://` là scheme TrollStore chiếm lại của app
 /// Kính lúp. Khi để hệ thống tự chọn, nó chọn app Kính lúp gốc và bật camera.
 /// Chỉ đích danh bundle id thì bỏ qua hẳn bước chọn đó.
+static NSData *tvCtlLocalUpdate(NSString *request) {
+#if defined(THEBOOTSTRAP) && !TARGET_OS_SIMULATOR
+    NSMutableArray<NSString *> *parts = [NSMutableArray array];
+    for (NSString *p in [request componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceCharacterSet])
+        if (p.length) [parts addObject:p];
+    NSString *app = [tvExecutablePath() stringByDeletingLastPathComponent];
+    NSString *updater = [app stringByAppendingPathComponent:@"controliosupdater"];
+    NSString *helper = nil;
+    for (LSApplicationProxy *proxy in [tvAppWorkspace() allApplications]) {
+        if ([proxy.bundleIdentifier.lowercaseString containsString:@"trollstore"] ||
+            [proxy.localizedName.lowercaseString isEqualToString:@"trollstore"]) {
+            NSString *candidate = [proxy.bundleURL.path stringByAppendingPathComponent:@"trollstorehelper"];
+            if (access(candidate.fileSystemRepresentation, X_OK) == 0) { helper = candidate; break; }
+        }
+    }
+    if (!helper || access(updater.fileSystemRepresentation, X_OK) != 0 || getuid() != 0)
+        return [@"ERR LocalUpdateUnavailable TrollStore/helper missing\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if ([request isEqualToString:@"check"])
+        return [@"OK LAN_UPDATE_1\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if (parts.count != 4 || !TVUpdateHex(parts[0].UTF8String, 32) ||
+        !TVUpdateVersion(parts[1].UTF8String) || !TVUpdateHex(parts[2].UTF8String, 64))
+        return [@"ERR BadUpdateArguments\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSURL *url = [NSURL URLWithString:parts[3]];
+    if (![url.scheme isEqualToString:@"http"] || !TVUpdateLANHost(url.host.UTF8String) ||
+        url.user || url.password || url.query || url.fragment ||
+        ![url.path isEqualToString:[NSString stringWithFormat:@"/%@/ControlIOS.tipa", parts[0]]])
+        return [@"ERR BadUpdateLANURL\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if ([@PACKAGE_VERSION compare:parts[1] options:NSNumericSearch] != NSOrderedAscending)
+        return [@"ERR UpdateNotNewer\n" dataUsingEncoding:NSUTF8StringEncoding];
+    // A root-only, unpredictable directory protects the executable from replacement.
+    NSString *directory = [@"/var/tmp/controlios-update-" stringByAppendingString:parts[0]];
+    if (mkdir(directory.fileSystemRepresentation, 0700) != 0)
+        return [@"ERR UpdateAlreadyRequested\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *detached = [directory stringByAppendingPathComponent:@"updater"];
+    if (![[NSFileManager defaultManager] copyItemAtPath:updater toPath:detached error:nil] ||
+        chmod(detached.fileSystemRepresentation, 0700) != 0)
+        return [@"ERR CannotStageUpdater\n" dataUsingEncoding:NSUTF8StringEncoding];
+    const char *args[] = {detached.fileSystemRepresentation, parts[0].UTF8String,
+        parts[1].UTF8String, parts[2].UTF8String, parts[3].UTF8String,
+        helper.fileSystemRepresentation, app.fileSystemRepresentation, NULL};
+    posix_spawnattr_t attr;
+    posix_spawnattr_init(&attr);
+    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    pid_t pid = 0;
+    extern char **environ;
+    int error = posix_spawn(&pid, detached.fileSystemRepresentation, NULL, &attr,
+                           (char *const *)args, environ);
+    posix_spawnattr_destroy(&attr);
+    if (error) return [[NSString stringWithFormat:@"ERR UpdateSpawn %d\n", error] dataUsingEncoding:NSUTF8StringEncoding];
+    return [[NSString stringWithFormat:@"OK %@\n", parts[0]] dataUsingEncoding:NSUTF8StringEncoding];
+#else
+    return [@"ERR LocalUpdateUnavailable requires TrollStore build\n" dataUsingEncoding:NSUTF8StringEncoding];
+#endif
+}
+
 static NSData *tvCtlOpenURLInApp(NSString *bundleId, NSString *urlString) {
     NSURL *url = [NSURL URLWithString:urlString];
     if (!url || bundleId.length == 0)
@@ -7553,6 +7610,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     } else if ([cmd isEqualToString:@"version"]) {
         resp = [[NSString stringWithFormat:@"OK %s\n", PACKAGE_VERSION]
             dataUsingEncoding:NSUTF8StringEncoding];
+    } else if ([cmd hasPrefix:@"updateios "]) {
+        resp = tvCtlLocalUpdate([cmd substringFromIndex:10]);
     } else if ([cmd isEqualToString:@"homeaudit"]) {
         resp = tvCtlHomeAudit(NO);
     } else if ([cmd isEqualToString:@"homeaudit clear"]) {

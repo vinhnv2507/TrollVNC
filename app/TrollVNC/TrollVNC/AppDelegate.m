@@ -99,19 +99,8 @@ static void TVScheduleKeeperCheck(NSTimeInterval delay) {
     // Để UIKit dựng xong màn hình trước; socket/SBS tuyệt đối không chặn main thread.
     TVScheduleKeeperCheck(2.0);
 
-#ifdef THEBOOTSTRAP
-    // Initialize Auto Updater
-    GHUpdateStrategy *updateStrategy = [[GHUpdateStrategy alloc] init];
-    [updateStrategy setRepoFullName:@"OwnGoalStudio/TrollVNC"];
-
-    GitHubReleaseUpdater *updater = [GitHubReleaseUpdater shared];
-#if TARGET_IPHONE_SIMULATOR
-    [updater configureWithStrategy:updateStrategy];
-#else
-    [updater configureWithStrategy:updateStrategy currentVersion:@PACKAGE_VERSION];
-#endif
-    [updater start];
-#endif
+    // Updates are requested by ControlIOS PC and downloaded from its LAN server.
+    // Do not check the former upstream GitHub repository on these devices.
 
     return YES;
 }

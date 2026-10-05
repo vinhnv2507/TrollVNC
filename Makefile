@@ -1,4 +1,4 @@
-export PACKAGE_VERSION := 4.17
+export PACKAGE_VERSION := 4.18
 export THEOS_PACKAGE_SCHEME
 
 ifeq ($(THEOS_DEVICE_SIMULATOR),1)
@@ -101,6 +101,12 @@ endif
 
 ifeq ($(THEBOOTSTRAP),1)
 TOOL_NAME += trollvncmanager
+TOOL_NAME += controliosupdater
+controliosupdater_FILES := src/controliosupdater.mm
+controliosupdater_CFLAGS := -fobjc-arc
+controliosupdater_CCFLAGS := -std=c++17
+controliosupdater_FRAMEWORKS := Foundation
+controliosupdater_CODESIGN_FLAGS := -Ssrc/trollvncmanager.entitlements
 
 trollvncmanager_FILES += src/trollvncmanager.mm
 trollvncmanager_FILES += src/TRWatchDog.mm
