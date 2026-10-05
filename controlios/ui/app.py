@@ -447,14 +447,31 @@ class ScanWorker(QThread):
         self.use_arp = use_arp
         self.use_bonjour = use_bonjour
         self.bonjour_found: List[str] = []
+        self._probe_loop = None
+        self._probe_task = None
+
+    def stop(self) -> None:
+        self.requestInterruption()
+        loop, task = self._probe_loop, self._probe_task
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass
 
     def run(self) -> None:
+        if self.isInterruptionRequested():
+            return
         hosts: List[str] = []
         if self.use_bonjour:
             # Máy tự quảng bá thì không cần dò cổng nữa — nhận luôn.
             self.bonjour_found = discover_bonjour(prefix="")
+        if self.isInterruptionRequested():
+            return
         if self.use_arp:
             hosts.extend(arp_hosts())
+        if self.isInterruptionRequested():
+            return
         for target in self.targets:
             if "/" in target:
                 import ipaddress
@@ -470,7 +487,21 @@ class ScanWorker(QThread):
 
         hosts = list(dict.fromkeys(hosts))
         emit_progress = lambda done, total, hit: self.progress.emit(done, total)
-        probed = asyncio.run(probe_hosts(hosts, self.port, progress=emit_progress))
+        async def probe():
+            self._probe_loop = asyncio.get_running_loop()
+            self._probe_task = asyncio.current_task()
+            if self.isInterruptionRequested():
+                return []
+            return await probe_hosts(hosts, self.port, progress=emit_progress)
+
+        try:
+            probed = asyncio.run(probe())
+        except asyncio.CancelledError:
+            return
+        finally:
+            self._probe_loop = self._probe_task = None
+        if self.isInterruptionRequested():
+            return
 
         # Bonjour trả về "ip:port"; gộp lại và bỏ trùng theo địa chỉ.
         seen = {h.partition(":")[0] for h in self.bonjour_found}
@@ -2684,6 +2715,7 @@ class MainWindow(QMainWindow):
         self.multi_detail_window: MultiDetailWindow | None = None
         self._cookie_headers: dict[tuple[str, str], str] = {}
         self.shopee_dialog = None
+        self._closing = False
         self._shopee_store = None
         self.script_dialog: ScriptDialog | None = None
         self.screen_monitor_dialog: ScreenTextMonitorDialog | None = None
@@ -3627,6 +3659,8 @@ class MainWindow(QMainWindow):
             self._apply_page()
 
     def _start_auto_scan(self) -> None:
+        if getattr(self, "_closing", False):
+            return
         if self._auto_scan_worker and self._auto_scan_worker.isRunning():
             return
         targets = [line.strip() for line in DEFAULT_SCAN_RANGE.splitlines()
@@ -3644,6 +3678,8 @@ class MainWindow(QMainWindow):
             self._auto_scan_worker = None
 
     def _auto_scan_found(self, hosts: List[str]) -> None:
+        if getattr(self, "_closing", False):
+            return
         added = self.registry.merge_hosts(hosts, DEFAULT_PORT)
         if not added:
             self._refresh_device_names()
@@ -3655,6 +3691,8 @@ class MainWindow(QMainWindow):
         self._refresh_device_names()
 
     def _refresh_device_names(self, force: bool = True) -> None:
+        if getattr(self, "_closing", False):
+            return
         if force:
             self._metadata_pending.update(d.key for d in self.registry.devices if d.enabled)
         if self._device_name_worker and self._device_name_worker.isRunning():
@@ -5227,6 +5265,9 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event) -> None:
+        self._closing = True
+        self._auto_scan_timer.stop()
+        self._metadata_retry_timer.stop()
         if self.shopee_dialog is not None and not self.shopee_dialog.shutdown():
             event.ignore()
             self.statusBar().showMessage("Đang dừng kiểm tra Shopee trước khi đóng…")
@@ -5240,10 +5281,18 @@ class MainWindow(QMainWindow):
         self._metadata_retry_timer.stop()
         if self._device_name_worker and self._device_name_worker.isRunning():
             self._device_name_worker.stop()
-            self._device_name_worker.wait(3000)
+            if not self._device_name_worker.wait(50):
+                event.ignore()
+                self.statusBar().showMessage("Đang dừng tác vụ nền trước khi đóng…")
+                QTimer.singleShot(100, self.close)
+                return
         if self._auto_scan_worker and self._auto_scan_worker.isRunning():
-            self._auto_scan_worker.requestInterruption()
-            self._auto_scan_worker.wait(3000)
+            self._auto_scan_worker.stop()
+            if not self._auto_scan_worker.wait(50):
+                event.ignore()
+                self.statusBar().showMessage("Đang dừng tác vụ nền trước khi đóng…")
+                QTimer.singleShot(100, self.close)
+                return
         if self.recording_id:
             self.pool.stop_recording(self.recording_id)
         self.pool.cancel_script()

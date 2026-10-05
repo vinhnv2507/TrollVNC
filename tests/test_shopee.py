@@ -274,6 +274,63 @@ class ApiTest(unittest.TestCase):
 
 
 class TableTest(unittest.TestCase):
+    def test_close_waits_for_background_scan_and_does_not_restart_it(self):
+        import time
+        from controlios.ui.app import MainWindow, ScanWorker
+        started, release = threading.Event(), threading.Event()
+        def bonjour(**kwargs):
+            started.set()
+            release.wait(3)
+            return []
+        with tempfile.TemporaryDirectory() as tmp, patch("controlios.ui.app.DevicePool"), patch("controlios.ui.app.discover_bonjour", bonjour):
+            window = MainWindow(Path(tmp) / "devices.json")
+            worker = ScanWorker([], 5901, use_arp=False, use_bonjour=True, parent=window)
+            window._auto_scan_worker = worker
+            window.show()
+            try:
+                worker.start()
+                self.assertTrue(started.wait(2))
+                window.close()
+                self.assertTrue(window.isVisible())
+                self.assertTrue(worker.isInterruptionRequested())
+                self.assertTrue(window._closing)
+                with patch("controlios.ui.app.ScanWorker") as new_scan:
+                    window._start_auto_scan()
+                    new_scan.assert_not_called()
+                release.set()
+                self.assertTrue(worker.wait(2000))
+                deadline = time.monotonic() + 2
+                while window.isVisible() and time.monotonic() < deadline:
+                    app.processEvents()
+                    time.sleep(0.01)
+                self.assertFalse(window.isVisible())
+            finally:
+                release.set()
+                worker.stop()
+                worker.wait(3000)
+                window.close()
+
+    def test_background_scan_cancels_active_probes(self):
+        import asyncio
+        from controlios.ui.app import ScanWorker
+        started = threading.Event()
+        async def slow_probe(*args, **kwargs):
+            started.set()
+            await asyncio.sleep(60)
+            return []
+        worker = ScanWorker(["127.0.0.1"], 5901, use_arp=False)
+        with patch("controlios.ui.app.probe_hosts", slow_probe):
+            try:
+                worker.start()
+                self.assertTrue(started.wait(2))
+                worker.stop()
+                self.assertTrue(worker.wait(2000))
+                self.assertIsNone(worker._probe_task)
+                self.assertIsNone(worker._probe_loop)
+            finally:
+                worker.stop()
+                worker.wait(3000)
+
     def test_voucher_cell_opens_only_clicked_accounts_scrollable_list(self):
         with tempfile.TemporaryDirectory() as tmp:
             store = AccountStore(Path(tmp) / "accounts.json")
