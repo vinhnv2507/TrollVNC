@@ -7,12 +7,12 @@ from datetime import datetime
 from PySide6.QtCore import Qt, QThread, Signal, QItemSelectionModel
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QDialog, QDialogButtonBox, QFormLayout,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
 )
 
-from ..shopee import Account, AccountStore, ShopeeClient, ShopeeError, normalize_cookie, normalize_proxy, proxy_label
+from ..shopee import Account, AccountStore, ShopeeClient, ShopeeError, normalize_cookie, normalize_proxy, proxy_label, proxy_assignment
 
 
 class CheckWorker(QThread):
@@ -110,6 +110,66 @@ class CopyTable(QTableWidget):
                 for row in rows))
 
 
+class ProxyAssignmentDialog(QDialog):
+    def __init__(self, total: int, selected: int, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Gán proxy")
+        self.resize(720, 490)
+        self.counts = {"all": total, "selected": selected}
+        layout = QVBoxLayout(self)
+        form = QFormLayout()
+        self.scope = QComboBox()
+        self.scope.addItem(f"Toàn bộ {total} cookie, từ trên xuống dưới", "all")
+        if selected:
+            self.scope.addItem(f"{selected} cookie đã chọn, từ trên xuống dưới", "selected")
+        self.mode = QComboBox()
+        self.mode.addItem("Gán lần lượt; cookie dư để trống proxy", "sequential")
+        self.mode.addItem("Gán lần lượt và lặp lại danh sách proxy", "cycle")
+        self.mode.addItem("Dùng một proxy cho tất cả cookie", "shared")
+        form.addRow("Áp dụng cho", self.scope)
+        form.addRow("Cách gán", self.mode)
+        layout.addLayout(form)
+        hint = QLabel("Mỗi dòng một proxy: host:port, host:port:user:pass hoặc URL HTTP/HTTPS/SOCKS5. "
+                      "Proxy trong phạm vi đã chọn sẽ được thay bằng kết quả bên dưới.")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+        self.editor = QPlainTextEdit()
+        self.editor.setPlaceholderText("172.30.0.91:3128")
+        layout.addWidget(self.editor)
+        self.preview = QLabel()
+        self.preview.setWordWrap(True)
+        layout.addWidget(self.preview)
+        buttons = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
+        self.apply_button = buttons.button(QDialogButtonBox.Apply)
+        self.apply_button.setText("Gán proxy")
+        self.apply_button.clicked.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.scope.currentIndexChanged.connect(self._preview)
+        self.mode.currentIndexChanged.connect(self._preview)
+        self.editor.textChanged.connect(self._preview)
+        self._preview()
+
+    def _preview(self):
+        self.assignments = []
+        try:
+            count = self.counts[self.scope.currentData()]
+            lines = self.editor.toPlainText().splitlines()
+            self.assignments = proxy_assignment(lines, count, self.mode.currentData())
+            used = sum(bool(value) for value in self.assignments)
+            supplied = sum(bool(line.strip()) for line in lines)
+            message = f"{count} cookie: gán proxy cho {used}, để trống proxy {count - used}."
+            if self.mode.currentData() == "cycle":
+                message += f" {max(0, count - supplied)} cookie dùng lại proxy từ đầu danh sách."
+            elif supplied > count:
+                message += f" {supplied - count} proxy cuối không được dùng."
+            self.preview.setText(message)
+            self.apply_button.setEnabled(True)
+        except ShopeeError as exc:
+            self.preview.setText(str(exc))
+            self.apply_button.setEnabled(False)
+
+
 class ShopeeDialog(QDialog):
     def __init__(self, store: AccountStore, parent=None):
         super().__init__(parent)
@@ -135,7 +195,10 @@ class ShopeeDialog(QDialog):
         buttons.addWidget(self.stop_button)
         layout.addLayout(buttons)
         splitter = QSplitter(Qt.Vertical)
-        self.table = self._table(["Tên / thiết bị", "Cookie", "Proxy", "Kết quả", "Đơn", "Voucher", "Kiểm tra lúc"])
+        self.table = self._table(["Tên / thiết bị", "Username", "Cookie", "Proxy", "Kết quả", "Đơn", "Voucher", "Kiểm tra lúc"])
+        self.table.setColumnWidth(1, 160)
+        self.table.setColumnWidth(2, 160)
+        self.table.setColumnWidth(3, 220)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.itemSelectionChanged.connect(self._details)
         self.table.itemDoubleClicked.connect(lambda _item: self._edit())
@@ -182,7 +245,7 @@ class ShopeeDialog(QDialog):
         for index, account in enumerate(self.store.accounts):
             result = account.result
             token = account.fingerprint()[:10]
-            values = [account.label, "SPC_ST • " + token, proxy_label(account.proxy),
+            values = [account.label, result.get("username") or "—", "SPC_ST • " + token, proxy_label(account.proxy),
                       result.get("status", "Chưa kiểm tra"),
                       self._count(result, "orders", "order_error"),
                       self._count(result, "vouchers", "voucher_error"), account.checked_at]
@@ -301,27 +364,24 @@ class ShopeeDialog(QDialog):
     def _assign_proxies(self):
         if self._busy():
             return
-        accounts = self._selected()
-        if not accounts:
-            self.status.setText("Chọn các tài khoản cần gán proxy.")
+        if not self.store.accounts:
+            self.status.setText("Thêm cookie trước khi gán proxy.")
             return
-        lines = self._multiline("Gán proxy cho các dòng đã chọn", "Dán một proxy để dùng chung, hoặc đúng số proxy bằng số dòng đã chọn (theo thứ tự trên bảng). Hỗ trợ HTTP/HTTPS/SOCKS5.")
-        if lines is None:
+        selected_ids = {account.id for account in self._selected()}
+        dialog = ProxyAssignmentDialog(len(self.store.accounts), len(selected_ids), self)
+        if dialog.exec() != QDialog.Accepted:
             return
-        accounts.sort(key=lambda a: self.store.accounts.index(a))
-        try:
-            proxies = [normalize_proxy(line) for line in lines]
-            if len(proxies) not in {1, len(accounts)}:
-                raise ShopeeError("Số proxy phải là 1 hoặc bằng số tài khoản đã chọn.")
-        except ShopeeError as exc:
-            QMessageBox.warning(self, "Proxy chưa hợp lệ", str(exc))
-            return
-        for index, account in enumerate(accounts):
-            proxy = proxies[0] if len(proxies) == 1 else proxies[index]
+        accounts = [account for account in self.store.accounts
+                    if dialog.scope.currentData() == "all" or account.id in selected_ids]
+        changed = 0
+        for account, proxy in zip(accounts, dialog.assignments):
             if account.proxy != proxy:
                 account.proxy, account.result, account.checked_at = proxy, {}, ""
-        self._save()
+                changed += 1
+        saved = self._save()
         self._refresh()
+        if saved:
+            self.status.setText(f"Đã gán proxy cho {len(accounts)} cookie; thay đổi {changed} dòng.")
 
     def _remove(self):
         if self._busy():
@@ -358,7 +418,10 @@ class ShopeeDialog(QDialog):
             for column, key in enumerate(("code", "title", "shop", "discount", "cap", "min_spend", "expires")):
                 self.vouchers.setItem(index, column, QTableWidgetItem(str(row.get(key, ""))))
         messages = [result.get("status", "Chưa kiểm tra")]
-        messages += [result[k] for k in ("order_error", "voucher_error") if result.get(k)]
+        if result.get("username"):
+            messages.append("Username: " + result["username"])
+        messages += [("Username: " if k == "profile_error" else "") + result[k]
+                     for k in ("profile_error", "order_error", "voucher_error") if result.get(k)]
         if result and not result.get("order_error") and not orders:
             messages.append("Không có đơn trong danh sách API trả về.")
         if result and not result.get("voucher_error") and not vouchers:

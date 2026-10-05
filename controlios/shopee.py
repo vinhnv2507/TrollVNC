@@ -83,6 +83,24 @@ def proxy_label(value: str) -> str:
         return "Proxy chưa hợp lệ"
 
 
+def proxy_assignment(lines: list[str], count: int, mode: str) -> list[str]:
+    """Validate the entire list before preparing assignments in table order."""
+    if count <= 0:
+        raise ShopeeError("Không có tài khoản để gán proxy.")
+    if mode not in {"sequential", "cycle", "shared"}:
+        raise ShopeeError("Cách gán proxy không hợp lệ.")
+    proxies = [normalize_proxy(line) for line in lines if line.strip()]
+    if not proxies:
+        raise ShopeeError("Hãy nhập ít nhất một proxy.")
+    if mode == "shared":
+        if len(proxies) != 1:
+            raise ShopeeError("Dùng chung yêu cầu đúng một proxy.")
+        return proxies * count
+    if mode == "cycle":
+        return [proxies[index % len(proxies)] for index in range(count)]
+    return proxies[:count] + [""] * max(0, count - len(proxies))
+
+
 @dataclass
 class Account:
     label: str
@@ -433,9 +451,24 @@ class ShopeeClient:
             warning += " Chỉ bổ sung chi tiết 10 đơn gần đây mỗi lần kiểm tra."
         return rows, warning.strip()
 
+    def profile(self) -> tuple[str, str]:
+        try:
+            data = self.request("/api/v4/account/basic/get_account_info")
+            # Only this endpoint's root identity belongs to the signed-in user.
+            # A recursive search could return a seller/recipient username instead.
+            username, user_id = data.get("username"), data.get("userid")
+            if (not isinstance(username, str) or not username.strip()
+                    or len(username) > 200 or re.search(r"[\x00-\x1f\x7f]", username)
+                    or not isinstance(user_id, int) or isinstance(user_id, bool) or user_id <= 0):
+                raise ShopeeError("Shopee chưa trả username của tài khoản đăng nhập; kiểm tra lại cookie.")
+            return username.strip(), ""
+        except ShopeeError as exc:
+            return "", str(exc)
+
     def check(self) -> dict:
+        username, profile_error = self.profile()
         vouchers, voucher_error = self.vouchers()
         orders, order_error = self.orders()
         return {"orders": orders, "vouchers": vouchers, "order_error": order_error,
-                "voucher_error": voucher_error,
-                "status": "Có cảnh báo" if order_error or voucher_error else "Đã kiểm tra"}
+                "voucher_error": voucher_error, "username": username, "profile_error": profile_error,
+                "status": "Có cảnh báo" if order_error or voucher_error or profile_error else "Đã kiểm tra"}

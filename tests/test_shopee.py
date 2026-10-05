@@ -10,11 +10,12 @@ from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QItemSelectionModel
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 from controlios.shopee import (Account, AccountStore, ShopeeClient, ShopeeError,
-                               normalize_cookie, normalize_proxy, parse_order, parse_voucher, proxy_label)
-from controlios.ui.shopee_panel import CheckWorker, ShopeeDialog
+                               normalize_cookie, normalize_proxy, parse_order, parse_voucher, proxy_label,
+                               proxy_assignment)
+from controlios.ui.shopee_panel import CheckWorker, ShopeeDialog, ProxyAssignmentDialog
 
 app = QApplication.instance() or QApplication([])
 
@@ -132,9 +133,73 @@ class StoreTest(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
 
 
+class AssignmentTest(unittest.TestCase):
+    def test_100_proxies_for_150_cookies(self):
+        proxies = [f"localhost:{1000 + i}" for i in range(100)]
+        expected = [normalize_proxy(value) for value in proxies]
+        self.assertEqual(proxy_assignment(proxies, 150, "sequential"), expected + [""] * 50)
+        self.assertEqual(proxy_assignment(proxies, 150, "cycle"), expected + expected[:50])
+        self.assertEqual(proxy_assignment(proxies[:1], 150, "shared"), expected[:1] * 150)
+
+    def test_validation_and_extra_proxies(self):
+        self.assertEqual(proxy_assignment(["localhost:99", "localhost:100"], 1, "sequential"),
+                         ["http://localhost:99"])
+        for lines, count, mode in [([], 3, "cycle"), (["localhost:99", "bad"], 1, "sequential"),
+                                   (["localhost:99", "localhost:100"], 3, "shared"),
+                                   (["localhost:99"], 0, "shared"), (["localhost:99"], 1, "bad")]:
+            with self.subTest(lines=lines, count=count, mode=mode), self.assertRaises(ShopeeError):
+                proxy_assignment(lines, count, mode)
+
+    def test_dialog_preview_scope_and_invalid_input(self):
+        dialog = ProxyAssignmentDialog(150, 50)
+        try:
+            self.assertFalse(dialog.apply_button.isEnabled())
+            dialog.editor.setPlainText("\n".join(f"localhost:{1000 + i}" for i in range(100)))
+            self.assertEqual(len(dialog.assignments), 150)
+            self.assertEqual(dialog.assignments[-50:], [""] * 50)
+            self.assertIn("50", dialog.preview.text())
+            dialog.mode.setCurrentIndex(1)
+            self.assertEqual(dialog.assignments[-50:], dialog.assignments[:50])
+            dialog.scope.setCurrentIndex(1)
+            self.assertEqual(len(dialog.assignments), 50)
+            dialog.mode.setCurrentIndex(2)
+            self.assertFalse(dialog.apply_button.isEnabled())
+            dialog.editor.setPlainText("localhost:99")
+            self.assertEqual(dialog.assignments, ["http://localhost:99"] * 50)
+            self.assertTrue(dialog.apply_button.isEnabled())
+        finally:
+            dialog.close()
+
+
 class ApiTest(unittest.TestCase):
     def client(self):
         return ShopeeClient("SPC_ST=synthetic", "localhost:99", session=Mock())
+
+    def test_profile_reads_only_root_logged_in_identity(self):
+        client = self.client()
+        client.request = Mock(return_value={"userid": 123, "username": "deadbeef",
+                                           "seller": {"username": "other"}})
+        self.assertEqual(client.profile(), ("deadbeef", ""))
+        client.request.assert_called_once_with("/api/v4/account/basic/get_account_info")
+        for data in ({"seller": {"userid": 123, "username": "other"}},
+                     {"userid": 0, "username": "guest"}, {"userid": True, "username": "guest"},
+                     {"userid": 123, "username": "bad\nname"}, {"userid": 123, "username": ""}):
+            client.request = Mock(return_value=data)
+            username, warning = client.profile()
+            self.assertEqual(username, "")
+            self.assertTrue(warning)
+
+    def test_profile_failure_keeps_order_and_voucher_results(self):
+        client = self.client()
+        client.request = Mock(side_effect=ShopeeError("HTTP 403"))
+        client.vouchers = Mock(return_value=([{"code": "SALE"}], ""))
+        client.orders = Mock(return_value=([{"order_id": "123"}], ""))
+        result = client.check()
+        self.assertEqual(result["username"], "")
+        self.assertIn("403", result["profile_error"])
+        self.assertEqual(result["vouchers"], [{"code": "SALE"}])
+        self.assertEqual(result["orders"], [{"order_id": "123"}])
+        self.assertEqual(result["status"], "Có cảnh báo")
 
     def test_voucher_money_expiry_and_percentage(self):
         row = parse_voucher({"voucher": {"voucher_code": "SALE", "discount_percentage": 15,
@@ -222,7 +287,7 @@ class TableTest(unittest.TestCase):
                     time.sleep(0.01)
                 self.assertIsNone(dialog.worker)
                 self.assertIn("Chưa gán proxy", store.accounts[0].result["status"])
-                self.assertIn("Chưa gán proxy", dialog.table.item(0, 3).text())
+                self.assertIn("Chưa gán proxy", dialog.table.item(0, 4).text())
                 self.assertTrue(dialog.shutdown())
             finally:
                 if dialog.worker:
@@ -249,12 +314,42 @@ class TableTest(unittest.TestCase):
                 a.cookie = "SPC_ST=changed"
                 dialog._checked(a.id, fingerprint, {"status": "stale"})
                 self.assertEqual(a.result, {})
-                dialog._checked(a.id, a.fingerprint(), {"status": "ok", "orders": [], "vouchers": [{"code": "SALE"}]})
+                dialog._checked(a.id, a.fingerprint(), {"status": "ok", "username": "synthetic_user", "orders": [], "vouchers": [{"code": "SALE"}]})
+                self.assertEqual(dialog.table.item(0, 1).text(), "synthetic_user")
                 self.assertEqual(dialog.vouchers.item(0, 0).text(), "SALE")
                 dialog.vouchers.selectRow(0)
                 dialog.vouchers._copy()
                 self.assertTrue(app.clipboard().text().startswith("SALE"))
                 self.assertEqual(AccountStore(store.path).accounts[0].result["status"], "ok")
+                self.assertEqual(AccountStore(store.path).accounts[0].result["username"], "synthetic_user")
+            finally:
+                dialog.close()
+
+    def test_assignment_selected_rows_in_table_order_and_clears_stale_result(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AccountStore(Path(tmp) / "accounts.json")
+            for index in range(4):
+                account = store.upsert(f"SPC_ST=synthetic-{index}", proxy="localhost:90")
+                account.result = {"username": "old"}
+                account.checked_at = "old"
+            dialog = ShopeeDialog(store)
+            try:
+                dialog.table.clearSelection()
+                for index in (3, 1):
+                    dialog.table.selectionModel().select(dialog.table.model().index(index, 0),
+                                                        QItemSelectionModel.Select | QItemSelectionModel.Rows)
+                def accept(editor):
+                    editor.scope.setCurrentIndex(1)
+                    editor.editor.setPlainText("localhost:99")
+                    return QDialog.Accepted
+                with patch.object(ProxyAssignmentDialog, "exec", accept):
+                    dialog._assign_proxies()
+                self.assertEqual([a.proxy for a in store.accounts],
+                                 ["http://localhost:90", "http://localhost:99", "http://localhost:90", ""])
+                self.assertEqual(store.accounts[0].result, {"username": "old"})
+                self.assertEqual(store.accounts[1].result, {})
+                self.assertEqual(store.accounts[3].checked_at, "")
+                self.assertEqual(AccountStore(store.path).accounts, store.accounts)
             finally:
                 dialog.close()
 
