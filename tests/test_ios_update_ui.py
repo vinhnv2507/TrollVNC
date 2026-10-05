@@ -47,9 +47,12 @@ class IOSUpdateUITests(unittest.TestCase):
         self.assertTrue(self.dialog.running)
         kwargs["on_event"]("172.30.2.42:5901", "Đang cài")
         self.assertIn("Đang cài", self.dialog.log.toPlainText())
+        self.assertIn("Đang cài", self.dialog.status.text())
         kwargs["on_done"]("ControlIOS 4.18", 1, [])
         self.assertFalse(self.dialog.running)
         self.assertTrue(self.dialog.start_button.isEnabled())
+        self.assertIn("1/1", self.dialog.status.text())
+        self.dialog._append("172.30.2.42:5901", "Thông tin bổ sung")
         self.assertIn("1/1", self.dialog.status.text())
 
     def test_newest_package_in_remembered_folder_selected_next_time(self):

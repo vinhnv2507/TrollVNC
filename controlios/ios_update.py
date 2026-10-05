@@ -218,9 +218,22 @@ async def update_one(channel, package: IOSPackage, server: UpdateServer,
     address = ipaddress.ip_address(channel.host)
     if address.version != 4 or address.is_loopback:
         raise ControlError("Cập nhật qua LAN cần địa chỉ Wi-Fi IPv4 của iPhone")
-    current = await channel.server_version()
+    current = None
+    for attempt in range(3):
+        try:
+            current = await asyncio.wait_for(channel.server_version(), 15)
+            break
+        except (UnauthorizedError, NotPatchedError):
+            raise
+        except (ControlError, asyncio.TimeoutError) as exc:
+            if attempt == 2:
+                raise ControlError(f"Không đọc được phiên bản trước cập nhật: {exc or 'hết thời gian chờ'}") from None
+            on_event("Chưa đọc được phiên bản; đang kiểm tra lại kết nối…")
+            await asyncio.sleep(interval)
     if version_key(current) >= version_key(package.version):
-        on_event(f"Bỏ qua: đang dùng {current}, gói là {package.version}")
+        if not await asyncio.wait_for(verify_vnc(channel.host, vnc_port), 12):
+            raise ControlError(f"Đã có ControlIOS {current}; VNC chưa phản hồi, không gửi lại gói cài")
+        on_event(f"Đã có ControlIOS {current}, màn hình VNC phản hồi; không cần cài lại")
         return "skipped"
     # Choose the PC interface that routes to THIS phone (VPN/multiple NIC safe).
     pc_ip = local_ip(channel.host)
@@ -229,31 +242,44 @@ async def update_one(channel, package: IOSPackage, server: UpdateServer,
         raise ControlError("Không tìm được địa chỉ LAN của PC để iPhone tải gói")
     native = version_key(current) >= version_key("4.18")
     if native:
-        if (await channel.command("updateios check")).strip() != "OK LAN_UPDATE_1":
+        if (await asyncio.wait_for(channel.command("updateios check"), 15)).strip() != "OK LAN_UPDATE_1":
             raise ControlError("Máy chưa sẵn sàng cập nhật qua LAN")
-    elif not await channel.find_trollstore():
+    elif not await asyncio.wait_for(channel.find_trollstore(), 15):
         raise ControlError("Không tìm thấy TrollStore trên iPhone")
     job = server.add_job()
     url = server.url_for(f"{job}/ControlIOS.tipa", pc_ip)
     on_event(f"{current} → {package.version}: gửi gói từ PC qua LAN")
-    if native:
-        # An ambiguous/disconnected reply must never trigger a second install.
-        try:
-            reply = await channel.command(f"updateios {job} {package.version} {package.sha256} {url}")
+    try:
+        if native:
+            # An ambiguous/disconnected reply must never trigger a second install.
+            reply = await asyncio.wait_for(channel.command(f"updateios {job} {package.version} {package.sha256} {url}"), 15)
             if reply.strip() != f"OK {job}":
                 raise ControlError("Phản hồi cập nhật không hợp lệ")
-        except (UnauthorizedError, NotPatchedError):
+        else:
+            on_event("Nâng cấp lần đầu: nếu TrollStore hỏi hãy bấm Install; sau khi cài mở ControlIOS một lần nếu máy chưa tự kết nối lại")
+            await asyncio.wait_for(channel.install_ipa(url), 30)
+    except (UnauthorizedError, NotPatchedError):
+        raise
+    except (ControlError, asyncio.TimeoutError) as exc:
+        if "ERR " in str(exc):
             raise
-        except ControlError as exc:
-            if "ERR " in str(exc):
-                raise
-            on_event(f"Chưa nhận xác nhận lệnh: {exc}; tiếp tục theo dõi, không gửi lại")
-    else:
-        on_event("Nâng cấp lần đầu: nếu TrollStore hỏi hãy bấm Install; sau khi cài mở ControlIOS một lần nếu máy chưa tự kết nối lại")
-        await channel.install_ipa(url)
+        on_event(f"Chưa nhận xác nhận lệnh: {exc or 'hết thời gian chờ'}; tiếp tục theo dõi, không gửi lại")
+    return await wait_for_update(channel, package, server, job, vnc_port,
+                                 on_event, current=current, timeout=timeout,
+                                 interval=interval, verify_vnc=verify_vnc)
+
+
+async def wait_for_update(channel, package, server, job, vnc_port, on_event,
+                          *, current, timeout=420, interval=2, verify_vnc=vnc_ready):
+    """Confirm the running service and RFB, with visible, bounded polling."""
     deadline = time.monotonic() + timeout
     last_status = None
     last_version = current
+    last_reason = None
+    next_progress = 0
+    next_app_check = 0
+    installed_version = None
+    on_event("Đã gửi yêu cầu cài; đang xác nhận phiên bản dịch vụ và màn hình…")
     while time.monotonic() < deadline:
         status = server.jobs[job]
         state = status.get("state")
@@ -263,17 +289,52 @@ async def update_one(channel, package: IOSPackage, server: UpdateServer,
                 on_event(status["message"])
         if state == "error":
             raise ControlError(status["message"])
+        reason = ""
         try:
-            last_version = await channel.server_version()
-            if version_key(last_version) == version_key(package.version):
-                if await verify_vnc(channel.host, vnc_port):
+            last_version = await asyncio.wait_for(channel.server_version(),
+                min(15, max(.001, deadline - time.monotonic())))
+            if version_key(last_version) >= version_key(package.version):
+                reason = f"Dịch vụ đã lên {last_version}; đang chờ màn hình VNC phản hồi"
+                if await asyncio.wait_for(verify_vnc(channel.host, vnc_port),
+                        min(12, max(.001, deadline - time.monotonic()))):
                     on_event(f"Thành công: ControlIOS {last_version}, màn hình VNC phản hồi")
                     return "updated"
-        except (ControlError, ValueError):
-            pass  # Expected while the old app and daemon are being replaced.
-        await asyncio.sleep(interval)
+            else:
+                reason = f"Dịch vụ vẫn là {last_version}; đang chờ ControlIOS {package.version} khởi động"
+                # Legacy TrollStore offers no progress callbacks. Distinguish
+                # its installed app from the daemon still answering commands.
+                if time.monotonic() >= next_app_check:
+                    next_app_check = time.monotonic() + 15
+                    try:
+                        apps = await asyncio.wait_for(channel.list_apps(),
+                            min(10, max(.001, deadline - time.monotonic())))
+                        installed_version = next((a.version for a in apps
+                            if a.bundle_id == "com.controlios.app"), None)
+                    except (UnauthorizedError, NotPatchedError):
+                        raise
+                    except (ControlError, asyncio.TimeoutError):
+                        pass
+                if installed_version and version_key(installed_version) >= version_key(package.version):
+                    reason = f"App đã cài {installed_version}, dịch vụ còn {last_version}; mở ControlIOS trên iPhone để bật dịch vụ mới"
+        except (UnauthorizedError, NotPatchedError):
+            raise
+        except asyncio.TimeoutError:
+            reason = reason or "Đang chờ dịch vụ kết nối lại: hết thời gian kiểm tra"
+        except (ControlError, ValueError) as exc:
+            reason = f"Đang chờ dịch vụ kết nối lại: {exc or 'hết thời gian kiểm tra'}"
+        if reason != last_reason or time.monotonic() >= next_progress:
+            remaining = max(0, int(deadline - time.monotonic()))
+            on_event(f"{reason} (còn tối đa {remaining}s)")
+            last_reason = reason
+            next_progress = time.monotonic() + 10
+        await asyncio.sleep(min(interval, max(0, deadline - time.monotonic())))
     downloaded = server.hits.get(job, 0) > 0
-    detail = ("Đã tải gói nhưng chưa xác nhận được phiên bản mới/màn hình; "
+    if version_key(last_version) >= version_key(package.version):
+        detail = f"Dịch vụ đã lên {last_version}, nhưng VNC chưa phản hồi"
+    elif installed_version and version_key(installed_version) >= version_key(package.version):
+        detail = f"App đã cài {installed_version}; mở ControlIOS trên iPhone để bật dịch vụ mới"
+    else:
+        detail = ("Đã tải gói nhưng chưa xác nhận được phiên bản mới/màn hình; "
               "kiểm tra TrollStore và mở ControlIOS" if downloaded else
               f"Chưa tải được gói từ PC; kiểm tra LAN/tường lửa cổng {server.port}")
-    raise ControlError(f"Hết thời gian chờ. {detail}. Phiên bản phản hồi cuối: {last_version}")
+    raise ControlError(f"Hết thời gian chờ. {last_reason or detail}. Phiên bản phản hồi cuối: {last_version}. {detail}")

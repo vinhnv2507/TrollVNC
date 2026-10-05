@@ -8,9 +8,9 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
-from controlios.control_channel import ControlError
+from controlios.control_channel import ControlChannel, ControlError, UnauthorizedError
 from controlios.ios_update import (inspect_package, stage_package, find_latest_package,
-    UpdateServer, update_one, vnc_ready, version_key)
+    UpdateServer, update_one, wait_for_update, vnc_ready, version_key)
 
 
 def write_package(path, version="4.18", bundle="com.controlios.app", helper=True):
@@ -127,7 +127,8 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.server = UpdateServer(self.package)
         self.server.port = 5555
         self.channel = SimpleNamespace(host="172.30.2.42", server_version=AsyncMock(return_value="4.18"),
-            command=AsyncMock(), install_ipa=AsyncMock(), find_trollstore=AsyncMock(return_value="com.opa334.TrollStore"))
+            command=AsyncMock(), install_ipa=AsyncMock(), list_apps=AsyncMock(return_value=[]),
+            find_trollstore=AsyncMock(return_value="com.opa334.TrollStore"))
         self.events = []
         self.verify = AsyncMock(return_value=True)
         self.route_patch = patch("controlios.ios_update.local_ip", return_value="172.30.0.91")
@@ -214,6 +215,68 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ControlError, "TrollStore"):
             await self.flow()
         self.channel.install_ipa.assert_not_called()
+
+    async def test_transient_initial_connection_is_retried_without_installing_again(self):
+        self.channel.server_version.side_effect = [ControlError("hết thời gian"), "4.19"]
+        self.assertEqual(await self.flow(), "skipped")
+        self.channel.install_ipa.assert_not_called()
+        self.assertTrue(any("kiểm tra lại" in event for event in self.events))
+
+    async def test_existing_version_with_stalled_vnc_is_explicit_failure(self):
+        self.channel.server_version.return_value = "4.19"
+        self.verify.return_value = False
+        with self.assertRaisesRegex(ControlError, "VNC chưa phản hồi"):
+            await self.flow()
+        self.channel.install_ipa.assert_not_called()
+
+    async def test_newer_version_after_dispatch_also_completes(self):
+        self.commands()
+        self.channel.server_version.side_effect = ["4.18", "4.20"]
+        self.assertEqual(await self.flow(), "updated")
+
+    async def test_legacy_lost_install_reply_is_monitored_without_resending(self):
+        self.channel.server_version.return_value = "4.17"
+        async def install(url):
+            self.channel.server_version.return_value = "4.19"
+            raise ControlError("mất kết nối giữa chừng")
+        self.channel.install_ipa.side_effect = install
+        self.assertEqual(await self.flow(), "updated")
+        self.channel.install_ipa.assert_awaited_once()
+
+    async def test_installed_app_with_old_daemon_is_distinguished(self):
+        self.channel.server_version.return_value = "4.17"
+        self.channel.list_apps.return_value = [SimpleNamespace(bundle_id="com.controlios.app", version="4.19")]
+        with self.assertRaisesRegex(ControlError, "App đã cài 4.19"):
+            await self.flow()
+        self.assertTrue(any("dịch vụ còn 4.17" in event for event in self.events))
+
+    async def test_poll_that_never_returns_obeys_overall_deadline(self):
+        job = self.server.add_job()
+        async def stuck(): await asyncio.Event().wait()
+        self.channel.server_version.side_effect = stuck
+        with self.assertRaisesRegex(ControlError, "Hết thời gian"):
+            await asyncio.wait_for(wait_for_update(self.channel, self.package,
+                self.server, job, 5901, self.events.append, current="4.18",
+                timeout=.02, interval=.001, verify_vnc=self.verify), .3)
+
+    async def test_bad_token_is_reported_without_waiting_seven_minutes(self):
+        self.commands()
+        self.channel.server_version.side_effect = ["4.18", UnauthorizedError("Sai token")]
+        with self.assertRaisesRegex(UnauthorizedError, "Sai token"):
+            await self.flow()
+
+
+class CommandCleanupTests(unittest.IsolatedAsyncioTestCase):
+    async def test_closed_socket_with_pending_close_does_not_hold_version_response(self):
+        from unittest.mock import Mock
+        reader = SimpleNamespace(read=AsyncMock(return_value=b"OK 4.18\n"))
+        async def stuck(): await asyncio.Event().wait()
+        writer = SimpleNamespace(write=Mock(), drain=AsyncMock(), close=Mock(),
+            wait_closed=AsyncMock(side_effect=stuck), transport=SimpleNamespace(abort=Mock()))
+        channel = ControlChannel("172.30.0.192")
+        with patch("controlios.control_channel.asyncio.open_connection", AsyncMock(return_value=(reader, writer))):
+            self.assertEqual(await asyncio.wait_for(channel.server_version(), 2), "4.18")
+        writer.transport.abort.assert_called_once()
 
 
 class VNCVerificationTests(unittest.IsolatedAsyncioTestCase):

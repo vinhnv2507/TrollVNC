@@ -208,7 +208,7 @@ class ControlChannel:
 
         try:
             writer.write(payload.encode("utf-8"))
-            await writer.drain()
+            await asyncio.wait_for(writer.drain(), timeout=self.timeout)
             data = await asyncio.wait_for(
                 reader.read(), timeout=read_timeout or self.timeout)
         except (OSError, asyncio.TimeoutError) as exc:
@@ -216,9 +216,11 @@ class ControlChannel:
         finally:
             writer.close()
             try:
-                await writer.wait_closed()
+                # Proactor transports can stall here after iOS replaces the
+                # daemon. Cleanup must not keep a completed command pending.
+                await asyncio.wait_for(writer.wait_closed(), timeout=1)
             except Exception:
-                pass
+                writer.transport.abort()
 
         text = data.decode("utf-8", errors="replace")
         self._raise_for_error(text, line)

@@ -31,3 +31,9 @@ chỉ Wi-Fi để cập nhật LAN. Gói mới cho những lần sau được ch
 Lỗi tải/hash/TrollStore được báo từng máy; hết thời gian hoặc chưa xác nhận được
 dịch vụ mới cũng được báo lỗi, không báo cài thành công. Không tự gửi lại lệnh nếu
 phản hồi ban đầu bị mất giữa lúc iPhone đang thay app.
+
+PC 0.2.39 hiển thị bước xác nhận hiện tại và thời gian chờ còn lại. Nếu app đã cài
+bản mới nhưng dịch vụ vẫn là bản cũ, bảng ghi rõ hai phiên bản và yêu cầu mở
+ControlIOS trên iPhone. Nếu dịch vụ đã lên bản mới nhưng VNC chưa phản hồi, bảng
+ghi đang chờ VNC. Các lần kiểm tra đều có giới hạn thời gian; lỗi token được báo
+ngay. Máy đã có bản mới được kiểm tra VNC và không gửi lại gói cài.

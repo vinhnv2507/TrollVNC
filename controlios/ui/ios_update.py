@@ -126,6 +126,9 @@ class IOSUpdateDialog(QDialog):
 
     def _append(self, key, message):
         self.log.appendPlainText(f"[{key}] {message}")
+        if self.running:
+            self.status.setText(f"[{key}] {message}")
+            self.status.setWordWrap(True)
 
     def _finished(self, describe, ok, failures):
         self.running = False
