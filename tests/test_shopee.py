@@ -9,7 +9,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-from PySide6.QtCore import QItemSelectionModel
+from PySide6.QtCore import QItemSelectionModel, Qt
+from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog
 
 from controlios.shopee import (Account, AccountStore, ShopeeClient, ShopeeError,
@@ -273,6 +274,102 @@ class ApiTest(unittest.TestCase):
 
 
 class TableTest(unittest.TestCase):
+    def test_voucher_cell_opens_only_clicked_accounts_scrollable_list(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AccountStore(Path(tmp) / "accounts.json")
+            a = store.upsert("SPC_ST=synthetic-A", "A")
+            b = store.upsert("SPC_ST=synthetic-B", "B")
+            a.result = {"vouchers": [{"code": "A-ONLY"}]}
+            b.result = {"username": "user_b", "vouchers": [{"code": f"B-{index}", "discount": "15%"}
+                                                         for index in range(50)]}
+            dialog = ShopeeDialog(store)
+            dialog.show()
+            app.processEvents()
+            try:
+                dialog.table.scrollToItem(dialog.table.item(1, 6))
+                rect = dialog.table.visualItemRect(dialog.table.item(1, 6))
+                QTest.mouseClick(dialog.table.viewport(), Qt.LeftButton, pos=rect.center())
+                app.processEvents()
+                popup = dialog.voucher_popup
+                self.assertIsNotNone(popup)
+                self.assertTrue(popup.isVisible())
+                self.assertEqual(popup.account_id, b.id)
+                self.assertEqual(popup.table.rowCount(), 50)
+                self.assertEqual(popup.table.item(0, 0).text(), "B-0")
+                self.assertIn("user_b", popup.title.text())
+                self.assertGreater(popup.table.verticalScrollBar().maximum(), 0)
+                popup.table.selectRow(49)
+                popup.table._copy()
+                self.assertTrue(app.clipboard().text().startswith("B-49"))
+                QTest.keyClick(popup.table, Qt.Key_Escape)
+                app.processEvents()
+                self.assertFalse(popup.isVisible())
+                # Multiple selection still uses the clicked cell's own cookie.
+                dialog.table.selectAll()
+                dialog._cell_clicked(0, 6)
+                self.assertEqual(popup.account_id, a.id)
+                self.assertEqual(popup.table.item(0, 0).text(), "A-ONLY")
+                with patch.object(dialog, "_edit") as edit:
+                    dialog._double_clicked(dialog.table.item(0, 6))
+                    edit.assert_not_called()
+            finally:
+                dialog.shutdown()
+                dialog.close()
+
+    def test_voucher_popup_empty_warning_refresh_and_stale_cookie(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AccountStore(Path(tmp) / "accounts.json")
+            a = store.upsert("SPC_ST=synthetic-A")
+            dialog = ShopeeDialog(store)
+            dialog.show()
+            app.processEvents()
+            try:
+                dialog._cell_clicked(0, 6)
+                popup = dialog.voucher_popup
+                self.assertIn("Chưa có dữ liệu", popup.message.text())
+                a.result = {"vouchers": [], "status": "ok"}
+                dialog._refresh()
+                self.assertIn("Không có voucher", popup.message.text())
+                a.result = {"vouchers": [{"code": "PARTIAL"}], "voucher_error": "HTTP 403"}
+                dialog._refresh()
+                self.assertEqual(popup.table.item(0, 0).text(), "PARTIAL")
+                self.assertIn("403", popup.message.text())
+                a.cookie = "SPC_ST=changed"
+                dialog._refresh()
+                self.assertFalse(popup.isVisible())
+            finally:
+                dialog.shutdown()
+                dialog.close()
+
+    def test_shopee_window_minimize_maximize_reopen_and_owner_shutdown(self):
+        from controlios.ui.app import MainWindow
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("controlios.ui.app.SHOPEE_STORE_PATH", root / "accounts.json"), patch("controlios.ui.app.DevicePool"):
+                window = MainWindow(root / "devices.json")
+                try:
+                    window._open_shopee()
+                    dialog = window.shopee_dialog
+                    self.assertIsNone(dialog.parentWidget())
+                    self.assertTrue(dialog.windowFlags() & Qt.WindowMinimizeButtonHint)
+                    self.assertTrue(dialog.windowFlags() & Qt.WindowMaximizeButtonHint)
+                    dialog.showMaximized()
+                    dialog.showMinimized()
+                    app.processEvents()
+                    self.assertTrue(dialog.isMinimized())
+                    window._open_shopee()
+                    app.processEvents()
+                    self.assertFalse(dialog.isMinimized())
+                    self.assertTrue(dialog.isMaximized())
+                    dialog.close()
+                    self.assertFalse(dialog.isVisible())
+                    window._open_shopee()
+                    self.assertTrue(dialog.isVisible())
+                    window.close()
+                    self.assertFalse(dialog.isVisible())
+                finally:
+                    window.close()
+
     def test_close_waits_for_worker_and_missing_proxy_is_visible(self):
         import time
         with tempfile.TemporaryDirectory() as tmp:

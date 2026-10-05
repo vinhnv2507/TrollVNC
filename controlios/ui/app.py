@@ -4776,6 +4776,7 @@ class MainWindow(QMainWindow):
         try:
             if self.shopee_dialog is None:
                 self.shopee_dialog = ShopeeDialog(self._get_shopee_store(), self)
+            self.shopee_dialog.setWindowState(self.shopee_dialog.windowState() & ~Qt.WindowMinimized)
             self.shopee_dialog.show()
             self.shopee_dialog.raise_()
             self.shopee_dialog.activateWindow()

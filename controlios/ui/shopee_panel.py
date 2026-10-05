@@ -4,10 +4,10 @@ from __future__ import annotations
 import copy
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime
-from PySide6.QtCore import Qt, QThread, Signal, QItemSelectionModel
+from PySide6.QtCore import Qt, QThread, Signal, QItemSelectionModel, QPoint
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
+    QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
 )
@@ -170,13 +170,92 @@ class ProxyAssignmentDialog(QDialog):
             self.apply_button.setEnabled(False)
 
 
+class VoucherPopup(QFrame):
+    """Scrollable voucher list anchored to one account's Voucher cell."""
+    def __init__(self, parent):
+        super().__init__(parent, Qt.Popup)
+        self.setWindowTitle("Danh sách voucher")
+        self.setFrameShape(QFrame.StyledPanel)
+        self.account_id = ""
+        self.fingerprint = ""
+        layout = QVBoxLayout(self)
+        self.title = QLabel()
+        self.title.setTextFormat(Qt.PlainText)
+        self.title.setWordWrap(True)
+        layout.addWidget(self.title)
+        self.table = ShopeeDialog._table(["Mã voucher", "Tên", "Shop", "Giảm", "Tối đa", "Đơn tối thiểu", "Hết hạn"])
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.table.setColumnWidth(0, 150)
+        self.table.setColumnWidth(1, 240)
+        self.table.setColumnWidth(2, 120)
+        for column in (3, 4, 5):
+            self.table.setColumnWidth(column, 100)
+        layout.addWidget(self.table)
+        self.message = QLabel()
+        self.message.setTextFormat(Qt.PlainText)
+        self.message.setWordWrap(True)
+        layout.addWidget(self.message)
+        buttons = QHBoxLayout()
+        copy_button = QPushButton("Copy đã chọn")
+        copy_button.clicked.connect(self.table._copy)
+        buttons.addWidget(copy_button)
+        buttons.addStretch()
+        close_button = QPushButton("Đóng danh sách")
+        close_button.clicked.connect(self.hide)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+
+    def load_account(self, account: Account):
+        self.account_id, self.fingerprint = account.id, account.fingerprint()
+        result = account.result
+        vouchers = result.get("vouchers", [])
+        identity = result.get("username") or account.label
+        self.title.setText(f"Voucher của {identity} — {len(vouchers)} voucher")
+        self.table.setRowCount(len(vouchers))
+        for index, row in enumerate(vouchers):
+            for column, key in enumerate(("code", "title", "shop", "discount", "cap", "min_spend", "expires")):
+                value = str(row.get(key, ""))
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.table.setItem(index, column, item)
+        if result.get("voucher_error"):
+            message = "Voucher: " + result["voucher_error"]
+        elif "vouchers" not in result:
+            message = "Chưa có dữ liệu voucher. Bấm Check đã chọn hoặc Check tất cả để lấy danh sách."
+        elif not vouchers:
+            message = "Không có voucher hiện có trong API trả về."
+        else:
+            message = "Cuộn để xem danh sách. Chọn voucher rồi Ctrl+C hoặc Copy đã chọn."
+        self.message.setText(message)
+
+    def open_at(self, account: Account, anchor: QPoint, above: int):
+        self.load_account(account)
+        screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
+        bounds = screen.availableGeometry()
+        height = min(480, max(230, 160 + 30 * min(10, self.table.rowCount())))
+        self.resize(min(1080, bounds.width()), min(height, bounds.height()))
+        x = max(bounds.left(), min(anchor.x(), bounds.right() - self.width() + 1))
+        y = anchor.y()
+        if y + self.height() > bounds.bottom() + 1:
+            y = above - self.height()
+        y = max(bounds.top(), min(y, bounds.bottom() - self.height() + 1))
+        self.move(x, y)
+        self.show()
+        self.table.setFocus()
+
+
 class ShopeeDialog(QDialog):
+    VOUCHER_COLUMN = 6
+
     def __init__(self, store: AccountStore, parent=None):
-        super().__init__(parent)
+        # MainWindow retains this window and shuts it down explicitly. An
+        # unowned normal window gets its own taskbar entry on Windows.
+        super().__init__(None, Qt.Window | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         self.setWindowTitle("Shopee — Cookie, đơn hàng và voucher")
         self.resize(1160, 760)
         self.store = store
         self.worker: CheckWorker | None = None
+        self.voucher_popup: VoucherPopup | None = None
         self._buttons = []
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Danh sách tự lưu trong ControlIOS PC. Mỗi tài khoản dùng proxy của dòng đó khi kiểm tra."))
@@ -201,7 +280,9 @@ class ShopeeDialog(QDialog):
         self.table.setColumnWidth(3, 220)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.itemSelectionChanged.connect(self._details)
-        self.table.itemDoubleClicked.connect(lambda _item: self._edit())
+        self.table.cellClicked.connect(self._cell_clicked)
+        self.table.cellActivated.connect(self._cell_clicked)
+        self.table.itemDoubleClicked.connect(self._double_clicked)
         splitter.addWidget(self.table)
         self.tabs = QTabWidget()
         self.orders = self._table(["Mã đơn / ID", "Mã vận đơn", "Trạng thái", "Người nhận", "Điện thoại", "Địa chỉ", "Sản phẩm", "Link"])
@@ -248,10 +329,12 @@ class ShopeeDialog(QDialog):
             values = [account.label, result.get("username") or "—", "SPC_ST • " + token, proxy_label(account.proxy),
                       result.get("status", "Chưa kiểm tra"),
                       self._count(result, "orders", "order_error"),
-                      self._count(result, "vouchers", "voucher_error"), account.checked_at]
+                      self._count(result, "vouchers", "voucher_error") + " ▾", account.checked_at]
             for column, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
                 item.setToolTip(str(value))
+                if column == self.VOUCHER_COLUMN:
+                    item.setToolTip("Bấm để xổ danh sách voucher của cookie này.")
                 self.table.setItem(index, column, item)
             if account.id == current_id:
                 self.table.setCurrentCell(index, 0)
@@ -263,7 +346,28 @@ class ShopeeDialog(QDialog):
                 self.table.selectionModel().select(self.table.model().index(index, 0),
                                                    QItemSelectionModel.Select | QItemSelectionModel.Rows)
         self.table.blockSignals(False)
+        if self.voucher_popup is not None and self.voucher_popup.isVisible():
+            account = next((a for a in self.store.accounts if a.id == self.voucher_popup.account_id), None)
+            if account is None or account.fingerprint() != self.voucher_popup.fingerprint:
+                self.voucher_popup.hide()
+            else:
+                self.voucher_popup.load_account(account)
         self._details()
+
+    def _cell_clicked(self, row, column):
+        if column != self.VOUCHER_COLUMN or not 0 <= row < len(self.store.accounts):
+            return
+        if self.voucher_popup is None:
+            self.voucher_popup = VoucherPopup(self)
+        rect = self.table.visualItemRect(self.table.item(row, column))
+        viewport = self.table.viewport()
+        self.voucher_popup.open_at(self.store.accounts[row], viewport.mapToGlobal(rect.bottomLeft()),
+                                   viewport.mapToGlobal(rect.topLeft()).y())
+        self.tabs.setCurrentIndex(1)
+
+    def _double_clicked(self, item):
+        if item.column() != self.VOUCHER_COLUMN:
+            self._edit()
 
     @staticmethod
     def _count(result, key, error):
@@ -481,7 +585,14 @@ class ShopeeDialog(QDialog):
 
     def shutdown(self) -> bool:
         self._stop()
+        if self.worker is None:
+            self.hide()
         return self.worker is None
+
+    def hideEvent(self, event):
+        if self.voucher_popup is not None:
+            self.voucher_popup.hide()
+        super().hideEvent(event)
 
     def reject(self):
         # Closing the table hides it; a running worker remains owned until done.
