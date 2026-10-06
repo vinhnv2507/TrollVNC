@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from unittest.mock import patch
 
 from controlios.config import Settings, DeviceSpec
+from controlios.control_channel import ControlError
 from controlios.vnc.pool import DevicePool
 from controlios.ios_update import inspect_package, update_one
 from tests.test_ios_update import write_package
@@ -29,6 +30,7 @@ class PoolUpdateTests(unittest.IsolatedAsyncioTestCase):
             addresses = []
             active = 0
             peak = 0
+            legacy_requests = []
 
             async def http(url, method="GET", body=b""):
                 address = urlsplit(url)
@@ -52,7 +54,10 @@ class PoolUpdateTests(unittest.IsolatedAsyncioTestCase):
 
                 async def command(self, line):
                     nonlocal active, peak
-                    if line == "updateios check": return "OK LAN_UPDATE_1"
+                    if line == "updateios check":
+                        if self.host.endswith(".44"):
+                            raise ControlError("ERR LocalUpdateUnavailable TrollStore/helper missing")
+                        return "OK LAN_UPDATE_1"
                     _, job, version, sha, url = line.split()
                     active += 1
                     peak = max(peak, active)
@@ -68,6 +73,21 @@ class PoolUpdateTests(unittest.IsolatedAsyncioTestCase):
                         await http(url.rsplit("/", 1)[0] + "/status", "POST", json.dumps(status).encode())
                         if not failure: self.version = version
                         return f"OK {job}"
+                    finally:
+                        active -= 1
+
+                async def find_trollstore(self): return "com.opa334.TrollStore"
+
+                async def install_ipa(self, url):
+                    nonlocal active, peak
+                    legacy_requests.append(self.host)
+                    active += 1
+                    peak = max(peak, active)
+                    try:
+                        downloaded = await http(url)
+                        if hashlib.sha256(downloaded).hexdigest() != package.sha256:
+                            raise AssertionError("Fallback served a changed package")
+                        self.version = package.version
                     finally:
                         active -= 1
 
@@ -91,6 +111,7 @@ class PoolUpdateTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(pool.updating_ios)
             self.assertEqual(result[0][1], 5)
             self.assertEqual(result[0][2], [(keys[-1], "Synthetic TrollStore failure")])
+            self.assertEqual(legacy_requests, ["172.30.2.44"])
             self.assertGreater(peak, 1)
             self.assertLessEqual(peak, 3)
             self.assertEqual(len(set(addresses)), 1)
