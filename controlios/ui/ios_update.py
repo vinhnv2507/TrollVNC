@@ -39,7 +39,7 @@ class IOSUpdateDialog(QDialog):
         layout.addLayout(row)
         self.info = QLabel(
             f"Cập nhật {len(self.targets)} máy đã chọn qua server tạm trên PC. Giữ PC mở đến khi xong.\n"
-            "iOS 4.20 trở lên: tự tải, cài và bật lại dịch vụ. Máy bản cũ có thể cần xác nhận\n"
+            "iOS 4.22 trở lên: tự tải, cài và bật lại dịch vụ. Máy bản cũ có thể cần xác nhận\n"
             "Install trong TrollStore và mở ControlIOS một lần khi nâng cấp đầu tiên.")
         self.info.setWordWrap(True)
         layout.addWidget(self.info)
