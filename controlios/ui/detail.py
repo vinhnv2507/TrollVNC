@@ -2,7 +2,7 @@
 
 Chuyển sự kiện chuột/bàn phím của Qt thành sự kiện RFB, ở **toạ độ
 framebuffer** — cửa sổ chính chỉ việc chuyển tiếp xuống pool. Widget này cũng
-tự vẽ con trỏ, vì TrollVNC không gửi hình con trỏ về: không có nó thì bạn
+tự vẽ con trỏ, vì CTRIOS không gửi hình con trỏ về: không có nó thì bạn
 không biết mình vừa chạm vào đâu.
 """
 
@@ -308,7 +308,7 @@ class DetailView(QWidget):
         painter.end()
 
     def _draw_cursor(self, painter: QPainter) -> None:
-        """Vòng ngắm tại vị trí con trỏ — TrollVNC không gửi hình con trỏ về."""
+        """Vòng ngắm tại vị trí con trỏ — CTRIOS không gửi hình con trỏ về."""
 
         if self._cursor is None or not self._target.contains(self._cursor):
             return

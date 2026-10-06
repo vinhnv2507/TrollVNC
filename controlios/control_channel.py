@@ -1,14 +1,14 @@
-"""Kênh điều khiển thứ hai: nói chuyện với control socket của TrollVNC.
+"""Kênh điều khiển thứ hai: nói chuyện với control socket của CTRIOS.
 
-Đây là kênh **song song** với VNC, không thay thế. VNC cho hình ảnh và
-chuột/phím; kênh này cho những thứ VNC không làm được: liệt kê app đã cài, mở
+Đây là kênh **song song** với CTRIOS, không thay thế. CTRIOS cho hình ảnh và
+chuột/phím; kênh này cho những thứ CTRIOS không làm được: liệt kê app đã cài, mở
 và đóng app theo bundle id.
 
-Giao thức của TrollVNC rất đơn giản: mỗi kết nối TCP phục vụ **đúng một dòng
+Giao thức của CTRIOS rất đơn giản: mỗi kết nối TCP phục vụ **đúng một dòng
 lệnh** rồi đóng. Nên ở đây không có phiên nào phải giữ — mỗi lệnh là một kết
 nối ngắn. Kết nối từ ngoài máy phải có tiền tố ``auth <token> ``.
 
-Chỉ dùng được với bản TrollVNC đã vá (xem docs/trollvnc-patch.md).
+Chỉ dùng được với bản CTRIOS đã vá (xem docs/trollvnc-patch.md).
 """
 
 from __future__ import annotations
@@ -58,7 +58,7 @@ class ControlError(RuntimeError):
 
 
 class NotPatchedError(ControlError):
-    """Máy chạy TrollVNC gốc, chưa có các lệnh quản lý app."""
+    """Máy chạy CTRIOS gốc, chưa có các lệnh quản lý app."""
 
 
 class UnauthorizedError(ControlError):
@@ -229,7 +229,7 @@ class ControlChannel:
     async def _command_with_connect_retry(
             self, line: str, read_timeout: Optional[float] = None,
             attempts: int = 3) -> str:
-        """Retry when port 46752 does not accept; VNC may still be online."""
+        """Retry when port 46752 does not accept; CTRIOS may still be online."""
         last = None
         for attempt in range(max(1, attempts)):
             try:
@@ -248,7 +248,7 @@ class ControlChannel:
         head = text.strip()
         if head.startswith("ERR Unauthorized"):
             raise UnauthorizedError(
-                "Sai token. Kiểm tra secret TVNC_CTL_TOKEN dùng lúc build máy đó."
+                "Sai token. Kiểm tra control token dùng lúc build máy đó."
             )
         if head.startswith("ERR Unknown"):
             raise NotPatchedError(
@@ -453,7 +453,7 @@ class ControlChannel:
         raise ControlError(f"Không đọc được ứng dụng đang mở: {reply}")
 
     async def type_text(self, value: str) -> None:
-        """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua VNC keysym."""
+        """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua CTRIOS keysym."""
         encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
         reply = (await self.command(f"typetext64 {encoded}")).strip()
         if not reply.startswith("OK"):
@@ -962,7 +962,7 @@ class ControlChannel:
     async def set_clipboard(self, text: str) -> int:
         """Đặt clipboard của máy = ``text`` (UTF-8). Trả về số byte máy xác nhận.
 
-        Đây là đường vòng qua giới hạn clipboard latin-1 của client VNC: chữ đi
+        Đây là đường vòng qua giới hạn clipboard latin-1 của client CTRIOS: chữ đi
         thẳng vào ``UIPasteboard`` nên **dán được khối chữ dài, đủ dấu tiếng
         Việt** cho hàng loạt máy mà không phải gõ từng ký tự qua keysym.
         """
@@ -1189,7 +1189,7 @@ class ControlChannel:
         """Đổi hệ số scale khung hình (0<factor<=1) lúc đang chạy.
 
         Khung nhỏ hơn -> máy nén nhanh hơn -> mượt hơn, đổi lại kém nét. Đổi kích
-        thước làm phiên VNC nối lại một nhịp (như xoay máy). Cần TrollVNC đã vá.
+        thước làm phiên CTRIOS nối lại một nhịp (như xoay máy). Cần CTRIOS đã vá.
         """
 
         if not (0.0 < factor <= 1.0):
@@ -1244,7 +1244,7 @@ class ControlChannel:
     async def install_ipa(self, url: str) -> None:
         """Nhờ TrollStore trên máy tải và cài .ipa từ URL.
 
-        Tự cài bằng installd cần bộ quyền mà TrollVNC không có; TrollStore mới
+        Tự cài bằng installd cần bộ quyền mà CTRIOS không có; TrollStore mới
         là thứ làm việc này đúng cách, nên ta chỉ đưa URL cho nó.
 
         Phải chỉ đích danh TrollStore: `apple-magnifier://` là scheme TrollStore
@@ -1261,7 +1261,7 @@ class ControlChannel:
         await self.open_url(target)
 
     async def client_count(self) -> int:
-        """Số client VNC đang nối vào máy — lệnh có sẵn của TrollVNC gốc."""
+        """Số client CTRIOS đang nối vào máy — lệnh có sẵn của CTRIOS gốc."""
 
         text = await self.command("count")
         try:

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "controlios"
-version = "0.2.39"
-description = "Control IOS PC — điều khiển nhiều thiết bị iOS qua TrollVNC, control socket và SSH"
+version = "0.2.40"
+description = "Control IOS PC — điều khiển nhiều thiết bị iOS qua CTRIOS, control socket và SSH"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

@@ -1,4 +1,4 @@
-# Checklist build/phát hành TrollVNC đã vá cho ControlIOS
+# Checklist build/phát hành CTRIOS đã vá cho ControlIOS
 
 Tài liệu này chốt quy trình build/phát hành bản `_fork/TrollVNC` đang mang các
 vá của ControlIOS, đặc biệt là các lệnh control socket như `apps`, `put`,
@@ -46,7 +46,7 @@ Riêng với vòng tự hồi phục Keeper, cần xác nhận:
 - `keeper/daemon/main.m` canh `trollvncmanager` bằng `kqueue NOTE_EXIT`
 
 Keeper là bundle RIÊNG (`com.controlios.keeper`), build bằng workflow
-**Build ControlIOS Keeper**, không đi kèm gói TrollVNC. Máy nào muốn tự hồi phục
+**Build ControlIOS Keeper**, không đi kèm gói CTRIOS. Máy nào muốn tự hồi phục
 thì phải cài CẢ HAI.
 
 ## 3. Secrets cần có trên GitHub
@@ -81,7 +81,7 @@ Với ControlIOS, nên bật:
 
 Điền tối thiểu:
 
-- `desktop_name`: tên máy hiển thị cho VNC client
+- `desktop_name`: tên máy hiển thị cho CTRIOS client
 - `port`: thường là `5901`
 - `scale`: theo cấu hình farm của bạn
 - `frame_rate_spec`: nếu muốn cố định fps ngay từ lúc build
@@ -172,7 +172,7 @@ Với máy jailbreak dùng `.deb`:
 
 Từ PC, kiểm tra theo thứ tự:
 
-1. Mở ControlIOS và kết nối được VNC tới máy
+1. Mở ControlIOS và kết nối được CTRIOS tới máy
 2. Thử lệnh control cơ bản:
    - `apps`
    - `clipget`

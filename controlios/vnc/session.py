@@ -1,4 +1,4 @@
-"""A single TrollVNC connection, with a tier that decides how much it costs.
+"""A single CTRIOS connection, with a tier that decides how much it costs.
 
 The scaling trick for hundreds of phones lives here: RFB only sends pixels the
 client asks for. A session in IDLE tier keeps its TCP connection and its input
@@ -202,7 +202,7 @@ class VncSession:
     async def sleep(self) -> None:
         """Ngắt hẳn kết nối để máy ngừng chụp hình.
 
-        TrollVNC chỉ chạy ScreenCapturer khi còn client nối vào, nên rời đi là
+        CTRIOS chỉ chạy ScreenCapturer khi còn client nối vào, nên rời đi là
         cách duy nhất để trả CPU và bộ nhớ lại cho iPhone. Tier IDLE chỉ tiết
         kiệm băng thông và CPU phía PC, máy vẫn phải render.
         """
@@ -341,7 +341,7 @@ class VncSession:
     def _discard_dropped_inflight(self, depth: int) -> None:
         """Forget leftover pipelined FBURs once when a drag starts.
 
-        Pipeline=2 hides RTT while watching. TrollVNC Q=1 can consume the extra
+        Pipeline=2 hides RTT while watching. CTRIOS Q=1 can consume the extra
         FBUR without a VIDEO reply, leaving a ghost _inflight. 0.2.15 then
         waited stall_timeout (20s) after depth dropped to 1.
 
@@ -617,7 +617,7 @@ class VncSession:
         except OSError:
             # Một số transport/test double không cho chỉnh socket; không làm
             # hỏng phiên VNC chỉ vì tối ưu tuỳ chọn này thất bại.
-            log.debug("cannot tune VNC socket", exc_info=True)
+            log.debug("cannot tune CTRIOS socket", exc_info=True)
 
     async def _session(self, client: asyncvnc.Client) -> None:
         """Reader and pacer run concurrently; either failing ends the session."""

@@ -18,7 +18,7 @@ manager và ControlIOS sau khi thay bundle, rồi PC kiểm tra phiên bản dae
 trao đổi RFB ban đầu. Việc tải xong/gửi lệnh cài chưa được tính là thành công.
 
 **Máy đang dùng iOS ControlIOS trước 4.18:** PC gửi URL gói local cho TrollStore.
-Nếu TrollStore hỏi thì bấm Install qua VNC; nếu không có Keeper tự bật lại app,
+Nếu TrollStore hỏi thì bấm Install qua CTRIOS; nếu không có Keeper tự bật lại app,
 cần mở ControlIOS một lần sau khi cài. Đây là bước nâng cấp ban đầu để có tiến trình
 cập nhật độc lập; những lần cập nhật tiếp theo dùng cơ chế tự động trên.
 
@@ -34,6 +34,6 @@ phản hồi ban đầu bị mất giữa lúc iPhone đang thay app.
 
 PC 0.2.39 hiển thị bước xác nhận hiện tại và thời gian chờ còn lại. Nếu app đã cài
 bản mới nhưng dịch vụ vẫn là bản cũ, bảng ghi rõ hai phiên bản và yêu cầu mở
-ControlIOS trên iPhone. Nếu dịch vụ đã lên bản mới nhưng VNC chưa phản hồi, bảng
-ghi đang chờ VNC. Các lần kiểm tra đều có giới hạn thời gian; lỗi token được báo
-ngay. Máy đã có bản mới được kiểm tra VNC và không gửi lại gói cài.
+ControlIOS trên iPhone. Nếu dịch vụ đã lên bản mới nhưng CTRIOS chưa phản hồi, bảng
+ghi đang chờ CTRIOS. Các lần kiểm tra đều có giới hạn thời gian; lỗi token được báo
+ngay. Máy đã có bản mới được kiểm tra CTRIOS và không gửi lại gói cài.

@@ -225,7 +225,7 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
     async def test_existing_version_with_stalled_vnc_is_explicit_failure(self):
         self.channel.server_version.return_value = "4.19"
         self.verify.return_value = False
-        with self.assertRaisesRegex(ControlError, "VNC chưa phản hồi"):
+        with self.assertRaisesRegex(ControlError, "CTRIOS chưa phản hồi"):
             await self.flow()
         self.channel.install_ipa.assert_not_called()
 

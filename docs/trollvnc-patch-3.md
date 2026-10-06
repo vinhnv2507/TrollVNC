@@ -1,4 +1,4 @@
-# Patch TrollVNC vòng 3: clipboard UTF-8 và nạp ảnh vào Thư viện
+# Patch CTRIOS vòng 3: clipboard UTF-8 và nạp ảnh vào Thư viện
 
 Thêm ba lệnh nữa vào control socket:
 
@@ -10,7 +10,7 @@ savephoto <đường dẫn> -> nạp một ảnh đã có trên máy vào Thư v
 
 Vì sao đáng làm:
 
-- **Clipboard** đi vòng qua giới hạn client VNC: `asyncvnc` chỉ có `ClientCutText`
+- **Clipboard** đi vòng qua giới hạn client CTRIOS: `asyncvnc` chỉ có `ClientCutText`
   latin-1 nên đường clipboard cũ không gửi được tiếng Việt. Đặt thẳng vào
   `UIPasteboard` thì **dán được khối chữ dài, đủ dấu và cả emoji** cho hàng loạt
   máy — nhanh hơn hẳn gõ từng ký tự qua keysym.
@@ -43,7 +43,7 @@ Có mấy đường xử lý, thử theo thứ tự:
 2. **Ghi thẳng bản ghi TCC**: trên máy jailbreak, chèn dòng cho phép vào
    `/var/mobile/Library/TCC/TCC.db` (cần root — đi qua **kênh SSH** có sẵn). Cách
    này chỉ hợp máy đã jailbreak.
-3. **Chuyển việc nạp sang chính app TrollVNC** (có UI) thay vì daemon: app xin
+3. **Chuyển việc nạp sang chính app CTRIOS** (có UI) thay vì daemon: app xin
    quyền một lần, người dùng bấm Đồng ý, từ đó nạp ảnh được. Nặng hơn nhưng chắc
    ăn nhất cho máy chỉ có TrollStore.
 
@@ -56,7 +56,7 @@ không phải sửa gì thêm ở PC.
 
 ## 1/5 — Thêm framework khi build (chỉ cho `savephoto`)
 
-Đọc `Makefile` thật của TrollVNC thì thấy:
+Đọc `Makefile` thật của CTRIOS thì thấy:
 
 - **`UIKit` đã có sẵn** (dòng `trollvncserver_FRAMEWORKS += UIKit`) vì
   `ClipboardManager.mm` vốn dùng `UIPasteboard`. Nên **`clipset`/`clipget` không
@@ -266,7 +266,7 @@ Nếu vẫn trả `ERR Denied`, thử theo thứ tự:
 
 2. Máy jailbreak: ghi thẳng bản ghi cho phép vào `/var/mobile/Library/TCC/TCC.db`
    qua **kênh SSH** có sẵn (cần root).
-3. Chuyển việc nạp ảnh sang chính **app TrollVNC** (có UI, xin quyền một lần).
+3. Chuyển việc nạp ảnh sang chính **app CTRIOS** (có UI, xin quyền một lần).
 
 `clipset`/`clipget` **không cần** entitlement gì thêm — `com.apple.Pasteboard.background-access`
 đã bật sẵn nên clipboard chạy tốt từ tiến trình nền.

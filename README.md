@@ -1,11 +1,11 @@
 ﻿# Control IOS PC
 
-Quản lý và điều khiển nhiều iPhone chạy **TrollVNC** từ một cửa sổ duy nhất —
-thay cho việc mở hàng trăm cửa sổ TightVNC rời rạc. Thiết kế cho quy mô **250
+Quản lý và điều khiển nhiều iPhone chạy **CTRIOS** từ một cửa sổ duy nhất —
+thay cho việc mở hàng trăm cửa sổ CTRIOS rời rạc. Thiết kế cho quy mô **250
 máy** trong dải `172.30.x.x:5901`.
 
-Phần mềm nói chuyện thẳng bằng giao thức RFB (VNC) nên nó vừa *xem* được màn
-hình vừa *bơm* được thao tác chuột/phím — không cần TightVNC viewer nữa.
+Phần mềm nói chuyện thẳng bằng giao thức RFB (CTRIOS) nên nó vừa *xem* được màn
+hình vừa *bơm* được thao tác chuột/phím — không cần CTRIOS viewer nữa.
 
 Nút **Shopee** mở bảng lưu cookie và proxy riêng từng tài khoản, kiểm tra đơn
 gần đây và voucher ngay trong tool. Xem [hướng dẫn bảng Shopee](docs/shopee-pc.md).
@@ -90,7 +90,7 @@ lưới vẫn giữ 3 kênh vì đã ít điểm ảnh, giữ 4 kênh chỉ phí
 ### Giảm tải cho chính iPhone
 
 Cơ chế tier ở trên tiết kiệm cho **phía PC và mạng**. Nhưng đọc mã nguồn
-TrollVNC thì thấy nó **bật/tắt ScreenCapturer theo số client đang nối**
+CTRIOS thì thấy nó **bật/tắt ScreenCapturer theo số client đang nối**
 (`trollvncserver.mm`: `startCapture` khi `gClientCount > 0`, `endCapture` khi về
 0). Nghĩa là chừng nào Control IOS còn giữ kết nối, **iPhone vẫn render và mã
 hoá khung hình** dù bạn không nhìn ô đó.
@@ -107,13 +107,13 @@ máy rồi chạy kịch bản vẫn đủ, không bỏ sót máy nào.
 
 Đặt `0` để tắt hẳn chính sách này và giữ nguyên hành vi cũ.
 
-> Một cách nữa, không cần code: build TrollVNC với ô **`frame_rate_spec`** đặt
+> Một cách nữa, không cần code: build CTRIOS với ô **`frame_rate_spec`** đặt
 > thấp (ví dụ `5`). Chỉ theo dõi và điều khiển thì 5 hình/giây là quá đủ, mà
 > CPU trên máy giảm hẳn. Một lần build dùng cho cả 250 máy.
 
 ### Số đo thực tế
 
-Đo bằng `tools/bench_scale.py`, giả lập 250 máy TrollVNC **chạy chung một tiến
+Đo bằng `tools/bench_scale.py`, giả lập 250 máy CTRIOS **chạy chung một tiến
 trình với client** (nên số CPU dưới đây đã bao gồm cả phần nén zlib mà ngoài
 đời là việc của iPhone — thực tế sẽ nhẹ hơn):
 
@@ -133,7 +133,7 @@ cần chỉnh gì.
 
 ### 1. Tìm máy
 
-TrollVNC **tự quảng bá dịch vụ `_rfb._tcp` qua Bonjour/mDNS**, nên cách tốt
+CTRIOS **tự quảng bá dịch vụ `_rfb._tcp` qua Bonjour/mDNS**, nên cách tốt
 nhất là hỏi thẳng mạng thay vì dò từng địa chỉ:
 
 ```powershell
@@ -165,7 +165,7 @@ Việc dò chỉ nhận máy trả lời đúng banner `RFB `, nên không nhầ
 
 Cả ba kênh đều là TCP nên **forward được qua dây USB** bằng usbmuxd của Apple
 (đi kèm iTunes / Apple Mobile Device Support). Nút **Quét USB** trên thanh công
-cụ: tìm iPhone đang cắm, tự dựng relay (`tidevice`) cho cả VNC lẫn control socket
+cụ: tìm iPhone đang cắm, tự dựng relay (`tidevice`) cho cả CTRIOS lẫn control socket
 lẫn SSH, rồi nạp vào lưới ở nhóm `usb`. Máy USB nhớ **cổng riêng từng kênh**
 (`127.0.0.1:<cổng>`) trong `DeviceSpec` nên **mọi tính năng chạy y như qua mạng**
 — xem/điều khiển, app, clipboard, nạp ảnh, reset dữ liệu app, respring, scale, SSH.
@@ -216,7 +216,7 @@ framebuffer** của đúng máy đó.
 
 ### Chuột
 
-Theo [mã nguồn TrollVNC](https://github.com/OwnGoalStudio/TrollVNC) (GPLv2), nút
+Theo [mã nguồn CTRIOS](https://github.com/OwnGoalStudio/TrollVNC) (GPLv2), nút
 chuột được map thành **nút cứng của iPhone**:
 
 | Thao tác | iPhone nhận được |
@@ -224,14 +224,14 @@ chuột được map thành **nút cứng của iPhone**:
 | Chuột trái, bấm/kéo/nhả | một ngón chạm; giữ để kéo |
 | **Chuột phải** | **nút Home/Menu** |
 | **Chuột giữa** | **nút Power** |
-| **Bánh xe** | vuốt ngắn (TrollVNC quy đổi, mặc định 48 px mỗi nấc, đổi bằng `-W`) |
+| **Bánh xe** | vuốt ngắn (CTRIOS quy đổi, mặc định 48 px mỗi nấc, đổi bằng `-W`) |
 | Bấm ra ngoài vùng ảnh | không gửi gì |
 
 Nên **chuột phải là về màn hình chính, chuột giữa là khoá máy** — nhớ điều này
 trước khi bấm bừa. Bánh xe nhích ít hơn một nấc vẫn cuộn một bước, nếu không
 cảm giác là kẹt.
 
-**Con trỏ có vòng ngắm**: TrollVNC không gửi hình con trỏ về, nên không vẽ thì
+**Con trỏ có vòng ngắm**: CTRIOS không gửi hình con trỏ về, nên không vẽ thì
 bạn không biết mình vừa chạm vào đâu. Vòng xanh là đang di, đỏ là đang giữ nút.
 
 **Thanh trạng thái hiện toạ độ** dạng `x=188 y=901 · 0.500 0.675`. Hai số sau
@@ -246,9 +246,9 @@ nút cần chạm rồi đọc số.
   bị **bỏ qua và ghi vào nhật ký**, chứ không làm chết cả kịch bản như trước.
 - **Tổ hợp bổ trợ**: Ctrl / Alt / Shift / Cmd (Super) + phím. `Ctrl+C` gửi đúng
   tổ hợp thay vì ký tự điều khiển thô, và nhả theo thứ tự ngược đúng quy ước.
-  Phía TrollVNC map `Alt → Option`, `Meta/Super → Command` (đổi được bằng `-M`).
+  Phía CTRIOS map `Alt → Option`, `Meta/Super → Command` (đổi được bằng `-M`).
 - **Phím đặc biệt**: Enter, BackSpace, Delete, Esc, Tab, 4 mũi tên, Home, End,
-  PageUp/Down, Insert, Space, F1–F12. TrollVNC nhận tới F24 nếu bạn cần thêm.
+  PageUp/Down, Insert, Space, F1–F12. CTRIOS nhận tới F24 nếu bạn cần thêm.
 - Giữ phím thì máy nhận nhiều lần (không chặn auto-repeat).
 - Nút **⏎ ⌫ Esc** trên thanh công cụ bấm nhanh cho các máy đang chọn.
 
@@ -260,9 +260,9 @@ hàng loạt máy.
 
 > Phần mềm gõ **từng ký tự qua keysym** — chậm hơn nhưng đúng dấu. Thư viện
 > client `asyncvnc` chỉ hiện thực `ClientCutText` chuẩn (latin-1) nên đường
-> clipboard **của VNC** không dùng được cho tiếng Việt.
+> clipboard **của CTRIOS** không dùng được cho tiếng Việt.
 >
-> **Đường vòng: đặt clipboard qua kênh điều khiển.** Với máy chạy TrollVNC đã vá
+> **Đường vòng: đặt clipboard qua kênh điều khiển.** Với máy chạy CTRIOS đã vá
 > (vòng 3), tick **Đặt vào clipboard máy (UTF-8, nhanh)** trong hộp *Gõ chữ…*:
 > chữ đi thẳng vào `UIPasteboard`, giữ đúng dấu lẫn emoji và **nhanh hơn hẳn** gõ
 > từng ký tự — hợp khi cần dán cùng một khối chữ dài (caption, bình luận) cho
@@ -284,18 +284,18 @@ hình vẫn trúng chỗ:
 Kết hợp được với **Điều khiển thẳng trên lưới**: bấm vào một ô bất kỳ là thao
 tác đó phát cho toàn bộ máy đang chọn.
 
-## Bảng ứng dụng (cần TrollVNC đã vá)
+## Bảng ứng dụng (cần CTRIOS đã vá)
 
 Nút **Ứng dụng** mở bảng bên phải — đây là nơi gom **mọi thao tác với app và
 máy**:
 
 - Hàng trên cùng: **⌂ Home**, **⇄ Chuyển app**, **⏻ Khoá máy**. Đây là thao tác
-  mức thiết bị, đi bằng nút cứng (chuột phải/giữa theo map của TrollVNC).
+  mức thiết bị, đi bằng nút cứng (chuột phải/giữa theo map của CTRIOS).
 - Nút **RAM** (cạnh Home/App/Khoá): đóng hết app đang chạy để giải phóng RAM cho remote.
   Giữ ControlIOS, TrollStore và tiến trình hệ thống; **EarnApp/Golike cũng bị đóng**.
-  Không tự chạy lúc kết nối VNC. `closeall 5` chỉ hất thẻ switcher, không thay `freeram`.
+  Không tự chạy lúc kết nối CTRIOS. `closeall 5` chỉ hất thẻ switcher, không thay `freeram`.
 - Hàng **Độ sáng**: `▁ Tối đa` hạ xuống đáy, `− +` từng nấc, `▔ Sáng` lên cao
-  nhất. Điều khiển qua VNC nên **máy chưa vá cũng dùng được**. Xem mục dưới về
+  nhất. Điều khiển qua CTRIOS nên **máy chưa vá cũng dùng được**. Xem mục dưới về
   chuyện tắt hẳn màn hình.
 - Danh sách app đã cài, mỗi app một biểu tượng màu: **bấm để mở**, **chuột phải
   để đóng**. Có ô lọc theo tên hoặc bundle id, mặc định ẩn app hệ thống.
@@ -306,7 +306,7 @@ cú bấm.
 Menu "Thao tác app" cũ trên thanh công cụ đã bỏ: mở/đóng app qua bundle id ở
 bảng này chính xác hơn hẳn cử chỉ Spotlight. Các cử chỉ `openapp <tên>`,
 `closeapp`, `applibrary` vẫn dùng được **trong kịch bản**, làm phương án dự
-phòng cho máy chưa cài bản TrollVNC đã vá.
+phòng cho máy chưa cài bản CTRIOS đã vá.
 
 Trong kịch bản thì dùng bundle id:
 
@@ -328,12 +328,12 @@ Nút **⤓ Cài .ipa…** trong bảng Ứng dụng. Cách hoạt động:
 2. Gửi cho từng máy: `openurl apple-magnifier://install?url=http://<ip-pc>:<cổng>/<file>`
 3. **TrollStore** trên từng máy tự tải về và cài
 
-Cố ý không tự cài bằng `installd`: việc đó cần bộ quyền TrollVNC không có, còn
+Cố ý không tự cài bằng `installd`: việc đó cần bộ quyền CTRIOS không có, còn
 TrollStore vốn làm đúng. Phần code trên máy vì thế chỉ là một lệnh mở URL.
 
 Web server sống thêm 5 phút sau khi gửi lệnh (máy còn phải tải), tự tắt sớm khi
 đủ số máy đã tải xong. TrollStore có thể hỏi xác nhận trên máy — lúc đó bấm OK
-qua màn hình VNC, hoặc phát thao tác cho nhiều máy cùng lúc.
+qua màn hình CTRIOS, hoặc phát thao tác cho nhiều máy cùng lúc.
 
 Từ dòng lệnh:
 
@@ -359,9 +359,9 @@ nên không phình dung lượng và không tốn RAM với file lớn.
 
 ### Điều kiện
 
-Tính năng này đi qua **kênh điều khiển thứ hai**, song song với VNC. Cần:
+Tính năng này đi qua **kênh điều khiển thứ hai**, song song với CTRIOS. Cần:
 
-1. Máy chạy **bản TrollVNC đã vá**:
+1. Máy chạy **bản CTRIOS đã vá**:
    - [docs/trollvnc-patch.md](docs/trollvnc-patch.md) — vòng 1: `apps`, `launch`, `terminate`
    - [docs/trollvnc-patch-2.md](docs/trollvnc-patch-2.md) — vòng 2: `put`, `openurl`
 2. Khai `control_token` trong `config/devices.json`, đúng token đã dùng lúc build
@@ -397,11 +397,11 @@ Báo *"No connection could be made"* ở cổng 46752 nghĩa là máy đó chưa
 ```
 
 Kênh này chỉ mở một socket ngắn cho mỗi lệnh, không giữ kết nối, nên không ảnh
-hưởng gì tới luồng hình VNC.
+hưởng gì tới luồng hình CTRIOS.
 
 ## SSH — máy đã jailbreak
 
-Kênh thứ ba, và là kênh mạnh nhất. Nó **chấm dứt vòng lặp** "vá TrollVNC →
+Kênh thứ ba, và là kênh mạnh nhất. Nó **chấm dứt vòng lặp** "vá CTRIOS →
 build trên GitHub → cài lại từng máy": mọi tính năng mới sau này chỉ còn là một
 câu lệnh shell.
 
@@ -409,8 +409,8 @@ Ba kênh bổ nhau chứ không thay thế nhau:
 
 | Kênh | Làm được gì | Điều kiện |
 |---|---|---|
-| **VNC** | hình ảnh, chuột/phím | mọi máy |
-| **Control socket** | app, truyền file, mở URL | TrollVNC đã vá |
+| **CTRIOS** | hình ảnh, chuột/phím | mọi máy |
+| **Control socket** | app, truyền file, mở URL | CTRIOS đã vá |
 | **SSH** | lệnh tuỳ ý, SFTP | máy đã jailbreak |
 
 Nút **SSH…** mở bảng chạy lệnh: gõ lệnh, chạy song song trên các máy đang chọn,
@@ -489,7 +489,7 @@ switcher_swipe        # dự phòng: mở switcher bằng vuốt-và-giữ
 ```
 
 **`home`, `switcher`, `lock` không phụ thuộc toạ độ** — chúng bấm nút cứng qua
-map nút chuột của TrollVNC, nên chạy đúng trên mọi đời máy mà không cần hiệu
+map nút chuột của CTRIOS, nên chạy đúng trên mọi đời máy mà không cần hiệu
 chỉnh gì. Chỉ các cử chỉ còn lại (`spotlight`, `closeapp`, `applibrary`) mới
 dùng toạ độ và có thể cần chỉnh. Máy nào bấm nút không ăn thì còn `home_swipe`
 và `switcher_swipe`.
@@ -606,8 +606,8 @@ tay. Sau đó BackgroundTasks giúp iOS tự bật lại khi có cơ hội.
 
 #### Vì sao không có lệnh "liệt kê app đã cài"
 
-VNC **chỉ có màn hình và chuột/phím**. Không có kênh nào để hỏi iOS "máy này
-cài app gì" hay "mở bundle id `com.example.app`" — TrollVNC không mở cổng đó.
+CTRIOS **chỉ có màn hình và chuột/phím**. Không có kênh nào để hỏi iOS "máy này
+cài app gì" hay "mở bundle id `com.example.app`" — CTRIOS không mở cổng đó.
 Nên mọi lệnh app ở đây đều là **cử chỉ**, đúng như bạn tự thao tác tay:
 
 - `openapp` = mở Spotlight, gõ tên, nhấn Enter. Cần **tên hiển thị** trên máy
@@ -616,7 +616,7 @@ Nên mọi lệnh app ở đây đều là **cử chỉ**, đúng như bạn t�
   `shot` thì được **ảnh chụp** các trang app — không phải danh sách chữ.
 
 Muốn danh sách app dạng text đúng nghĩa (và mở/đóng theo bundle id) thì phải
-có kênh khác ngoài VNC, ví dụ SSH trên máy. Xem "Giới hạn đã biết" bên dưới.
+có kênh khác ngoài CTRIOS, ví dụ SSH trên máy. Xem "Giới hạn đã biết" bên dưới.
 
 #### Toạ độ cử chỉ chỉnh được
 
@@ -844,14 +844,14 @@ Soi bố cục bằng ảnh (không cần iPhone):
 
 ## Giới hạn đã biết
 
-- Nếu TrollVNC bản của bạn có bảng map phím khác, sửa `SPECIAL_KEYS` trong
+- Nếu CTRIOS bản của bạn có bảng map phím khác, sửa `SPECIAL_KEYS` trong
   `controlios/ui/detail.py` và `config/gestures.json`.
-- **Clipboard UTF-8** của TrollVNC chưa dùng được vì client `asyncvnc` chỉ có
+- **Clipboard UTF-8** của CTRIOS chưa dùng được vì client `asyncvnc` chỉ có
   `ClientCutText` latin-1 (xem mục Gõ chữ).
-- Client chỉ đăng ký encoding **ZLib**; nếu TrollVNC không hỗ trợ, nó rơi về
+- Client chỉ đăng ký encoding **ZLib**; nếu CTRIOS không hỗ trợ, nó rơi về
   **Raw** (vẫn chạy, chỉ tốn băng thông hơn). Client chưa yêu cầu Tight/ZRLE
-  dù TrollVNC có thể hỗ trợ — chỗ này còn dư địa tối ưu băng thông cho 250 máy.
-- TrollVNC tự **xoay framebuffer** theo hướng máy (0/90/180/270°). Khi kích
+  dù CTRIOS có thể hỗ trợ — chỗ này còn dư địa tối ưu băng thông cho 250 máy.
+- CTRIOS tự **xoay framebuffer** theo hướng máy (0/90/180/270°). Khi kích
   thước đổi (dọc ↔ ngang), client này không đăng ký pseudo-encoding DesktopSize
   nên phiên đó ngắt rồi tự nối lại — không mất máy, chỉ chớp một nhịp, và khung
   điều khiển tự nới ra theo tỉ lệ mới.
@@ -860,13 +860,13 @@ Soi bố cục bằng ảnh (không cần iPhone):
 - Kịch bản chạy **mở vòng**: nó gửi thao tác theo đúng thời gian đã ghi, chứ
   không đọc màn hình để chờ một nút hiện ra. Nếu máy phản ứng chậm, tăng `wait`.
   Muốn kiểm chứng thì chèn `shot` ở các mốc rồi xem lại ảnh.
-- VNC thuần không liệt kê/mở/đóng app theo bundle id. Bản hiện tại giải quyết
-  bằng control socket của TrollVNC đã vá, hoặc bằng kênh SSH trên máy jailbreak
+- CTRIOS thuần không liệt kê/mở/đóng app theo bundle id. Bản hiện tại giải quyết
+  bằng control socket của CTRIOS đã vá, hoặc bằng kênh SSH trên máy jailbreak
   (xem mục "Bảng ứng dụng" và "SSH — máy đã jailbreak").
 - Toạ độ cử chỉ mặc định nhắm iPhone Face ID dọc màn hình. Máy có nút Home vật
   lý, hoặc iOS khác đời, cần chỉnh `config/gestures.json`.
 - **Nạp ảnh và video vào Thư viện Ảnh** đã chạy: nút **Nạp ảnh/video…** (đẩy file
-  rồi gọi `PHPhotoLibrary`), lệnh kịch bản `savephoto`, và bản vá TrollVNC vòng 3
+  rồi gọi `PHPhotoLibrary`), lệnh kịch bản `savephoto`, và bản vá CTRIOS vòng 3
   ([docs/trollvnc-patch-3.md](docs/trollvnc-patch-3.md) — đã kèm entitlement TCC
   nên quyền được cấp sẵn, không cần hộp thoại). **Video tự chuẩn hoá:** iOS chỉ
   nhận H.264 (≤1080p) / HEVC, `yuv420p` — một `.mp4` mở tốt trên PC (ví dụ 4K
@@ -875,11 +875,11 @@ Soi bố cục bằng ảnh (không cần iPhone):
   ở `captures/_media_tmp/`). Cần **ffmpeg trên PATH**; thiếu thì video được đẩy
   nguyên bản và máy tự báo lỗi nếu không nạp được.
 - Cài `.ipa` phụ thuộc TrollStore trên máy nhận URL `apple-magnifier://`. Nếu
-  TrollStore hỏi xác nhận thì phải bấm OK qua VNC — chưa tự động hoá bước đó.
-- **Không tắt hẳn được màn hình mà vẫn giữ VNC.** TrollVNC chụp hình bằng
+  TrollStore hỏi xác nhận thì phải bấm OK qua CTRIOS — chưa tự động hoá bước đó.
+- **Không tắt hẳn được màn hình mà vẫn giữ CTRIOS.** CTRIOS chụp hình bằng
   IOSurface + CoreAnimation render server, **theo nhịp `CADisplayLink`** — mà
   `CADisplayLink` chạy theo nhịp quét của màn hình. Màn tắt thì nhịp đó dừng,
-  luồng hình VNC đứng theo. Nên cách dùng được là **hạ độ sáng xuống đáy**:
-  màn vẫn bật (VNC vẫn chạy), panel tối, tiết kiệm pin — nhất là máy OLED.
+  luồng hình CTRIOS đứng theo. Nên cách dùng được là **hạ độ sáng xuống đáy**:
+  màn vẫn bật (CTRIOS vẫn chạy), panel tối, tiết kiệm pin — nhất là máy OLED.
   Muốn kiểm chứng thì bấm **⏻ Khoá máy** trên một máy rồi xem ô của nó ở lưới
   còn cập nhật không.

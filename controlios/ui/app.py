@@ -4178,7 +4178,7 @@ class MainWindow(QMainWindow):
         )
 
     def _send_media_key(self, name: str, repeat: int) -> None:
-        """Độ sáng/âm lượng — đi qua VNC nên máy chưa vá cũng dùng được."""
+        """Độ sáng/âm lượng — đi qua CTRIOS nên máy chưa vá cũng dùng được."""
 
         targets = self._confirmed_action_targets(f"{name} độ sáng/âm lượng")
         if targets is None:
@@ -4229,7 +4229,7 @@ class MainWindow(QMainWindow):
             f"Cài <b>{ipa.name}</b> ({ipa.stat().st_size // 1024} KB) lên "
             f"<b>{len(targets)} máy</b>?<br><br>"
             "PC sẽ mở một web server tạm để máy tải file về. TrollStore trên "
-            "từng máy có thể hỏi xác nhận — lúc đó bấm OK qua màn hình VNC.",
+            "từng máy có thể hỏi xác nhận — lúc đó bấm OK qua màn hình CTRIOS.",
         )
         if answer != QMessageBox.Yes:
             return

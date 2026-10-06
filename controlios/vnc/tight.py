@@ -1,6 +1,6 @@
-"""Tight (RFB encoding 7) for TrollVNC.
+"""Tight (RFB encoding 7) for CTRIOS.
 
-asyncvnc only asks for ZLib-raw 32bpp. TrollVNC already links turbojpeg and
+asyncvnc only asks for ZLib-raw 32bpp. CTRIOS already links turbojpeg and
 will send Tight JPEG once the client lists encoding 7 plus a QualityLevel.
 A full-dirty Shopee frame as JPEG is a fraction of the zlib-raw size, which
 is what makes remote dragging usable on a busy WiFi farm.

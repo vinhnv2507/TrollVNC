@@ -278,7 +278,7 @@ class ControlChannelTest(unittest.IsolatedAsyncioTestCase):
         bad = ControlChannel("127.0.0.1", self.server.port, "SaiToken", timeout=3)
         with self.assertRaises(UnauthorizedError) as ctx:
             await bad.list_apps()
-        self.assertIn("TVNC_CTL_TOKEN", str(ctx.exception))
+            self.assertIn("control token", str(ctx.exception))
         self.assertEqual(self.server.unauthorized, 1)
 
     async def test_unpatched_server_says_so(self) -> None:

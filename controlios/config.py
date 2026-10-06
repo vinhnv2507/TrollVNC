@@ -150,7 +150,7 @@ def save_earnapp_monitor_code(code: str, path: Path | str | None = None) -> None
 
 @dataclass
 class DeviceSpec:
-    """One TrollVNC iPhone."""
+    """One CTRIOS iPhone."""
 
     host: str
     port: int = DEFAULT_PORT

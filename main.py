@@ -32,11 +32,11 @@ def main() -> int:
     parser.add_argument("--scan", nargs="+", metavar="TARGET",
                         help="dải cần quét: 172.30.3.0/24, 172.30.3.10-90, hoặc IP")
     parser.add_argument("--bonjour", action="store_true",
-                        help="tìm máy qua mDNS _rfb._tcp (TrollVNC tự quảng bá)")
+                        help="tìm máy qua mDNS _rfb._tcp (CTRIOS tự quảng bá)")
     parser.add_argument("--bonjour-timeout", type=float, default=4.0,
                         help="số giây lắng nghe quảng bá mDNS (mặc định 4)")
     parser.add_argument("--scan-arp", action="store_true",
-                        help="lấy IP từ bảng ARP rồi dò cổng VNC")
+                        help="lấy IP từ bảng ARP rồi dò cổng CTRIOS")
     parser.add_argument("--arp-prefix", default="172.30.",
                         help="tiền tố IP cần lọc trong bảng ARP (mặc định 172.30.)")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
@@ -48,7 +48,7 @@ def main() -> int:
             print(f"Lắng nghe quảng bá _rfb._tcp trong {args.bonjour_timeout}s…")
             hosts = discover_bonjour(args.bonjour_timeout)
             if not hosts:
-                print("Không thấy máy nào. Kiểm tra: TrollVNC đang chạy, PC và "
+                print("Không thấy máy nào. Kiểm tra: CTRIOS đang chạy, PC và "
                       "iPhone cùng mạng LAN, mDNS không bị firewall chặn.")
         elif args.scan_arp:
             candidates = arp_hosts(args.arp_prefix)
@@ -58,7 +58,7 @@ def main() -> int:
             hosts = scan_sync(args.scan, args.port)
         added = registry.merge_hosts(hosts, args.port)
         registry.save(DEFAULT_REGISTRY)
-        print(f"Tìm thấy {len(hosts)} máy TrollVNC, thêm mới {added}.")
+        print(f"Tìm thấy {len(hosts)} máy CTRIOS, thêm mới {added}.")
         print(f"Đã ghi {DEFAULT_REGISTRY}")
         return 0
 

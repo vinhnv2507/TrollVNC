@@ -232,8 +232,8 @@ async def update_one(channel, package: IOSPackage, server: UpdateServer,
             await asyncio.sleep(interval)
     if version_key(current) >= version_key(package.version):
         if not await asyncio.wait_for(verify_vnc(channel.host, vnc_port), 12):
-            raise ControlError(f"Đã có ControlIOS {current}; VNC chưa phản hồi, không gửi lại gói cài")
-        on_event(f"Đã có ControlIOS {current}, màn hình VNC phản hồi; không cần cài lại")
+            raise ControlError(f"Đã có ControlIOS {current}; CTRIOS chưa phản hồi, không gửi lại gói cài")
+        on_event(f"Đã có ControlIOS {current}, màn hình CTRIOS phản hồi; không cần cài lại")
         return "skipped"
     # Choose the PC interface that routes to THIS phone (VPN/multiple NIC safe).
     pc_ip = local_ip(channel.host)
@@ -294,10 +294,10 @@ async def wait_for_update(channel, package, server, job, vnc_port, on_event,
             last_version = await asyncio.wait_for(channel.server_version(),
                 min(15, max(.001, deadline - time.monotonic())))
             if version_key(last_version) >= version_key(package.version):
-                reason = f"Dịch vụ đã lên {last_version}; đang chờ màn hình VNC phản hồi"
+                reason = f"Dịch vụ đã lên {last_version}; đang chờ màn hình CTRIOS phản hồi"
                 if await asyncio.wait_for(verify_vnc(channel.host, vnc_port),
                         min(12, max(.001, deadline - time.monotonic()))):
-                    on_event(f"Thành công: ControlIOS {last_version}, màn hình VNC phản hồi")
+                    on_event(f"Thành công: ControlIOS {last_version}, màn hình CTRIOS phản hồi")
                     return "updated"
             else:
                 reason = f"Dịch vụ vẫn là {last_version}; đang chờ ControlIOS {package.version} khởi động"
@@ -330,7 +330,7 @@ async def wait_for_update(channel, package, server, job, vnc_port, on_event,
         await asyncio.sleep(min(interval, max(0, deadline - time.monotonic())))
     downloaded = server.hits.get(job, 0) > 0
     if version_key(last_version) >= version_key(package.version):
-        detail = f"Dịch vụ đã lên {last_version}, nhưng VNC chưa phản hồi"
+        detail = f"Dịch vụ đã lên {last_version}, nhưng CTRIOS chưa phản hồi"
     elif installed_version and version_key(installed_version) >= version_key(package.version):
         detail = f"App đã cài {installed_version}; mở ControlIOS trên iPhone để bật dịch vụ mới"
     else:

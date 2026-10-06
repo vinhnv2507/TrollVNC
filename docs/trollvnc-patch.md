@@ -1,6 +1,6 @@
-# Patch TrollVNC: thêm lệnh quản lý app
+# Patch CTRIOS: thêm lệnh quản lý app
 
-Thêm ba lệnh vào **control socket** đã có sẵn của TrollVNC:
+Thêm ba lệnh vào **control socket** đã có sẵn của CTRIOS:
 
 ```
 apps                      -> danh sách app đã cài (TSV: bundleId, tên, loại, phiên bản)
@@ -13,7 +13,7 @@ Kèm khả năng mở cổng điều khiển ra LAN **có token**. Không có to
 vẫn chỉ nghe 127.0.0.1 y như bản gốc.
 
 > Token **không** nằm trong mã nguồn. Nó đi qua GitHub Secret →
-> `Managed.plist` → prefs, đúng cách TrollVNC đang làm với mật khẩu VNC.
+> `Managed.plist` → prefs, đúng cách CTRIOS đang làm với mật khẩu CTRIOS.
 > Fork của bạn là public nên đây là điều bắt buộc.
 
 Sửa 3 file. Tất cả đều sửa được thẳng trên web GitHub.
@@ -334,7 +334,7 @@ Thử mở app:
 $w.WriteLine("auth $token launch com.zing.zalo")
 ```
 
-Mỗi kết nối chỉ nhận **một lệnh** rồi đóng — đúng thiết kế sẵn có của TrollVNC.
+Mỗi kết nối chỉ nhận **một lệnh** rồi đóng — đúng thiết kế sẵn có của CTRIOS.
 
 ---
 

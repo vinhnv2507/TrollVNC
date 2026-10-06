@@ -2,7 +2,7 @@
 
 Daemon TrollVNC/ControlIOS chỉ phục vụ khi có **license hợp lệ**: chữ ký ECDSA
 P-256 đúng, **đúng UDID máy**, **chưa hết hạn**. Thiếu/sai → daemon **từ chối mọi
-client VNC** (newClientHook) và control socket trả `ERR NotActivated`.
+client CTRIOS** (newClientHook) và control socket trả `ERR NotActivated`.
 
 **"Khoá có ích"**: control token lấy TỪ license (`tok`). Kẻ khác patch phần kiểm
 cũng không có token đúng → PC không điều khiển được. (Vẫn là bảo vệ *offline* —
@@ -49,6 +49,6 @@ trong `src/trollvncserver.mm`. (Khoá công khai sinh sẵn hiện tại khớp 
 - **Offline** nên người rất giỏi trên máy jailbreak vẫn có thể patch daemon. Buộc
   UDID + ký số chặn: chia sẻ key sang máy khác, tự chế key mới. Muốn thu hồi /
   chống patch triệt để → cần **kích hoạt online** (làm sau nếu cần).
-- **GPL**: bán/phát tán bản khoá key cho người ngoài vướng GPL-2.0 của TrollVNC.
+- **GPL**: bán/phát tán bản khoá key cho người ngoài vướng GPL-2.0 của CTRIOS.
   Dùng nội bộ farm thì không sao.
 - Mất `controlios_private.pem` = mất khả năng cấp key. **Sao lưu nơi an toàn.**

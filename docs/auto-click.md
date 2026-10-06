@@ -2,7 +2,7 @@
 
 Kịch bản **JavaScript** chạy **ngay trong daemon trên iPhone** (engine
 JavaScriptCore — framework có sẵn của iOS), **không cần PC nối**. Bơm sự kiện qua
-`STHIDEventGenerator` (đúng bộ VNC dùng để điều khiển) nên tác động lên **app đang
+`STHIDEventGenerator` (đúng bộ CTRIOS dùng để điều khiển) nên tác động lên **app đang
 mở** trên máy. Mạnh như AutoTouch: có biến/hàm/vòng lặp/điều kiện của JS + dò
 màu + tìm ảnh mẫu.
 
@@ -51,7 +51,7 @@ log('thông báo');              // ghi log daemon
 > Khi lấy màu, PC **hỏi thẳng máy** (lệnh control `color rx ry`) để lấy **màu
 > THẬT** — daemon đọc pixel gốc trên framebuffer, đúng cái `getColor`/`matchColor`
 > auto-click dùng, nên **khớp tuyệt đối** (không lệ thuộc khung PC bị nén). Status
-> ghi rõ “màu THẬT từ máy”. Máy chạy bản TrollVNC cũ (chưa có lệnh này) thì tự lùi
+> ghi rõ “màu THẬT từ máy”. Máy chạy bản CTRIOS cũ (chưa có lệnh này) thì tự lùi
 > về màu đọc ở PC (gần đúng) và báo rõ.
 
 **Dò MÀU** (đọc màn thật)
@@ -173,7 +173,7 @@ Vòng lặp dày thì nhật ký giữ **250 dòng gần nhất**. Muốn tắt 
 > AutoTouch cần tweak inject vào SpringBoard (chỉ có khi jailbreak).
 
 ## Ghi chú
-- Chạy trong **daemon**, luồng riêng, tách khỏi luồng VNC. Lỗi JS **không sập
+- Chạy trong **daemon**, luồng riêng, tách khỏi luồng CTRIOS. Lỗi JS **không sập
   daemon** (bắt exception). **Dừng** ăn ngay ở lệnh kế (tap/sleep tự kiểm cờ dừng)
   — nên vòng lặp phải có `tap`/`sleep` (auto-click luôn có).
 - Toạ độ theo màn **dọc**. Dò màu/tìm ảnh chuẩn nhất khi **không xoay**.

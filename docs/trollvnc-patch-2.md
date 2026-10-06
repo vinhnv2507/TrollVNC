@@ -1,4 +1,4 @@
-# Patch TrollVNC vòng 2: truyền file và mở URL
+# Patch CTRIOS vòng 2: truyền file và mở URL
 
 Thêm hai lệnh nữa vào control socket:
 
@@ -24,7 +24,7 @@ mới là thứ làm việc đó chuẩn. Thay vì tự cài, ta **nhờ TrollSt
 3. TrollStore trên máy tự tải về và cài
 
 Phần code trên máy vì thế rất nhỏ, ít chỗ hỏng. Entitlement
-`com.apple.springboard.opensensitiveurl` đã có sẵn trong TrollVNC.
+`com.apple.springboard.opensensitiveurl` đã có sẵn trong CTRIOS.
 
 ---
 

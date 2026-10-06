@@ -1,4 +1,4 @@
-# Patch TrollVNC vòng 5: setscale (đổi scale khung hình lúc đang chạy)
+# Patch CTRIOS vòng 5: setscale (đổi scale khung hình lúc đang chạy)
 
 Thêm một lệnh vào control socket:
 
@@ -6,7 +6,7 @@ Thêm một lệnh vào control socket:
 setscale <0..1>   -> đổi hệ số scale khung hình NGAY, để giảm tải máy đời cũ
 ```
 
-TrollVNC **vốn đã có** scale (`gScale`, đặt qua CLI `-s` hoặc pref `Scale`), nhưng
+CTRIOS **vốn đã có** scale (`gScale`, đặt qua CLI `-s` hoặc pref `Scale`), nhưng
 chỉ đọc lúc khởi động. Lệnh này cho **chỉnh runtime từ Control IOS** (hộp *Chất
 lượng* → *Scale khung máy gửi*), không phải build lại hay đổi pref.
 
@@ -88,5 +88,5 @@ cd D:\ControlIOS
 - Giá trị **không lưu qua lần khởi động lại daemon** (gScale reset về pref/mặc
   định). Control IOS nhớ lựa chọn trong `settings.device_scale` và phát lại khi
   bạn Áp dụng; muốn cố định trên máy thì đặt pref `Scale`.
-- Đổi scale = đổi kích thước framebuffer → **phiên VNC nối lại ~1 giây**. Đừng đổi
+- Đổi scale = đổi kích thước framebuffer → **phiên CTRIOS nối lại ~1 giây**. Đừng đổi
   liên tục.

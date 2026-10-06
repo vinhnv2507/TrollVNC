@@ -2,7 +2,7 @@
 
 Quy trình một lệnh:
 1. Sinh (nếu chưa có) một cặp khoá SSH cho Control IOS.
-2. Cài khoá công khai vào máy **qua control socket của TrollVNC** — kênh đó
+2. Cài khoá công khai vào máy **qua control socket của CTRIOS** — kênh đó
    chạy bằng root nên ghi được `/var/root/.ssh/authorized_keys`.
 3. Thử đăng nhập SSH bằng khoá để xác nhận.
 
@@ -32,7 +32,7 @@ async def setup_one(host: str, settings, public_key: str, key_path: Path,
     try:
         remote = await control.install_ssh_key(public_key, user=user)
     except ControlError as exc:
-        return host, False, f"cài khoá thất bại (TrollVNC đã vá chưa?): {exc}"
+        return host, False, f"cài khoá thất bại (CTRIOS đã vá chưa?): {exc}"
 
     ssh = SshChannel(host, settings.ssh_port, user, key_path=str(key_path))
     try:

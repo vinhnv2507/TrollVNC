@@ -22,14 +22,14 @@ Cần cài **cả** PC 0.2.27 và IPA 4.14. Đóng bản PC đang chạy rồi m
 ## PC 0.2.26: canh EarnApp không còn rớt cổng 46752 vì chụp màn 3 lần
 
 Log 0.2.25 kiểu `chụp màn hình lỗi (); đang nối lại` rồi `46752 không phản hồi`
-**không có nghĩa là máy mất mạng**. VNC và control vẫn sống: PC đọc được SpringBoard
+**không có nghĩa là máy mất mạng**. CTRIOS và control vẫn sống: PC đọc được SpringBoard
 và mở EarnApp. Capture timeout (`()` = hết thời gian chờ, hoặc `no framebuffer
 update`) bị lặp 3 lần, mỗi lần chiếm pacer LIVE / có thể làm rớt phiên RFB.
-TrollVNC bận nên cổng 46752 không accept, OCR `findtext` fail.
+CTRIOS bận nên cổng 46752 không accept, OCR `findtext` fail.
 
 PC 0.2.26 (không cần cài lại iOS):
 
-- Máy VNC còn ONLINE: thử chụp **một lần** (4.5s). Lỗi thì OCR luôn, không nối lại 3 lần.
+- Máy CTRIOS còn ONLINE: thử chụp **một lần** (4.5s). Lỗi thì OCR luôn, không nối lại 3 lần.
 - Capture timeout không giết phiên LIVE; waiter hết hạn bị bỏ, hình tiếp tục chạy.
 - `findtext` / `frontmost` / `color` thử lại khi 46752 không accept.
 - Log hết thời gian chờ ghi rõ `hết thời gian chờ`, không còn `()`.
@@ -38,15 +38,15 @@ PC 0.2.26 (không cần cài lại iOS):
 
 ## PC 0.2.25: canh EarnApp không còn fail vì disconnected during capture
 
-OCR EarnApp đọc framebuffer trên máy. Bản trước **bắt chụp một khung VNC full**
+OCR EarnApp đọc framebuffer trên máy. Bản trước **bắt chụp một khung CTRIOS full**
 trước khi OCR. Khi đang mở khung lớn (LIVE), socket nửa sống hoặc FBUR ma của
-pipeline=2 làm phiên VNC rớt ngay: log `LỖI kiểm tra màn hình: ... disconnected
+pipeline=2 làm phiên CTRIOS rớt ngay: log `LỖI kiểm tra màn hình: ... disconnected
 during capture`, chưa kịp OCR.
 
 PC 0.2.25 (không cần cài lại iOS):
 
 - Máy LIVE/GRID vừa có khung (<2.5s): OCR luôn, không gửi thêm capture full.
-- Capture lỗi: nối lại tối đa 3 lần; nếu VNC vẫn online thì OCR trên khung đang có.
+- Capture lỗi: nối lại tối đa 3 lần; nếu CTRIOS vẫn online thì OCR trên khung đang có.
 - Capture không còn chờ stall_timeout 20s rồi giết phiên LIVE vì inflight ma.
 
 Đóng bản PC đang chạy rồi mở 0.2.25.
@@ -108,7 +108,7 @@ máy nội bộ: ping ~180ms, client cũ chỉ xin ZLib-raw, LIVE 12fps kiểu g
 PC 0.2.14 (không cần cài lại iOS 4.11):
 
 - Xin Tight JPEG (encoding 7, QualityLevel 6). Khung Shopee đầy màu nhẹ hơn nhiều
-  so với zlib-raw 32bpp. Daemon TrollVNC đã link turbojpeg sẵn.
+  so với zlib-raw 32bpp. Daemon CTRIOS đã link turbojpeg sẵn.
 - LIVE luôn sàn 30fps và gửi **2 FramebufferUpdateRequest chồng nhau** để giấu
   một RTT (~180ms) thay vì request-then-wait. (0.2.15 tắt pipeline này lúc kéo.)
 - Khi mở/điều khiển 1 máy, **luôn tạm dừng stream lưới** — không phụ thuộc
@@ -167,15 +167,15 @@ Muốn cố định tối ưu ngay từ đầu, commit `prefs/TrollVNCPrefs/Reso
 > PC (mục trên); riêng dò-vùng-bẩn và frame rate hiện chỉ đặt lúc build.
 
 ## Máy đầy RAM / remote giật — nút **RAM** / lệnh `freeram`
-Khi nhiều app nặng (Safari, Facebook, EarnApp, Golike…) cùng mở, VNC dễ giật.
+Khi nhiều app nặng (Safari, Facebook, EarnApp, Golike…) cùng mở, CTRIOS dễ giật.
 Bấm **RAM** trên PC (cạnh Home/App/Khoá), menu **Giải phóng RAM** trong app
 ControlIOS, hoặc lệnh kịch bản `freeram` / JS `freeRAM()`.
 
 Lệnh đóng hết app đang chạy trừ ControlIOS, TrollStore và tiến trình hệ thống.
 **EarnApp và Golike cũng bị đóng** — chỉ bấm khi muốn nhường RAM cho remote.
-Không tự chạy lúc kết nối VNC. `closeall 5` chỉ hất thẻ switcher, không thay `freeram`.
+Không tự chạy lúc kết nối CTRIOS. `closeall 5` chỉ hất thẻ switcher, không thay `freeram`.
 
 ## Ghi chú
 - Tham số Q/defer/xoay áp live sẽ **giữ tới khi daemon khởi động lại** (máy reboot
-  / TrollVNC chạy lại). Sau reboot mở lại **Chất lượng → Áp dụng** để nạp lại,
+  / CTRIOS chạy lại). Sau reboot mở lại **Chất lượng → Áp dụng** để nạp lại,
   hoặc cố định bằng Managed.plist.

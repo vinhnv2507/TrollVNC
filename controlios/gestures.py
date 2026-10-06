@@ -1,6 +1,6 @@
 """Cử chỉ iOS dựng sẵn — `home`, `openapp`, `closeapp`…
 
-VNC chỉ có màn hình và chuột/phím: không có kênh nào hỏi iOS "đang cài app gì"
+CTRIOS chỉ có màn hình và chuột/phím: không có kênh nào hỏi iOS "đang cài app gì"
 hay "mở bundle id này". Nên các lệnh app ở đây là **chuỗi cử chỉ**, đúng như
 bạn tự thao tác tay.
 
@@ -13,7 +13,7 @@ không cần sửa code:
     }
 
 Mặc định dưới đây nhắm iPhone **Face ID** (không nút Home), màn hình dọc. Máy
-có nút Home vật lý (SE, 8) thì `home` nên đổi thành `key Home` — nếu TrollVNC
+có nút Home vật lý (SE, 8) thì `home` nên đổi thành `key Home` — nếu CTRIOS
 bên máy có map keysym đó.
 """
 

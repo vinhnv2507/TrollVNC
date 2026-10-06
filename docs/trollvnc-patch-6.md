@@ -1,4 +1,4 @@
-# Patch TrollVNC vòng 6: reset dữ liệu app (wipeapp / snapshot / restore)
+# Patch CTRIOS vòng 6: reset dữ liệu app (wipeapp / snapshot / restore)
 
 Thêm các lệnh vào control socket để **quản lý dữ liệu app từ xa** cho cả farm,
 hỗ trợ **nhiều bản snapshot có tên** cho mỗi app:
@@ -16,7 +16,7 @@ nhiều bản, mỗi tên một bản (trùng tên thì ghi đè).
 
 Chạy được trên **máy chỉ có TrollStore, KHÔNG cần jailbreak** — vì mọi thứ nằm ở
 `/var` (phân vùng Data), không đụng phân vùng hệ thống bị SSV niêm phong. Daemon
-control của TrollVNC đã sẵn entitlement (`platform-application`,
+control của CTRIOS đã sẵn entitlement (`platform-application`,
 `com.apple.private.security.storage.AppDataContainers`, `no-container`) để đọc/ghi
 container của app khác, và chạy bằng **root**.
 
@@ -65,9 +65,9 @@ app), không phải xoá dấu vết thiết bị.
   restore com.zing.zalo       # hoặc quay lại bản đã lưu
   ```
 
-## Thao tác NGAY TRÊN máy (trong app TrollVNC)
+## Thao tác NGAY TRÊN máy (trong app CTRIOS)
 
-Ngoài điều khiển từ PC, app TrollVNC trên máy có thêm nút **"App Data"** trên
+Ngoài điều khiển từ PC, app CTRIOS trên máy có thêm nút **"App Data"** trên
 thanh điều hướng (hiện cả ở màn hình *managed*). Luồng:
 
 1. Bấm **App Data** → liệt kê app người dùng (app hỏi daemon `apps` qua control

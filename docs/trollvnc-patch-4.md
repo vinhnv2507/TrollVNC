@@ -1,4 +1,4 @@
-# Patch TrollVNC vòng 4: respring
+# Patch CTRIOS vòng 4: respring
 
 Thêm một lệnh vào control socket:
 

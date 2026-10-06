@@ -190,7 +190,7 @@ class DevicePool:
     async def _idle_janitor(self) -> None:
         """Ngắt kết nối tới máy đã lâu không nhìn tới.
 
-        Cơ chế tier chỉ tiết kiệm cho phía PC: TrollVNC vẫn chạy ScreenCapturer
+        Cơ chế tier chỉ tiết kiệm cho phía PC: CTRIOS vẫn chạy ScreenCapturer
         chừng nào còn client nối vào. Rời hẳn mới trả được CPU cho iPhone.
         """
 
@@ -226,9 +226,9 @@ class DevicePool:
         return session
 
     async def _refresh_framebuffer_for_ocr(self, key: str, on_event=None):
-        """Wake VNC so ControlIOS OCR is not reading a stale framebuffer.
+        """Wake CTRIOS so ControlIOS OCR is not reading a stale framebuffer.
 
-        findtext/getcolor read TrollVNC gScreen->frameBuffer. Dormant phones
+        findtext/getcolor read CTRIOS gScreen->frameBuffer. Dormant phones
         must reconnect and pull a frame. A LIVE/GRID session that already has
         a recent VIDEO frame is already fresh: another full capture on a
         half-open LIVE socket is what shows up as "disconnected during
@@ -241,7 +241,7 @@ class DevicePool:
 
         session = await self._ensure_awake(key)
         if session is None or session.state is not State.ONLINE:
-            raise ConnectionError("VNC chưa kết nối")
+            raise ConnectionError("CTRIOS chưa kết nối")
         age = (time.monotonic() - session.last_frame_at
                if session.last_frame_at else 1e9)
         if age < 2.5:
@@ -261,7 +261,7 @@ class DevicePool:
                 session.reconnect_now()
                 session = await self._ensure_awake(key)
                 if session is None or session.state is not State.ONLINE:
-                    raise ConnectionError("VNC chưa kết nối") from exc
+                    raise ConnectionError("CTRIOS chưa kết nối") from exc
             return session
 
     # ------------------------------------------------------------------- input
@@ -270,7 +270,7 @@ class DevicePool:
         self._call(lambda: self._with(key, lambda s: s.tap(x, y, button)))
 
     def wake_if_locked(self, key: str, on_event=None, on_result=None) -> None:
-        """Kiểm tra sau khi VNC online và bấm Home nếu iOS đang khóa/tắt."""
+        """Kiểm tra sau khi CTRIOS online và bấm Home nếu iOS đang khóa/tắt."""
 
         async def run() -> None:
             try:
@@ -525,7 +525,7 @@ class DevicePool:
                          on_event=None, on_done=None) -> None:
         """Chạy một thao tác app trên nhiều máy rồi **tổng kết lại**.
 
-        Tổng kết là phần quan trọng: máy chưa cài bản TrollVNC đã vá sẽ lỗi
+        Tổng kết là phần quan trọng: máy chưa cài bản CTRIOS đã vá sẽ lỗi
         lặng lẽ, mà một dòng thoáng qua ở thanh trạng thái thì rất dễ bỏ sót.
         """
 

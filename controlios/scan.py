@@ -1,13 +1,13 @@
-"""Find TrollVNC phones on the LAN.
+"""Find CTRIOS phones on the LAN.
 
 Ba cách, từ tốt nhất xuống:
 
-* ``discover_bonjour`` — TrollVNC tự quảng bá dịch vụ ``_rfb._tcp`` qua mDNS,
+* ``discover_bonjour`` — CTRIOS tự quảng bá dịch vụ ``_rfb._tcp`` qua mDNS,
   nên hỏi thẳng mạng thay vì dò từng địa chỉ. Nhanh nhất và không bỏ sót máy
   đang bật, kể cả khi nó chưa từng liên lạc với PC này.
 * ``arp_hosts``  — đọc bảng ARP của Windows rồi chỉ dò những IP đã từng liên
   lạc. Nhanh, nhưng bỏ sót máy chưa nói chuyện với PC.
-* ``scan_cidr``  — dò cổng VNC trên từng địa chỉ của một subnet. Chậm nhất
+* ``scan_cidr``  — dò cổng CTRIOS trên từng địa chỉ của một subnet. Chậm nhất
   nhưng chắc chắn nhất; một /16 là 65k địa chỉ nên hãy quét /24.
 """
 
@@ -49,7 +49,7 @@ BONJOUR_SERVICE = "_rfb._tcp.local."
 
 
 def discover_bonjour(timeout: float = 4.0, prefix: str = "") -> List[str]:
-    """Máy TrollVNC tự quảng bá qua mDNS. Trả về danh sách ``ip:port``.
+    """Máy CTRIOS tự quảng bá qua mDNS. Trả về danh sách ``ip:port``.
 
     Không cần biết subnet, không dò 254 địa chỉ. Cần cài ``zeroconf``; nếu
     thiếu thì trả về danh sách rỗng để phần quét thường vẫn chạy được.
@@ -118,7 +118,7 @@ async def _probe(host: str, port: int, timeout: float) -> bool:
     """Recognise ControlIOS through RFB or its dedicated control socket.
 
     A busy/already-connected RFB server can close a new probe without sending
-    its banner. Port 46752 remains available independently of the VNC slot.
+    its banner. Port 46752 remains available independently of the CTRIOS slot.
     """
     try:
         reader, writer = await asyncio.wait_for(

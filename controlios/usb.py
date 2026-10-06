@@ -1,12 +1,12 @@
 """Chế độ USB: điều khiển iPhone qua dây cáp thay vì WiFi.
 
-Cả ba kênh của Control IOS đều là TCP (VNC 5901, control socket 46752, SSH 22).
+Cả ba kênh của Control IOS đều là TCP (CTRIOS 5901, control socket 46752, SSH 22).
 usbmuxd của Apple (đi kèm iTunes/Apple Mobile Device Support) cho **forward cổng
 TCP của máy qua USB**. Ở đây dùng ``tidevice relay`` (thuần Python, cài bằng pip)
 để mở mỗi cổng thành một cổng ``127.0.0.1`` trên PC; Control IOS nối tới đó y như
 một máy mạng thường.
 
-Mỗi máy chiếm một dải cổng cục bộ (VNC/control/SSH). Không đụng tới TrollVNC —
+Mỗi máy chiếm một dải cổng cục bộ (VNC/control/SSH). Không đụng tới CTRIOS —
 đây thuần tuý là lớp khám phá + tunnel ở phía PC.
 """
 

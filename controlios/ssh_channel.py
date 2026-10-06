@@ -1,13 +1,13 @@
 """Kênh thứ ba: SSH tới máy đã jailbreak.
 
 Đây là kênh **có sức mạnh lớn nhất** trong ba kênh, và nó chấm dứt vòng lặp
-"vá TrollVNC → build trên GitHub → cài lại từng máy": mọi tính năng mới sau này
+"vá CTRIOS → build trên GitHub → cài lại từng máy": mọi tính năng mới sau này
 chỉ còn là một câu lệnh shell.
 
 Ba kênh bổ nhau, không thay thế nhau:
 
-* **VNC** — hình ảnh và thao tác chuột/phím, chạy trên mọi máy
-* **Control socket** — app, truyền file; cần TrollVNC đã vá
+* **CTRIOS** — hình ảnh và thao tác chuột/phím, chạy trên mọi máy
+* **Control socket** — app, truyền file; cần CTRIOS đã vá
 * **SSH** (file này) — lệnh tuỳ ý; cần máy đã jailbreak
 
 Máy chưa jailbreak sẽ báo :class:`SshUnavailable` rõ ràng chứ không treo.
@@ -66,7 +66,7 @@ class SshChannel:
     """Một máy. Mỗi lệnh mở một kết nối ngắn, giống control socket.
 
     Không giữ kết nối lâu vì với 250 máy thì số socket mở thường trực là gánh
-    nặng không cần thiết — lệnh SSH vốn thưa, khác hẳn luồng hình VNC.
+    nặng không cần thiết — lệnh SSH vốn thưa, khác hẳn luồng hình CTRIOS.
     """
 
     host: str
