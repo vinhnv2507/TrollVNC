@@ -67,7 +67,7 @@ static inline void TVStartUpdateManager(NSString *app) {
     strlcpy(address.sun_path, TVUPDATE_SOCKET, sizeof(address.sun_path));
     unlink(TVUPDATE_SOCKET); // The existing manager singleton already holds its lock.
     if (bind(fd, (struct sockaddr *)&address, sizeof(address)) != 0 ||
-        chown(TVUPDATE_SOCKET, 0, 501) != 0 || chmod(TVUPDATE_SOCKET, 0660) != 0 || listen(fd, 4) != 0) {
+        chown(TVUPDATE_SOCKET, 0, 0) != 0 || chmod(TVUPDATE_SOCKET, 0666) != 0 || listen(fd, 4) != 0) {
         close(fd); return;
     }
     fcntl(fd, F_SETFD, FD_CLOEXEC);
@@ -80,6 +80,8 @@ static inline void TVStartUpdateManager(NSString *app) {
                 socklen_t size = sizeof(pid);
                 char executable[PROC_PIDPATHINFO_MAXSIZE] = {};
                 NSString *expected = [[app stringByAppendingPathComponent:@"trollvncserver"] stringByResolvingSymlinksInPath];
+                // Access is checked by peer uid AND exact executable path; the
+                // mobile screen process can retain wheel as its primary group.
                 BOOL trusted = getpeereid(client, &uid, &gid) == 0 && (uid == 0 || uid == 501) &&
                     getsockopt(client, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0 && pid > 0 &&
                     proc_pidpath(pid, executable, sizeof(executable)) > 0 &&
