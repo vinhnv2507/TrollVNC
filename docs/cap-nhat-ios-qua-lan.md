@@ -10,8 +10,10 @@ tối đa ba máy cập nhật cùng lúc. Máy có phiên bản bằng hoặc c
 Gói phải đúng bundle `com.controlios.app`, đủ chương trình và vượt kiểm tra ZIP/CRC.
 Thư mục chứa gói gốc có thể thay đổi; bản sao đang phục vụ không bị thay đổi theo.
 
-ControlIOS iOS **4.22 trở lên** có tiến trình cập nhật độc lập hoạt động với quyền
-root riêng; tiến trình nhận lệnh và truyền màn hình vẫn chạy bằng mobile. Bộ cập nhật tải
+ControlIOS iOS **4.25 trở lên** chuyển lệnh qua socket nội bộ đến manager có quyền
+root. Manager chỉ nhận từ tiến trình `trollvncserver` của đúng bundle ControlIOS;
+tiến trình nhận lệnh LAN và truyền màn hình vẫn chạy bằng mobile. Manager khởi
+chạy bộ cập nhật độc lập, bộ này tạo bản sao ngoài bundle bằng root rồi tải
 gói từ địa chỉ LAN số IPv4 của PC, không theo chuyển hướng, kiểm tra SHA256 rồi gọi
 `trollstorehelper install custom` để cài đè. Không xóa dữ liệu app, token hoặc giấy
 phép; không sửa tùy chọn xác nhận cài ứng dụng khác của TrollStore. Nó bật lại
@@ -21,8 +23,9 @@ trao đổi RFB ban đầu. Việc tải xong/gửi lệnh cài chưa được t
 **Máy đang dùng bản cũ hoặc bộ cập nhật báo chưa sẵn sàng:** PC gửi URL gói local
 cho TrollStore. PC 0.2.41 xử lý cả lỗi `LocalUpdateUnavailable` ở bản 4.18/4.19;
 thông báo cũ “TrollStore/helper missing” có thể do thiếu quyền root dù TrollStore
-vẫn được cài đầy đủ. Các bản 4.20/4.21 có thể báo `updater root check exit 10`;
-PC cũng chuyển sang TrollStore. Chọn gói 4.22 hoặc mới hơn để sửa cơ chế tự cập nhật.
+vẫn được cài đầy đủ. Các bản thử nghiệm 4.20–4.24 có thể báo `updater root check
+exit 10`; PC cũng chuyển sang TrollStore. Chọn gói 4.25 hoặc mới hơn để nâng cấp
+sang cơ chế manager khởi chạy bộ cài bằng root.
 Nếu TrollStore hỏi thì bấm Install qua CTRIOS; nếu không có Keeper tự bật lại app,
 cần mở ControlIOS một lần sau khi cài. Đây là bước nâng cấp ban đầu để có tiến trình
 cập nhật độc lập; những lần cập nhật tiếp theo dùng cơ chế tự động trên.
