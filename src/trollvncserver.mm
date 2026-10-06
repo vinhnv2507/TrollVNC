@@ -5844,32 +5844,50 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
     BOOL checking = [request isEqualToString:@"check"];
     if (checking) {
         // Test the actual root launch without downloading or installing anything.
+        int output[2];
+        if (pipe(output) != 0)
+            return [@"ERR LocalUpdateUnavailable check pipe failed\n" dataUsingEncoding:NSUTF8StringEncoding];
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init(&actions);
+        posix_spawn_file_actions_adddup2(&actions, output[1], STDOUT_FILENO);
+        posix_spawn_file_actions_addclose(&actions, output[0]);
         posix_spawnattr_t attr;
         posix_spawnattr_init(&attr);
         int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
         pid_t pid = 0;
         const char *args[] = {updater.fileSystemRepresentation, "--check", NULL};
         extern char **environ;
-        if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, NULL, &attr,
+        if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, &actions, &attr,
                                         (char *const *)args, environ);
         posix_spawnattr_destroy(&attr);
-        if (error) return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable RootSpawn %d\n", error]
-                           dataUsingEncoding:NSUTF8StringEncoding];
+        posix_spawn_file_actions_destroy(&actions);
+        close(output[1]);
+        if (error) {
+            close(output[0]);
+            return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable RootSpawn %d\n", error]
+                    dataUsingEncoding:NSUTF8StringEncoding];
+        }
         int result = 0;
         for (int i = 0; i < 30; ++i) {
             pid_t exited = waitpid(pid, &result, WNOHANG);
             if (exited == pid) {
+                fcntl(output[0], F_SETFL, O_NONBLOCK);
+                char metrics[161] = {};
+                ssize_t length = read(output[0], metrics, sizeof(metrics) - 1);
+                close(output[0]);
+                NSString *details = length > 0 ? @(metrics) : @"no credentials reported";
                 if (WIFEXITED(result) && WEXITSTATUS(result) == 0)
                     return [@"OK LAN_UPDATE_1\n" dataUsingEncoding:NSUTF8StringEncoding];
-                return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable updater root check %@ %d\n",
+                return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable updater root check %@ %d (%@)\n",
                          WIFEXITED(result) ? @"exit" : @"signal",
-                         WIFEXITED(result) ? WEXITSTATUS(result) : WTERMSIG(result)] dataUsingEncoding:NSUTF8StringEncoding];
+                         WIFEXITED(result) ? WEXITSTATUS(result) : WTERMSIG(result), details] dataUsingEncoding:NSUTF8StringEncoding];
             }
             if (exited < 0 && errno != EINTR) break;
             usleep(100000);
         }
         kill(pid, SIGKILL);
         waitpid(pid, &result, 0);
+        close(output[0]);
         return [@"ERR LocalUpdateUnavailable updater root check timeout\n" dataUsingEncoding:NSUTF8StringEncoding];
     }
     if (parts.count != 4 || !TVUpdateHex(parts[0].UTF8String, 32) ||

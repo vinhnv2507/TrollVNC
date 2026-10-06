@@ -109,6 +109,9 @@ static NSString *fileSHA(NSString *path) {
 }
 
 int main(int argc, char **argv) {
+    BOOL checking = argc == 2 && strcmp(argv[1], "--check") == 0;
+    if (checking)
+        dprintf(STDOUT_FILENO, "uid=%u euid=%u gid=%u egid=%u", getuid(), geteuid(), getgid(), getegid());
     // Some launch environments grant effective root while retaining the
     // parent's real uid. Normalize only an already-privileged child; the
     // screen server itself must remain mobile.
@@ -116,7 +119,7 @@ int main(int argc, char **argv) {
         if (setgid(0) != 0 || setuid(0) != 0) return 14;
     }
     @autoreleasepool {
-        if (argc == 2 && strcmp(argv[1], "--check") == 0)
+        if (checking)
             return getuid() != 0 ? (geteuid() == 0 ? 15 : 10) : geteuid() != 0 ? 11 : getgid() != 0 ? 12 : getegid() != 0 ? 13 : 0;
         if (argc != 7 || getuid() != 0) return 2;
         // job, version, SHA256, package URL, TrollStore helper, existing app path
