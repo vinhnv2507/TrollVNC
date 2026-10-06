@@ -4,8 +4,13 @@
 
 static int calls;
 static int failAt;
-static int persona(posix_spawnattr_t *, uid_t id, uint32_t flags) {
+static int persona(posix_spawnattr_t *attr, uid_t id, uint32_t flags) {
     assert(id == 99 && flags == 1);
+    short existing = 0;
+    assert(posix_spawnattr_getflags(attr, &existing) == 0);
+    assert(existing & POSIX_SPAWN_CLOEXEC_DEFAULT); // Must be configured BEFORE persona.
+    // Model the flag added by the private persona API; it must survive configuration.
+    assert(posix_spawnattr_setflags(attr, existing | POSIX_SPAWN_SETPGROUP) == 0);
     return ++calls == failAt ? EPERM : 0;
 }
 static int rootUID(posix_spawnattr_t *, uid_t id) {
@@ -21,6 +26,9 @@ int main() {
         calls = 0;
         assert(TVUpdateRootAttributes(&attributes, {persona, rootUID, rootGID}) == (failAt ? EPERM : 0));
         assert(calls == (failAt ? failAt : 3)); // Never continue after a failed privilege request.
+        short flags = 0;
+        assert(posix_spawnattr_getflags(&attributes, &flags) == 0);
+        assert(flags & POSIX_SPAWN_SETPGROUP); // No later setflags may erase persona.
     }
     calls = 0;
     assert(TVUpdateRootAttributes(&attributes, {nullptr, rootUID, rootGID}) == ENOSYS);

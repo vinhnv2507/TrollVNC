@@ -20,7 +20,10 @@ static inline TVUpdatePersonaAPI TVUpdatePersonaFunctions() {
 }
 static inline int TVUpdateRootAttributes(posix_spawnattr_t *attr, TVUpdatePersonaAPI api) {
     if (!api.set || !api.uid || !api.gid) return ENOSYS;
-    int error = api.set(attr, 99, 1); // POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE
+    // set_persona_np adds an internal spawn flag. Setting the flags afterwards
+    // would erase it and silently launch the child with the parent's mobile uid.
+    int error = posix_spawnattr_setflags(attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+    if (!error) error = api.set(attr, 99, 1); // POSIX_SPAWN_PERSONA_FLAGS_OVERRIDE
     if (!error) error = api.uid(attr, 0);
     if (!error) error = api.gid(attr, 0);
     return error;

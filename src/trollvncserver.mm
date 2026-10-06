@@ -5847,7 +5847,6 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
         posix_spawnattr_t attr;
         posix_spawnattr_init(&attr);
         int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
-        posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
         pid_t pid = 0;
         const char *args[] = {updater.fileSystemRepresentation, "--check", NULL};
         extern char **environ;
@@ -5891,7 +5890,6 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
     int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
-    posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
     pid_t pid = 0;
     extern char **environ;
     if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, NULL, &attr,
