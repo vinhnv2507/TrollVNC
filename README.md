@@ -25,9 +25,9 @@ CTRIOS is a CTRIOS server for iOS devices, allowing remote access and control of
 
 ## Usage
 
-1. Fork this repo and run GitHub workflow “Build CTRIOS”.
-2. Download “CTRIOS” from Releases and install it on your iOS device.
-3. Configure the CTRIOS server settings from “Settings” → “CTRIOS” or the standalone “CTRIOS” app as needed.
+1. Fork this repo and run GitHub workflow “Build ControlIOS”.
+2. Download “ControlIOS” from Releases and install it on your iOS device.
+3. Configure the CTRIOS server settings from “Settings” → “ControlIOS” or the standalone “ControlIOS” app as needed.
 4. Or, run the following command on iOS device or simulator:
 
 ```sh
@@ -369,7 +369,7 @@ Connect from your browser. Open the bundled web page at `http://<host>:5801/`. T
 ## Auto-Discovery (Bonjour/mDNS)
 
 - Publishes a CTRIOS service on the local network via Bonjour/mDNS (type `_rfb._tcp`), using the name from `-n` and the port from `-p`.
-- Enabled by default. Toggle with `-B on|off` or in Settings → CTRIOS → “Enable Auto-Discovery”.
+- Enabled by default. Toggle with `-B on|off` or in Settings → ControlIOS → “Enable Auto-Discovery”.
 - Viewers on the same LAN that support Bonjour can find it automatically; otherwise connect by `ip:port` shown in the app/logs.
 
 ## Reverse CTRIOS (Reverse Connection)
@@ -407,7 +407,7 @@ CTRIOS can connect to a viewer running in Listening mode. The viewer listens for
   trollvncserver -reverse [2001:db8::1]:5500 -n "My iPhone"
   ```
 
-- Preferences (Settings → CTRIOS):
+- Preferences (Settings → ControlIOS):
   - Reverse Connection → Mode: Viewer
   - Server: `host:port` (e.g., `viewer.example.com:5500` or `[2001:db8::1]:5500`)
 
@@ -443,7 +443,7 @@ CTRIOS can connect to an CTRIOS Repeater in Mode II. Both the Server (CTRIOS) an
   - `12345679` is the numeric Repeater ID.
   - `repeater.example.com:5500` should point to the repeater’s server (invers) port. IPv6 example: `-repeater 12345679 [2001:db8::1]:5500`
 
-- Preferences (Settings → CTRIOS):
+- Preferences (Settings → ControlIOS):
   - Reverse Connection → Mode: CTRIOS Repeater
   - Server: `host:server_port` (e.g., `repeater.example.com:5500` or `[2001:db8::1]:5500`)
   - Repeater ID: numeric (e.g., `12345679`)
@@ -478,7 +478,7 @@ CTRIOS can be preconfigured via a bundled `Managed.plist` for supervised or flee
 3. Build/package the project as usual; the file is embedded into `TrollVNCPrefs.bundle` automatically.
 4. Install the build on device. CTRIOS detects `Managed.plist` at startup and applies the configured values.
 5. Verify & expected behavior:
-   - “Settings” → “CTRIOS” shows a banner: “This CTRIOS instance is managed by your organization”.
+   - “Settings” → “ControlIOS” shows a banner: “This CTRIOS instance is managed by your organization”.
    - The preferences UI is effectively locked down.
    - In‑app update prompts are suppressed while managed.
    - Configured values take effect at startup; you don’t need equivalent CLI flags for these options.
@@ -603,7 +603,7 @@ CTRIOS can be preconfigured via a bundled `Managed.plist` for supervised or flee
 You can build CTRIOS entirely in GitHub Actions using the built-in workflow.
 
 - Fork this repository (or enable “Actions” in your own clone).
-- Go to the “Actions” tab → “Build CTRIOS” → “Run workflow”.
+- Go to the “Actions” tab → “Build ControlIOS” → “Run workflow”.
 - Choose the branch to run on (usually main) and fill the form inputs below.
 
 ### Inputs
