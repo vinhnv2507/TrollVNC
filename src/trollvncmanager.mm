@@ -38,6 +38,7 @@
 #import "Logging.h"
 #import "TRWatchDog.h"
 #import "libproc.h"
+#import "TVNCUpdateService.h"
 
 #define SINGLETON_MARKER_PATH "/var/mobile/Library/Caches/com.82flex.trollvnc.manager.pid"
 
@@ -381,6 +382,7 @@ int main(int argc, const char *argv[]) {
     // Open a passive local probe port for clients to detect availability.
     // IPv4 127.0.0.1:46751, no response; accept and close.
     openLocalDummyService(kTvAlivePort);
+    TVStartUpdateManager([@(argv[0]) stringByDeletingLastPathComponent]);
 
     CFRunLoopRun();
     @autoreleasepool {

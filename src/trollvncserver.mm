@@ -67,7 +67,7 @@
 #import "TVNCSocket.h"
 #import "TVNCTouchLockPolicy.h"
 #import "TVNCLocalUpdate.h"
-#import "TVNCUpdateRootSpawn.h"
+#import "TVNCUpdateIPC.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import "FBSOrientationObserver.h"
@@ -5841,55 +5841,7 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
         return [@"ERR LocalUpdateUnavailable TrollStore/helper missing\n" dataUsingEncoding:NSUTF8StringEncoding];
     if (access(updater.fileSystemRepresentation, X_OK) != 0)
         return [@"ERR LocalUpdateUnavailable ControlIOS updater missing\n" dataUsingEncoding:NSUTF8StringEncoding];
-    BOOL checking = [request isEqualToString:@"check"];
-    if (checking) {
-        // Test the actual root launch without downloading or installing anything.
-        int output[2];
-        if (pipe(output) != 0)
-            return [@"ERR LocalUpdateUnavailable check pipe failed\n" dataUsingEncoding:NSUTF8StringEncoding];
-        posix_spawn_file_actions_t actions;
-        posix_spawn_file_actions_init(&actions);
-        posix_spawn_file_actions_adddup2(&actions, output[1], STDOUT_FILENO);
-        posix_spawn_file_actions_addclose(&actions, output[0]);
-        posix_spawnattr_t attr;
-        posix_spawnattr_init(&attr);
-        int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
-        pid_t pid = 0;
-        const char *args[] = {updater.fileSystemRepresentation, "--check", NULL};
-        extern char **environ;
-        if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, &actions, &attr,
-                                        (char *const *)args, environ);
-        posix_spawnattr_destroy(&attr);
-        posix_spawn_file_actions_destroy(&actions);
-        close(output[1]);
-        if (error) {
-            close(output[0]);
-            return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable RootSpawn %d\n", error]
-                    dataUsingEncoding:NSUTF8StringEncoding];
-        }
-        int result = 0;
-        for (int i = 0; i < 30; ++i) {
-            pid_t exited = waitpid(pid, &result, WNOHANG);
-            if (exited == pid) {
-                fcntl(output[0], F_SETFL, O_NONBLOCK);
-                char metrics[161] = {};
-                ssize_t length = read(output[0], metrics, sizeof(metrics) - 1);
-                close(output[0]);
-                NSString *details = length > 0 ? @(metrics) : @"no credentials reported";
-                if (WIFEXITED(result) && WEXITSTATUS(result) == 0)
-                    return [@"OK LAN_UPDATE_1\n" dataUsingEncoding:NSUTF8StringEncoding];
-                return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable updater root check %@ %d (%@)\n",
-                         WIFEXITED(result) ? @"exit" : @"signal",
-                         WIFEXITED(result) ? WEXITSTATUS(result) : WTERMSIG(result), details] dataUsingEncoding:NSUTF8StringEncoding];
-            }
-            if (exited < 0 && errno != EINTR) break;
-            usleep(100000);
-        }
-        kill(pid, SIGKILL);
-        waitpid(pid, &result, 0);
-        close(output[0]);
-        return [@"ERR LocalUpdateUnavailable updater root check timeout\n" dataUsingEncoding:NSUTF8StringEncoding];
-    }
+    if ([request isEqualToString:@"check"]) return TVUpdateBridge(request, helper);
     if (parts.count != 4 || !TVUpdateHex(parts[0].UTF8String, 32) ||
         !TVUpdateVersion(parts[1].UTF8String) || !TVUpdateHex(parts[2].UTF8String, 64))
         return [@"ERR BadUpdateArguments\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -5900,21 +5852,7 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
         return [@"ERR BadUpdateLANURL\n" dataUsingEncoding:NSUTF8StringEncoding];
     if ([@PACKAGE_VERSION compare:parts[1] options:NSNumericSearch] != NSOrderedAscending)
         return [@"ERR UpdateNotNewer\n" dataUsingEncoding:NSUTF8StringEncoding];
-    // The root child stages itself. A mobile-owned executable must never be
-    // staged by the screen server and subsequently executed with root privileges.
-    const char *args[] = {updater.fileSystemRepresentation, parts[0].UTF8String,
-        parts[1].UTF8String, parts[2].UTF8String, parts[3].UTF8String,
-        helper.fileSystemRepresentation, app.fileSystemRepresentation, NULL};
-    posix_spawnattr_t attr;
-    posix_spawnattr_init(&attr);
-    int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
-    pid_t pid = 0;
-    extern char **environ;
-    if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, NULL, &attr,
-                                    (char *const *)args, environ);
-    posix_spawnattr_destroy(&attr);
-    if (error) return [[NSString stringWithFormat:@"ERR UpdateSpawn %d\n", error] dataUsingEncoding:NSUTF8StringEncoding];
-    return [[NSString stringWithFormat:@"OK %@\n", parts[0]] dataUsingEncoding:NSUTF8StringEncoding];
+    return TVUpdateBridge(request, helper);
 #else
     return [@"ERR LocalUpdateUnavailable requires TrollStore build\n" dataUsingEncoding:NSUTF8StringEncoding];
 #endif

@@ -93,6 +93,8 @@ jobs:
           /tmp/controlios-touch-test
           clang++ -std=c++17 -Wall -Wextra -Werror tests/local_update.cpp -o /tmp/controlios-local-update-test
           /tmp/controlios-local-update-test
+          clang++ -std=c++17 -fobjc-arc -framework Foundation -Wall -Wextra -Werror tests/update_ipc.mm -o /tmp/controlios-update-ipc-test
+          /tmp/controlios-update-ipc-test
 
       - name: Install dependencies
         run: |
