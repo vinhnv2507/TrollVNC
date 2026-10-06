@@ -5859,9 +5859,13 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
         int result = 0;
         for (int i = 0; i < 30; ++i) {
             pid_t exited = waitpid(pid, &result, WNOHANG);
-            if (exited == pid)
-                return [(WIFEXITED(result) && WEXITSTATUS(result) == 0 ? @"OK LAN_UPDATE_1\n" :
-                         @"ERR LocalUpdateUnavailable updater root check failed\n") dataUsingEncoding:NSUTF8StringEncoding];
+            if (exited == pid) {
+                if (WIFEXITED(result) && WEXITSTATUS(result) == 0)
+                    return [@"OK LAN_UPDATE_1\n" dataUsingEncoding:NSUTF8StringEncoding];
+                return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable updater root check %@ %d\n",
+                         WIFEXITED(result) ? @"exit" : @"signal",
+                         WIFEXITED(result) ? WEXITSTATUS(result) : WTERMSIG(result)] dataUsingEncoding:NSUTF8StringEncoding];
+            }
             if (exited < 0 && errno != EINTR) break;
             usleep(100000);
         }

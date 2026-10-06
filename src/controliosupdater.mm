@@ -111,7 +111,7 @@ static NSString *fileSHA(NSString *path) {
 int main(int argc, char **argv) {
     @autoreleasepool {
         if (argc == 2 && strcmp(argv[1], "--check") == 0)
-            return getuid() == 0 && getgid() == 0 ? 0 : 2;
+            return getuid() != 0 ? 10 : geteuid() != 0 ? 11 : getgid() != 0 ? 12 : getegid() != 0 ? 13 : 0;
         if (argc != 7 || getuid() != 0) return 2;
         // job, version, SHA256, package URL, TrollStore helper, existing app path
         jobID = @(argv[1]); targetVersion = @(argv[2]);
