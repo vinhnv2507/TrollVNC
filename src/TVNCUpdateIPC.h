@@ -22,6 +22,7 @@ static inline NSData *TVUpdateBridge(NSString *request, NSString *helper) {
     int yes = 1;
     setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
     struct sockaddr_un address = {};
+    address.sun_len = sizeof(address);
     address.sun_family = AF_UNIX;
     strlcpy(address.sun_path, TVUPDATE_SOCKET, sizeof(address.sun_path));
     uid_t uid; gid_t gid;

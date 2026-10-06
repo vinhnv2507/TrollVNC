@@ -63,6 +63,7 @@ static inline void TVStartUpdateManager(NSString *app) {
     int fd = socket(AF_UNIX, SOCK_STREAM, 0);
     if (fd < 0) return;
     struct sockaddr_un address = {};
+    address.sun_len = sizeof(address);
     address.sun_family = AF_UNIX;
     strlcpy(address.sun_path, TVUPDATE_SOCKET, sizeof(address.sun_path));
     unlink(TVUPDATE_SOCKET); // The existing manager singleton already holds its lock.
