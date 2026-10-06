@@ -242,9 +242,19 @@ async def update_one(channel, package: IOSPackage, server: UpdateServer,
         raise ControlError("Không tìm được địa chỉ LAN của PC để iPhone tải gói")
     native = version_key(current) >= version_key("4.18")
     if native:
-        if (await asyncio.wait_for(channel.command("updateios check"), 15)).strip() != "OK LAN_UPDATE_1":
-            raise ControlError("Máy chưa sẵn sàng cập nhật qua LAN")
-    elif not await asyncio.wait_for(channel.find_trollstore(), 15):
+        try:
+            if (await asyncio.wait_for(channel.command("updateios check"), 15)).strip() != "OK LAN_UPDATE_1":
+                raise ControlError("Máy chưa sẵn sàng cập nhật qua LAN")
+        except (UnauthorizedError, NotPatchedError):
+            raise
+        except ControlError as exc:
+            # Only an explicit preflight refusal permits the TrollStore route.
+            # No install has been sent at this point; never retry an ambiguous dispatch.
+            if not str(exc).startswith("ERR LocalUpdateUnavailable "):
+                raise
+            native = False
+            on_event("Bộ cập nhật tự động chưa hoạt động; chuyển sang TrollStore để nâng cấp bản sửa lỗi")
+    if not native and not await asyncio.wait_for(channel.find_trollstore(), 15):
         raise ControlError("Không tìm thấy TrollStore trên iPhone")
     job = server.add_job()
     url = server.url_for(f"{job}/ControlIOS.tipa", pc_ip)

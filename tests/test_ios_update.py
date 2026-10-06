@@ -8,7 +8,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
-from controlios.control_channel import ControlChannel, ControlError, UnauthorizedError
+from controlios.control_channel import ControlChannel, ControlError, UnauthorizedError, NotPatchedError
 from controlios.ios_update import (inspect_package, stage_package, find_latest_package,
     UpdateServer, update_one, wait_for_update, vnc_ready, version_key)
 
@@ -202,6 +202,44 @@ class FlowTests(unittest.IsolatedAsyncioTestCase):
         self.channel.install_ipa.assert_awaited_once()
         self.channel.command.assert_not_called()
         self.assertTrue(any("lần đầu" in event for event in self.events))
+
+    async def test_unavailable_native_preflight_uses_trollstore_once(self):
+        self.channel.command.side_effect = ControlError("ERR LocalUpdateUnavailable TrollStore/helper missing")
+        async def install(url): self.channel.server_version.return_value = "4.19"
+        self.channel.install_ipa.side_effect = install
+        self.assertEqual(await self.flow(), "updated")
+        self.channel.command.assert_awaited_once_with("updateios check")
+        self.channel.find_trollstore.assert_awaited_once()
+        self.channel.install_ipa.assert_awaited_once()
+        self.assertTrue(any("bản sửa lỗi" in event for event in self.events))
+
+    async def test_missing_trollstore_after_explicit_native_refusal_does_not_install(self):
+        self.channel.command.side_effect = ControlError("ERR LocalUpdateUnavailable updater root check failed")
+        self.channel.find_trollstore.return_value = None
+        with self.assertRaisesRegex(ControlError, "Không tìm thấy TrollStore"):
+            await self.flow()
+        self.channel.install_ipa.assert_not_called()
+        self.assertFalse(self.server.jobs)
+
+    async def test_other_preflight_failures_never_fall_back_to_install(self):
+        for error in [UnauthorizedError("Sai token"), NotPatchedError("Chưa hỗ trợ"),
+                      ControlError("mất kết nối"), ControlError("ERR BadUpdateArguments"), asyncio.TimeoutError()]:
+            with self.subTest(error=type(error).__name__):
+                self.channel.command.side_effect = error
+                with self.assertRaises(type(error)):
+                    await self.flow()
+                self.channel.find_trollstore.assert_not_called()
+                self.channel.install_ipa.assert_not_called()
+                self.assertFalse(self.server.jobs)
+
+    async def test_native_dispatch_refusal_never_sends_second_install(self):
+        self.channel.command.side_effect = ["OK LAN_UPDATE_1",
+            ControlError("ERR LocalUpdateUnavailable RootSpawn 1")]
+        with self.assertRaisesRegex(ControlError, "RootSpawn"):
+            await self.flow()
+        self.channel.install_ipa.assert_not_called()
+        self.channel.find_trollstore.assert_not_called()
+        self.assertEqual(self.channel.command.await_count, 2)
 
     async def test_usb_loopback_rejected(self):
         self.channel.host = "127.0.0.1"
