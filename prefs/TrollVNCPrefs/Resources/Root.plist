@@ -36,7 +36,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Name shown to VNC clients.</string>
+			<string>Name shown to CTRIOS clients.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -50,7 +50,7 @@
 			<key>default</key>
 			<string>ControlIOS</string>
 			<key>placeholder</key>
-			<string>Shown to VNC clients</string>
+			<string>Shown to CTRIOS clients</string>
 			<key>keyboard</key>
 			<string>alphabet</string>
 		</dict>
@@ -86,7 +86,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>VNC TCP port. Default 5901. Valid range 1024–65535.</string>
+			<string>CTRIOS TCP port. Default 5901. Valid range 1024–65535.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -116,7 +116,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Set a VNC password for full control. Leaving empty disables authentication (not recommended). Classic VNC authentication uses only the first 8 characters.</string>
+			<string>Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended). Classic CTRIOS authentication uses only the first 8 characters.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -138,7 +138,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Set a password for view-only access (no input). Classic VNC authentication uses only the first 8 characters.</string>
+			<string>Set a password for view-only access (no input). Classic CTRIOS authentication uses only the first 8 characters.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -160,7 +160,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Syncs text clipboard with VNC clients while connected. Disable if you do not want remote clipboard access.</string>
+			<string>Syncs text clipboard with CTRIOS clients while connected. Disable if you do not want remote clipboard access.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -698,7 +698,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Serve the built-in web VNC client on this port. 0 disables.</string>
+			<string>Serve the built-in web CTRIOS client on this port. 0 disables.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -806,7 +806,7 @@
 			<key>label</key>
 			<string>Reverse Connection</string>
 			<key>footerText</key>
-			<string>Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT.</string>
+			<string>Establish a reverse connection to a listening CTRIOS viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -831,7 +831,7 @@
 			<array>
 				<string>None</string>
 				<string>Viewer</string>
-				<string>UltraVNC Repeater</string>
+				<string>CTRIOS Repeater</string>
 			</array>
 			<key>validValues</key>
 			<array>
@@ -840,7 +840,7 @@
 				<string>repeater</string>
 			</array>
 			<key>staticTextMessage</key>
-			<string>A repeater ID is required for the “UltraVNC Repeater” mode.</string>
+			<string>A repeater ID is required for the “CTRIOS Repeater” mode.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -882,7 +882,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>Advertises the VNC service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting.</string>
+			<string>Advertises the CTRIOS service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting.</string>
 		</dict>
 		<dict>
 			<key>cell</key>
@@ -926,7 +926,7 @@
 			<key>label</key>
 			<string></string>
 			<key>footerText</key>
-			<string>To unblock previously blocked clients, restart the VNC service. The temporary block list is cleared on service restart.</string>
+			<string>To unblock previously blocked clients, restart the CTRIOS service. The temporary block list is cleared on service restart.</string>
 		</dict>
 		<dict>
 			<key>cell</key>

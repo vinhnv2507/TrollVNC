@@ -87,13 +87,13 @@ static void startServerHealthMonitor(void) {
             return;
         }
         failures++;
-        fprintf(stderr, "[health] VNC port %d failed %u/3\n", port, failures);
+        fprintf(stderr, "[health] CTRIOS port %d failed %u/3\n", port, failures);
         if (failures < 3)
             return;
         failures = 0;
         dispatch_async(dispatch_get_main_queue(), ^{
             if (gWatchDog && [gWatchDog isRunning]) {
-                fprintf(stderr, "[health] VNC unresponsive; restarting trollvncserver\n");
+                fprintf(stderr, "[health] CTRIOS unresponsive; restarting trollvncserver\n");
                 [gWatchDog restart];
             }
         });

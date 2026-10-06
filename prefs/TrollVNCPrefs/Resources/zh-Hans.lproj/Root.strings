@@ -14,13 +14,13 @@
 
 "90° Clockwise" = "顺时针 90°";
 
-"A repeater ID is required for the “UltraVNC Repeater” mode." = "“UltraVNC 中继器” 模式需要一个中继器 ID。";
+"A repeater ID is required for the “CTRIOS Repeater” mode." = "“CTRIOS 中继器” 模式需要一个中继器 ID。";
 
 "Absolute path to static web client files. Leave empty to use built-in assets." = "静态 Web 客户端文件的绝对路径。留空使用内置资源。";
 
 "Advanced wheel options: comma-separated key=value (e.g. step=48,coalesce=0.03,accel=1.0). Leave empty to use defaults." = "高级滚轮选项：以逗号分隔的 key=value（例如 step=48,coalesce=0.03,accel=1.0）。留空使用默认值。";
 
-"Advertises the VNC service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting." = "通过 Bonjour 在局域网发布 VNC 服务（_rfb._tcp），便于兼容客户端自动发现；启用内置 HTTP 时也会发布 _http._tcp。关闭以禁用广播。";
+"Advertises the CTRIOS service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting." = "通过 Bonjour 在局域网发布 CTRIOS 服务（_rfb._tcp），便于兼容客户端自动发现；启用内置 HTTP 时也会发布 _http._tcp。关闭以禁用广播。";
 
 "Alt as Command" = "Alt 作为 Command";
 
@@ -78,7 +78,7 @@
 
 "Enabled" = "启用";
 
-"Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "建立到监听的 VNC 查看器或中继器的反向连接，而无需打开服务器端口。这对于绕过防火墙或 NAT 非常有用。";
+"Establish a reverse connection to a listening CTRIOS viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "建立到监听的 CTRIOS 查看器或中继器的反向连接，而无需打开服务器端口。这对于绕过防火墙或 NAT 非常有用。";
 
 "Export Certificate…" = "导出证书…";
 
@@ -126,7 +126,7 @@
 
 "Modifier Mapping" = "修饰键映射";
 
-"Name shown to VNC clients." = "在 VNC 客户端中显示的名称。";
+"Name shown to CTRIOS clients." = "在 CTRIOS 客户端中显示的名称。";
 
 "Natural Scroll Direction" = "自然滚动方向";
 
@@ -164,7 +164,7 @@
 
 "Scroll & Input" = "滚动与输入";
 
-"Serve the built-in web VNC client on this port. 0 disables." = "在该端口提供内置 noVNC 客户端。设为 0 关闭。";
+"Serve the built-in web CTRIOS client on this port. 0 disables." = "在该端口提供内置 CTRIOS 客户端。设为 0 关闭。";
 
 "Server" = "服务器";
 
@@ -174,15 +174,15 @@
 
 "Set a password for view-only access (no input)." = "设置仅查看访问的密码（无控制权限）。";
 
-"Set a password for view-only access (no input). Classic VNC authentication uses only the first 8 characters." = "设置仅查看访问的密码（无控制权限）。经典 VNC 认证方式仅使用前 8 个字符。";
+"Set a password for view-only access (no input). Classic CTRIOS authentication uses only the first 8 characters." = "设置仅查看访问的密码（无控制权限）。经典 CTRIOS 认证方式仅使用前 8 个字符。";
 
-"Set a VNC password for full control. Leaving empty disables authentication (not recommended)." = "设置具有完全控制权限的 VNC 密码。留空将关闭认证（不推荐）。";
+"Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended)." = "设置具有完全控制权限的 CTRIOS 密码。留空将关闭认证（不推荐）。";
 
-"Set a VNC password for full control. Leaving empty disables authentication (not recommended). Classic VNC authentication uses only the first 8 characters." = "设置具有完全控制权限的 VNC 密码。留空将关闭认证（不推荐）。经典 VNC 认证方式仅使用前 8 个字符。";
+"Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended). Classic CTRIOS authentication uses only the first 8 characters." = "设置具有完全控制权限的 CTRIOS 密码。留空将关闭认证（不推荐）。经典 CTRIOS 认证方式仅使用前 8 个字符。";
 
 "Show notifications when clients connect or disconnect." = "当客户端连接或断开连接时显示通知。";
 
-"Shown to VNC clients" = "在客户端显示";
+"Shown to CTRIOS clients" = "在客户端显示";
 
 "Silence Notifications" = "静默通知";
 
@@ -204,7 +204,7 @@
 
 "Sync Interface Orientation" = "同步界面方向";
 
-"Syncs text clipboard with VNC clients while connected. Disable if you do not want remote clipboard access." = "连接期间与 VNC 客户端同步文本剪贴板。如不希望远程访问剪贴板，请关闭。";
+"Syncs text clipboard with CTRIOS clients while connected. Disable if you do not want remote clipboard access." = "连接期间与 CTRIOS 客户端同步文本剪贴板。如不希望远程访问剪贴板，请关闭。";
 
 "TCP Port" = "TCP 端口";
 
@@ -212,11 +212,11 @@
 
 "Tile Size (px)" = "瓦片大小（像素）";
 
-"To unblock previously blocked clients, restart the VNC service. The temporary block list is cleared on service restart." = "要解封之前被封禁的客户端，请重启 VNC 服务。临时封禁列表会在服务重启时清空。";
+"To unblock previously blocked clients, restart the CTRIOS service. The temporary block list is cleared on service restart." = "要解封之前被封禁的客户端，请重启 CTRIOS 服务。临时封禁列表会在服务重启时清空。";
 
-"TrollVNC" = "ControlIOS";
+"CTRIOS" = "ControlIOS";
 
-"UltraVNC Repeater" = "UltraVNC 中继器";
+"CTRIOS Repeater" = "CTRIOS 中继器";
 
 "View Logs" = "查看日志";
 
@@ -228,7 +228,7 @@
 
 "Viewer" = "查看器";
 
-"VNC TCP port. Default 5901. Valid range 1024–65535." = "VNC TCP 端口。默认 5901。有效范围 1024–65535。";
+"CTRIOS TCP port. Default 5901. Valid range 1024–65535." = "CTRIOS TCP 端口。默认 5901。有效范围 1024–65535。";
 
 "Wheel Step (px)" = "滚轮步进（像素）";
 

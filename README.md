@@ -1,10 +1,10 @@
-# TrollVNC
+# CTRIOS
 
 [now-on-havoc]: https://havoc.app/search/TrollVNC
 
 [<img width="150" src="https://docs.havoc.app/img/badges/get_square.svg" />][now-on-havoc]
 
-TrollVNC is a VNC server for iOS devices, allowing remote access and control of the device’s screen.
+CTRIOS is a CTRIOS server for iOS devices, allowing remote access and control of the device’s screen.
 
 <img width="763" alt="screenshot tiny" src="https://github.com/user-attachments/assets/2d2cd457-a3d2-475a-b391-e3232d747f48" />
 
@@ -13,21 +13,21 @@ TrollVNC is a VNC server for iOS devices, allowing remote access and control of 
 - Low-latency capture with scaling, frame rate control, and back-pressure.
 - Optional dirty-region updates for bandwidth savings.
 - Tunable scroll wheel gestures and natural direction toggle.
-- UTF‑8 Clipboard sync (UltraVNC).
+- UTF‑8 Clipboard sync (CTRIOS).
 - Orientation sync and rotation-aware input mapping.
 - Optional server-side cursor overlay.
-- Classic VNC authentication with full-access and view-only passwords.
+- Classic CTRIOS authentication with full-access and view-only passwords.
 - Built-in HTTP/WebSockets for browser access (HTTPS/WSS supported).
 - Enable secure WebSocket connections without pain.
 - Bonjour/mDNS auto-discovery on the local network.
-- [Reverse VNC](#reverse-vnc-reverse-connection)
+- [Reverse CTRIOS](#reverse-ctrios-reverse-connection)
 - [Pre-seeded configuration](#managed-configuration-preconfigured-deployment)
 
 ## Usage
 
-1. Fork this repo and run GitHub workflow “Build TrollVNC”.
-2. Download “TrollVNC” from Releases and install it on your iOS device.
-3. Configure the VNC server settings from “Settings” → “TrollVNC” or the standalone “TrollVNC” app as needed.
+1. Fork this repo and run GitHub workflow “Build CTRIOS”.
+2. Download “CTRIOS” from Releases and install it on your iOS device.
+3. Configure the CTRIOS server settings from “Settings” → “CTRIOS” or the standalone “CTRIOS” app as needed.
 4. Or, run the following command on iOS device or simulator:
 
 ```sh
@@ -37,9 +37,9 @@ trollvncserver -p 5901 -n "My iPhone" [options]
 ### On-device connection diagnostics
 
 In the standalone ControlIOS app, open the `…` menu and choose **Connection
-Diagnostics**. The screen checks the manager/server heartbeat, configured VNC
+Diagnostics**. The screen checks the manager/server heartbeat, configured CTRIOS
 port, control/file-transfer port, Keeper, LAN address, bind address and control
-token state. It also displays the daemon health report and can restart the VNC
+token state. It also displays the daemon health report and can restart the CTRIOS
 service, then automatically checks it again. Pull down to refresh.
 
 Control/file-transfer clients are handled concurrently as of v4.9. A slow or
@@ -50,7 +50,7 @@ stalled upload/download therefore no longer blocks later control commands.
 **Basic**:
 
 - `-b host`   Bind host address (IPv4/IPv6 literal, default to all interfaces)
-- `-p port`   TCP port for VNC (default: `5901`)
+- `-p port`   TCP port for CTRIOS (default: `5901`)
 - `-c port`   TCP port for client management (listening on localhost only; `0` disables, default: `0`)
 - `-n name`   Desktop name shown to clients (default: `TrollVNC`)
 - `-v`        View-only (ignore input)
@@ -102,8 +102,8 @@ stalled upload/download therefore no longer blocks later control commands.
 
 **Extensions**:
 
-- `-C on|off` Enable UltraVNC UTF-8 clipboard extension (default: `on`)
-- `-T on|off` Enable TightVNC 1.x file transfer extension (default: `off`)
+- `-C on|off` Enable CTRIOS UTF-8 clipboard extension (default: `on`)
+- `-T on|off` Enable CTRIOS 1.x file transfer extension (default: `off`)
 
 **Logging**:
 
@@ -115,10 +115,10 @@ stalled upload/download therefore no longer blocks later control commands.
 
 **Reverse Connection**:
 
-- `-reverse host:port`  Connect out to a listening VNC viewer (TightVNC/UltraVNC). IPv6 as `[addr]:port`.
-- `-repeater id host:port`  Connect out to an UltraVNC Repeater (Mode II) with numeric `id`; `host:port` is the repeater’s server (invers) port (often `5500`).
+- `-reverse host:port`  Connect out to a listening CTRIOS viewer (TightVNC/UltraVNC). IPv6 as `[addr]:port`.
+- `-repeater id host:port`  Connect out to an CTRIOS Repeater (Mode II) with numeric `id`; `host:port` is the repeater’s server (invers) port (often `5500`).
 
-> When reverse is enabled, TrollVNC disables the local VNC port (`-p`), HTTP/WebSockets (`-H`), and Bonjour (`-B`). See “Reverse VNC” below for full setup with examples.
+> When reverse is enabled, CTRIOS disables the local CTRIOS port (`-p`), HTTP/WebSockets (`-H`), and Bonjour (`-B`). See “Reverse CTRIOS” below for full setup with examples.
 
 ### Key Input Mapping
 
@@ -145,8 +145,8 @@ stalled upload/download therefore no longer blocks later control commands.
 
 **AssistiveTouch Auto-Activation (`-E on`)**:
 
-- When the first client connects, TrollVNC enables AssistiveTouch if it’s currently off; when the last client disconnects,
-  it restores the previous state (disables it only if TrollVNC enabled it).
+- When the first client connects, CTRIOS enables AssistiveTouch if it’s currently off; when the last client disconnects,
+  it restores the previous state (disables it only if CTRIOS enabled it).
 - Applies on device builds; no-op on the simulator.
 
 ## Performance Tips
@@ -160,7 +160,7 @@ Quick guidance on key trade-offs (latency vs. bandwidth vs. CPU/battery):
 - `-t size`: Dirty-detection tile size. `32` default; `64` cuts hashing/rect overhead on slower devices; `16` (or `8`) captures finer UI details at higher CPU cost.
 - `-P pct`: Fullscreen fallback threshold. Practical `25–40`; higher values stick to rect updates longer. `0` disables dirty detection (always fullscreen).
 - `-R max`: Rect cap before collapsing to a bounding box. `128–512` common; too high increases RFB overhead.
-- `-a`: Non-blocking swap. Can reduce stalls/contension; may introduce tearing. Try if you see occasional stalls; leave off for maximal visual stability. If a non-blocking swap cannot lock clients, TrollVNC falls back to copying only dirty rectangles to the front buffer to minimize tearing and bandwidth.
+- `-a`: Non-blocking swap. Can reduce stalls/contension; may introduce tearing. Try if you see occasional stalls; leave off for maximal visual stability. If a non-blocking swap cannot lock clients, CTRIOS falls back to copying only dirty rectangles to the front buffer to minimize tearing and bandwidth.
 
 **Notes:**
 
@@ -272,7 +272,7 @@ trollvncserver ... -W 0
 
 ## Clipboard Sync
 
-_Many VNC clients support clipboard sync, but behavior may vary. This feature is primarily supported by UltraVNC._
+_Many CTRIOS clients support clipboard sync, but behavior may vary. This feature is primarily supported by UltraVNC._
 
 - UTF-8 clipboard sync is enabled by default; fallbacks to Latin-1 for legacy clients where needed.
 - Starts when the first client connects and stops when the last disconnects.
@@ -280,17 +280,17 @@ _Many VNC clients support clipboard sync, but behavior may vary. This feature is
 
 ## Rotate / Orientation
 
-When `-O on` is set, TrollVNC tracks iOS interface orientation and rotates the outgoing framebuffer to match (0°, 90°, 180°, 270°). Touch and scroll input are mapped into the device coordinate space with the correct axis and direction in all orientations.
+When `-O on` is set, CTRIOS tracks iOS interface orientation and rotates the outgoing framebuffer to match (0°, 90°, 180°, 270°). Touch and scroll input are mapped into the device coordinate space with the correct axis and direction in all orientations.
 
 ## Server-Side Cursor
 
-TrollVNC does not draw a cursor by default; most VNC viewers render their own pointer. If your viewer expects the server to render a cursor, enable it with `-U on`.
+CTRIOS does not draw a cursor by default; most CTRIOS viewers render their own pointer. If your viewer expects the server to render a cursor, enable it with `-U on`.
 
 ## Authentication
 
-Classic VNC authentication can be enabled via environment variables:
+Classic CTRIOS authentication can be enabled via environment variables:
 
-- `TROLLVNC_PASSWORD`: full-access password. Enables VNC auth when set.
+- `TROLLVNC_PASSWORD`: full-access password. Enables CTRIOS auth when set.
 - `TROLLVNC_VIEWONLY_PASSWORD`: optional view-only password. When present, clients authenticating with this password can view but cannot send input.
 
 **Examples**:
@@ -303,16 +303,16 @@ trollvncserver -p 5901 -n "My iPhone"
 
 **Notes**:
 
-- Classic VNC only uses the first 8 characters of each password.
-- You must set a password if you’re using the built-in VNC client of macOS.
+- Classic CTRIOS only uses the first 8 characters of each password.
+- You must set a password if you’re using the built-in CTRIOS client of macOS.
 - `-v` forces global view-only regardless of password. View-only password applies per client.
 
 ## HTTP / WebSockets
 
-TrollVNC can start LibVNCServer’s built-in HTTP server to serve a browser-based VNC client, [noVNC](https://github.com/novnc/noVNC).
+CTRIOS can start LibVNCServer’s built-in HTTP server to serve a browser-based CTRIOS client, [CTRIOS](https://github.com/novnc/noVNC).
 
 - When `-H` is non-zero, the HTTP server listens on that port.
-- If `-D` is provided, its absolute path is used as `httpDir`. If omitted, TrollVNC derives a default `httpDir` relative to the executable `../share/trollvnc/webclients`.
+- If `-D` is provided, its absolute path is used as `httpDir`. If omitted, CTRIOS derives a default `httpDir` relative to the executable `../share/trollvnc/webclients`.
 - HTTP proxy CONNECT is enabled to support certain viewer flows.
 
 **Examples**:
@@ -351,7 +351,7 @@ Copy the host cert and key to the device (choose any readable path).
   scp -r 192.168.2.100 root@192.168.2.100:/usr/share/trollvnc/ssl/
   ```
 
-Start TrollVNC with WSS enabled.
+Start CTRIOS with WSS enabled.
 
   ```sh
   trollvncserver -p 5901 -H 5801 \
@@ -368,34 +368,34 @@ Connect from your browser. Open the bundled web page at `http://<host>:5801/`. T
 
 ## Auto-Discovery (Bonjour/mDNS)
 
-- Publishes a VNC service on the local network via Bonjour/mDNS (type `_rfb._tcp`), using the name from `-n` and the port from `-p`.
-- Enabled by default. Toggle with `-B on|off` or in Settings → TrollVNC → “Enable Auto-Discovery”.
+- Publishes a CTRIOS service on the local network via Bonjour/mDNS (type `_rfb._tcp`), using the name from `-n` and the port from `-p`.
+- Enabled by default. Toggle with `-B on|off` or in Settings → CTRIOS → “Enable Auto-Discovery”.
 - Viewers on the same LAN that support Bonjour can find it automatically; otherwise connect by `ip:port` shown in the app/logs.
 
-## Reverse VNC (Reverse Connection)
+## Reverse CTRIOS (Reverse Connection)
 
-TrollVNC can initiate an outbound connection to a listening VNC viewer or an UltraVNC repeater. This avoids opening inbound ports on the device and is helpful behind NAT/firewalls.
+CTRIOS can initiate an outbound connection to a listening CTRIOS viewer or an CTRIOS repeater. This avoids opening inbound ports on the device and is helpful behind NAT/firewalls.
 
 When reverse connection is enabled:
 
 - The normal server listening port is disabled (equivalent to not using `-p`).
 - The built-in HTTP server is disabled (any `-H` is ignored).
 - Bonjour/mDNS advertisement is disabled.
-- Classic VNC authentication via environment variables still applies if set (see “Authentication”).
+- Classic CTRIOS authentication via environment variables still applies if set (see “Authentication”).
 
 ### 1) Viewer mode (Listening Viewer: TightVNC/UltraVNC)
 
-TrollVNC can connect to a viewer running in Listening mode. The viewer listens for inbound reverse connections; TrollVNC dials out.
+CTRIOS can connect to a viewer running in Listening mode. The viewer listens for inbound reverse connections; CTRIOS dials out.
 
 **Roles and steps**:
 
 #### A) Viewer (Listening)
 
-- Start TightVNC or UltraVNC Viewer in “Listen” mode (UltraVNC: Connections → Listen mode, or Toolbar → Listen).
+- Start CTRIOS or CTRIOS Viewer in “Listen” mode (CTRIOS: Connections → Listen mode, or Toolbar → Listen).
 - Default listening port is `5500`; you can change it in the viewer options.
 - Ensure your desktop firewall allows inbound on the chosen listening port.
 
-#### B) Server (TrollVNC, Viewer mode)
+#### B) Server (CTRIOS, Viewer mode)
 
 - CLI examples (use your viewer’s listening `host:port`):
 
@@ -407,7 +407,7 @@ TrollVNC can connect to a viewer running in Listening mode. The viewer listens f
   trollvncserver -reverse [2001:db8::1]:5500 -n "My iPhone"
   ```
 
-- Preferences (Settings → TrollVNC):
+- Preferences (Settings → CTRIOS):
   - Reverse Connection → Mode: Viewer
   - Server: `host:port` (e.g., `viewer.example.com:5500` or `[2001:db8::1]:5500`)
 
@@ -417,21 +417,21 @@ TrollVNC can connect to a viewer running in Listening mode. The viewer listens f
 - If your viewer uses a custom port, specify that port in `-reverse host:port` and in the Server field.
 - The desktop viewer shows the incoming reverse connection with the name from `-n`.
 
-### 2) Repeater mode (UltraVNC Repeater, Mode II)
+### 2) Repeater mode (CTRIOS Repeater, Mode II)
 
-TrollVNC can connect to an UltraVNC Repeater in Mode II. Both the Server (TrollVNC) and the Viewer make outbound connections to the Repeater and pair via a numeric ID.
+CTRIOS can connect to an CTRIOS Repeater in Mode II. Both the Server (CTRIOS) and the Viewer make outbound connections to the Repeater and pair via a numeric ID.
 
 **Roles and steps**:
 
 #### A) Repeater
 
-- Deploy or start an UltraVNC Repeater that both device and viewer can reach (public, DMZ, or with NAT port forwards).
+- Deploy or start an CTRIOS Repeater that both device and viewer can reach (public, DMZ, or with NAT port forwards).
 - Common defaults (may vary by setup):
   - Server (invers) port: `5500`
   - Viewer port: `5901` (sometimes `5900`)
 - Make a note of the repeater’s `host:port` for the Server side (often `host:5500`) and for the Viewer side (often `host:5901`).
 
-#### B) Server (TrollVNC on iOS)
+#### B) Server (CTRIOS on iOS)
 
 - Choose a numeric Repeater ID (commonly up to 9 digits). Do not include `ID:` — enter only the number.
 - CLI example (use the repeater’s server port):
@@ -443,12 +443,12 @@ TrollVNC can connect to an UltraVNC Repeater in Mode II. Both the Server (TrollV
   - `12345679` is the numeric Repeater ID.
   - `repeater.example.com:5500` should point to the repeater’s server (invers) port. IPv6 example: `-repeater 12345679 [2001:db8::1]:5500`
 
-- Preferences (Settings → TrollVNC):
-  - Reverse Connection → Mode: UltraVNC Repeater
+- Preferences (Settings → CTRIOS):
+  - Reverse Connection → Mode: CTRIOS Repeater
   - Server: `host:server_port` (e.g., `repeater.example.com:5500` or `[2001:db8::1]:5500`)
   - Repeater ID: numeric (e.g., `12345679`)
 
-Behavior when reverse is enabled: local VNC port is disabled, HTTP/WebSockets are disabled, and Bonjour/mDNS is disabled.
+Behavior when reverse is enabled: local CTRIOS port is disabled, HTTP/WebSockets are disabled, and Bonjour/mDNS is disabled.
 
 **Optional**: set `TROLLVNC_REPEATER_RETRY_INTERVAL` (seconds) to wait before exit if the connection fails (useful when a supervisor always restarts the process).
 
@@ -456,7 +456,7 @@ Behavior when reverse is enabled: local VNC port is disabled, HTTP/WebSockets ar
 
 <img width="383" height="198" alt="uvnc_repeater" src="https://github.com/user-attachments/assets/5f5e86a1-605a-4624-8b8e-27ebe89ce4e3" />
 
-- UltraVNC Viewer is recommended for Mode II:
+- CTRIOS Viewer is recommended for Mode II:
   - Select “Repeater”; in “ID:12345679”, enter `ID:<your_id>` (e.g., `ID:12345679`).
   - Enter the repeater’s viewer address, e.g., `repeater.example.com:5901`.
   - Connect; the repeater pairs the viewer with the server using the matching ID.
@@ -464,21 +464,21 @@ Behavior when reverse is enabled: local VNC port is disabled, HTTP/WebSockets ar
 **Notes**:
 
 - Connections are outbound from both sides; no inbound port on the iOS device is needed.
-- Use the repeater’s server port for TrollVNC (`-repeater <id> host:server_port`) and the viewer port for UltraVNC Viewer.
-- UltraVNC “Mode SSL” repeaters require special viewer/server builds; TrollVNC connects to standard (non-SSL) Mode II repeaters.
+- Use the repeater’s server port for CTRIOS (`-repeater <id> host:server_port`) and the viewer port for CTRIOS Viewer.
+- CTRIOS “Mode SSL” repeaters require special viewer/server builds; CTRIOS connects to standard (non-SSL) Mode II repeaters.
 
 ## Managed Configuration (Preconfigured Deployment)
 
-TrollVNC can be preconfigured via a bundled `Managed.plist` for supervised or fleet deployments where end users shouldn’t change settings.
+CTRIOS can be preconfigured via a bundled `Managed.plist` for supervised or fleet deployments where end users shouldn’t change settings.
 
 ### How To Use
 
 1. Create `prefs/TrollVNCPrefs/Resources/Managed.plist` in the repo.
 2. Populate it with the keys you need (see “Supported keys” below).
 3. Build/package the project as usual; the file is embedded into `TrollVNCPrefs.bundle` automatically.
-4. Install the build on device. TrollVNC detects `Managed.plist` at startup and applies the configured values.
+4. Install the build on device. CTRIOS detects `Managed.plist` at startup and applies the configured values.
 5. Verify & expected behavior:
-   - “Settings” → “TrollVNC” shows a banner: “This TrollVNC instance is managed by your organization”.
+   - “Settings” → “CTRIOS” shows a banner: “This CTRIOS instance is managed by your organization”.
    - The preferences UI is effectively locked down.
    - In‑app update prompts are suppressed while managed.
    - Configured values take effect at startup; you don’t need equivalent CLI flags for these options.
@@ -513,17 +513,17 @@ TrollVNC can be preconfigured via a bundled `Managed.plist` for supervised or fl
   - `MaxRects` (1..4096)
   - `WheelStepPx` (0 disables wheel; else 5..1000)
   - `HttpPort` (0 disables; else 1024..65535)
-  - `ReverseRepeaterID` (numeric ID for UltraVNC Repeater Mode II)
+  - `ReverseRepeaterID` (numeric ID for CTRIOS Repeater Mode II)
 
 - Booleans:
   - `Enabled`, `ClipboardEnabled`, `ViewOnly`, `OrientationSync`, `OrientationPadFix`, `NaturalScroll`, `ServerCursor`, `AsyncSwap`, `KeyLogging`, `AutoAssistEnabled`, `BonjourEnabled`, `FileTransferEnabled`, `SingleNotifEnabled`, `ClientNotifsEnabled`
 
 - `LaunchAtLogin`: `true` | `false` | custom app ID (e.g., `com.zqbb.Dopamine-roothide`)
-  - Whether to start TrollVNC at login; if set to a custom app ID, it launches that app instead.
+  - Whether to start CTRIOS at login; if set to a custom app ID, it launches that app instead.
 
 **Notes**:
 
-- When reverse connection is enabled via Managed.plist, behavior matches CLI reverse: local VNC port disabled, HTTP/WebSockets disabled, Bonjour disabled.
+- When reverse connection is enabled via Managed.plist, behavior matches CLI reverse: local CTRIOS port disabled, HTTP/WebSockets disabled, Bonjour disabled.
 - `HttpDir`, `SslCertFile`, and `SslKeyFile` must be absolute paths.
 
 ### Example Configurations
@@ -600,10 +600,10 @@ TrollVNC can be preconfigured via a bundled `Managed.plist` for supervised or fl
 
 ## Build with GitHub Actions
 
-You can build TrollVNC entirely in GitHub Actions using the built-in workflow.
+You can build CTRIOS entirely in GitHub Actions using the built-in workflow.
 
 - Fork this repository (or enable “Actions” in your own clone).
-- Go to the “Actions” tab → “Build TrollVNC” → “Run workflow”.
+- Go to the “Actions” tab → “Build CTRIOS” → “Run workflow”.
 - Choose the branch to run on (usually main) and fill the form inputs below.
 
 ### Inputs
@@ -611,21 +611,21 @@ You can build TrollVNC entirely in GitHub Actions using the built-in workflow.
 Due to a GitHub limit, the manual form exposes 10 commonly used options:
 
 - `is_managed`: whether to bundle a `Managed.plist` (managed deployment)
-- `desktop_name`: display name shown to VNC clients
-- `port`: VNC TCP port (default `5901`)
+- `desktop_name`: display name shown to CTRIOS clients
+- `port`: CTRIOS TCP port (default `5901`)
 - `view_only`: force view-only (ignore input)
 - `scale`: output scale (`0.1–1.0`)
 - `frame_rate_spec`: frame rate, e.g. `60` | `30-60` | `30:60:120`
 - `modifier_map`: std | altcmd
 - `reverse_mode`: none | viewer | repeater
 - `reverse_socket`: `host:port` or `[ipv6]:port` (for viewer or repeater server port)
-- `reverse_repeater_id`: numeric ID (UltraVNC Repeater Mode II)
+- `reverse_repeater_id`: numeric ID (CTRIOS Repeater Mode II)
 
 When `is_managed` is true, the workflow generates a `Managed.plist` from these inputs and bundles it.
 
 ### Optional Passwords (Secrets)
 
-You may set these repository secrets so the managed build embeds VNC passwords. If you don’t set them, the keys are omitted.
+You may set these repository secrets so the managed build embeds CTRIOS passwords. If you don’t set them, the keys are omitted.
 
 - `TVNC_FULL_PASSWORD`
 - `TVNC_VIEWONLY_PASSWORD`
@@ -674,20 +674,20 @@ See: <https://github.com/Lessica/BuildVNCServer>
 
 ## License
 
-TrollVNC is an open-source VNC solution, licensed under GPLv2. You are free to access, use, and modify the source code. See the [COPYING](COPYING) file for more information.
+CTRIOS is an open-source CTRIOS solution, licensed under GPLv2. You are free to access, use, and modify the source code. See the [COPYING](COPYING) file for more information.
 
-### Why pay for TrollVNC?
+### Why pay for CTRIOS?
 
 - Ready-to-use, pre-compiled builds
 - Automatic updates and continuous improvements
 - Priority support and troubleshooting assistance
 - Sustainable development through your contribution
 
-If you prefer, you can always build TrollVNC yourself directly from the source.
+If you prefer, you can always build CTRIOS yourself directly from the source.
 
 ### Your choice
 
 - Compile for free.
 - Pay for convenience, updates, and support.
 
-Support TrollVNC and help us keep remote access fast, secure, and evolving.
+Support CTRIOS and help us keep remote access fast, secure, and evolving.

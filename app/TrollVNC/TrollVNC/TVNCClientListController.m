@@ -1255,13 +1255,13 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
         [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Manager/server",
                                                                manager ? @"✓" : @"✗"],
                           @"detail": @"Alive socket nội bộ · cổng 46751"}];
-        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ VNC",
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ CTRIOS",
                                                                vnc ? @"✓" : @"✗"],
                           @"detail": [NSString stringWithFormat:@"Cổng %ld · %@", (long)vncPort,
-                              vncHealth == TVNCRFBReady ? @"Bắt tay VNC thành công"
-                              : vncHealth == TVNCRFBAuthRequired ? @"VNC phản hồi; cần xác thực"
-                              : vncHealth == TVNCRFBRefused ? @"VNC từ chối phiên xem; kiểm tra quyền/bản quyền"
-                              : @"Không hoàn tất bắt tay VNC; manager sẽ thử tự phục hồi"]}];
+                              vncHealth == TVNCRFBReady ? @"Bắt tay CTRIOS thành công"
+                              : vncHealth == TVNCRFBAuthRequired ? @"CTRIOS phản hồi; cần xác thực"
+                              : vncHealth == TVNCRFBRefused ? @"CTRIOS từ chối phiên xem; kiểm tra quyền/bản quyền"
+                              : @"Không hoàn tất bắt tay CTRIOS; manager sẽ thử tự phục hồi"]}];
         NSString *controlDetail = control
             ? (controlReplies ? @"Cổng 46752 phản hồi lệnh bình thường"
                               : @"Cổng 46752 mở nhưng KHÔNG trả lời — có thể lượt truyền cũ đang kẹt")
@@ -1300,7 +1300,7 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
 - (void)confirmRestart {
     UIAlertController *alert = [UIAlertController
         alertControllerWithTitle:@"Khởi động lại dịch vụ?"
-                         message:@"Dừng trollvncserver hiện tại. Manager sẽ tự chạy lại; kết nối VNC/control ngắt trong vài giây."
+                         message:@"Dừng dịch vụ CTRIOS hiện tại. Manager sẽ tự chạy lại; kết nối CTRIOS/control ngắt trong vài giây."
                   preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Huỷ" style:UIAlertActionStyleCancel handler:nil]];
     __weak typeof(self) weakSelf = self;
@@ -1497,7 +1497,7 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
         dispatch_async(dispatch_get_main_queue(), ^{
             [self refresh];
             [self alert:(ok ? @"Thành công" : @"Chưa kích hoạt được")
-                message:(ok ? @"License hợp lệ. Nếu đang mở phiên VNC, respring cho chắc."
+                message:(ok ? @"License hợp lệ. Nếu đang mở phiên CTRIOS, respring cho chắc."
                             : @"Không hợp lệ / sai UDID / hết hạn. Kiểm tra lại key.")];
         });
     });
@@ -1556,7 +1556,7 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
                 @"home·key·typeText. Chờ/lặp: sleep·random·while·for·if·stop. Màu/ảnh: "
                 @"getColor·matchColor·waitColor·findImage. App/Web: launchApp·killApp·openURL·"
                 @"openURLIn·httpGet·httpPost. Tệp: readFile·writeFile·fileExists (JSON có "
-                @"sẵn: JSON.parse/stringify). Mẹo: lấy toạ độ trên khung VNC ở PC (góc dưới).";
+                @"sẵn: JSON.parse/stringify). Mẹo: lấy toạ độ trên khung CTRIOS ở PC (góc dưới).";
     hint.translatesAutoresizingMaskIntoConstraints = NO;
 
     self.editor = [UITextView new];

@@ -19,7 +19,7 @@ on:
         default: ControlIOS
       port:
         type: string
-        description: VNC TCP port (1024–65535; default 5901)
+        description: CTRIOS TCP port (1024–65535; default 5901)
         required: false
         default: "5901"
       view_only:

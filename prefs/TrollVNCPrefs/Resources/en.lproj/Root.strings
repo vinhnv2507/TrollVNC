@@ -14,13 +14,13 @@
 
 "90° Clockwise" = "90° Clockwise";
 
-"A repeater ID is required for the “UltraVNC Repeater” mode." = "A repeater ID is required for the “UltraVNC Repeater” mode.";
+"A repeater ID is required for the “CTRIOS Repeater” mode." = "A repeater ID is required for the “CTRIOS Repeater” mode.";
 
 "Absolute path to static web client files. Leave empty to use built-in assets." = "Absolute path to static web client files. Leave empty to use built-in assets.";
 
 "Advanced wheel options: comma-separated key=value (e.g. step=48,coalesce=0.03,accel=1.0). Leave empty to use defaults." = "Advanced wheel options: comma-separated key=value (e.g. step=48,coalesce=0.03,accel=1.0). Leave empty to use defaults.";
 
-"Advertises the VNC service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting." = "Advertises the VNC service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting.";
+"Advertises the CTRIOS service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting." = "Advertises the CTRIOS service over Bonjour (_rfb._tcp) for clients that support auto-discovery. When the built-in HTTP server is enabled, also publishes _http._tcp. Turn off to disable broadcasting.";
 
 "Alt as Command" = "Alt as Command";
 
@@ -78,7 +78,7 @@
 
 "Enabled" = "Enabled";
 
-"Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "Establish a reverse connection to a listening VNC viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT.";
+"Establish a reverse connection to a listening CTRIOS viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT." = "Establish a reverse connection to a listening CTRIOS viewer or repeater without opening a server port. This is useful for bypassing firewalls or NAT.";
 
 "Export Certificate…" = "Export Certificate…";
 
@@ -126,7 +126,7 @@
 
 "Modifier Mapping" = "Modifier Mapping";
 
-"Name shown to VNC clients." = "Name shown to VNC clients.";
+"Name shown to CTRIOS clients." = "Name shown to CTRIOS clients.";
 
 "Natural Scroll Direction" = "Natural Scroll Direction";
 
@@ -164,7 +164,7 @@
 
 "Scroll & Input" = "Scroll & Input";
 
-"Serve the built-in web VNC client on this port. 0 disables." = "Serve the built-in web VNC client on this port. 0 disables.";
+"Serve the built-in web CTRIOS client on this port. 0 disables." = "Serve the built-in web CTRIOS client on this port. 0 disables.";
 
 "Server" = "Server";
 
@@ -174,15 +174,15 @@
 
 "Set a password for view-only access (no input)." = "Set a password for view-only access (no input).";
 
-"Set a password for view-only access (no input). Classic VNC authentication uses only the first 8 characters." = "Set a password for view-only access (no input). Classic VNC authentication uses only the first 8 characters.";
+"Set a password for view-only access (no input). Classic CTRIOS authentication uses only the first 8 characters." = "Set a password for view-only access (no input). Classic CTRIOS authentication uses only the first 8 characters.";
 
-"Set a VNC password for full control. Leaving empty disables authentication (not recommended)." = "Set a VNC password for full control. Leaving empty disables authentication (not recommended).";
+"Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended)." = "Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended).";
 
-"Set a VNC password for full control. Leaving empty disables authentication (not recommended). Classic VNC authentication uses only the first 8 characters." = "Set a VNC password for full control. Leaving empty disables authentication (not recommended). Classic VNC authentication uses only the first 8 characters.";
+"Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended). Classic CTRIOS authentication uses only the first 8 characters." = "Set a CTRIOS password for full control. Leaving empty disables authentication (not recommended). Classic CTRIOS authentication uses only the first 8 characters.";
 
 "Show notifications when clients connect or disconnect." = "Show notifications when clients connect or disconnect.";
 
-"Shown to VNC clients" = "Shown to VNC clients";
+"Shown to CTRIOS clients" = "Shown to CTRIOS clients";
 
 "Silence Notifications" = "Silence Notifications";
 
@@ -204,7 +204,7 @@
 
 "Sync Interface Orientation" = "Sync Interface Orientation";
 
-"Syncs text clipboard with VNC clients while connected. Disable if you do not want remote clipboard access." = "Syncs text clipboard with VNC clients while connected. Disable if you do not want remote clipboard access.";
+"Syncs text clipboard with CTRIOS clients while connected. Disable if you do not want remote clipboard access." = "Syncs text clipboard with CTRIOS clients while connected. Disable if you do not want remote clipboard access.";
 
 "TCP Port" = "TCP Port";
 
@@ -212,9 +212,9 @@
 
 "Tile Size (px)" = "Tile Size (px)";
 
-"TrollVNC" = "ControlIOS";
+"CTRIOS" = "ControlIOS";
 
-"UltraVNC Repeater" = "UltraVNC Repeater";
+"CTRIOS Repeater" = "CTRIOS Repeater";
 
 "View Logs" = "View Logs";
 
@@ -226,7 +226,7 @@
 
 "Viewer" = "Viewer";
 
-"VNC TCP port. Default 5901. Valid range 1024–65535." = "VNC TCP port. Default 5901. Valid range 1024–65535.";
+"CTRIOS TCP port. Default 5901. Valid range 1024–65535." = "CTRIOS TCP port. Default 5901. Valid range 1024–65535.";
 
 "Wheel Step (px)" = "Wheel Step (px)";
 
@@ -234,4 +234,4 @@
 
 "When dirty rectangles exceed this count, collapse to a bounding box. Too high increases protocol overhead." = "When dirty rectangles exceed this count, collapse to a bounding box. Too high increases protocol overhead.";
 
-"To unblock previously blocked clients, restart the VNC service. The temporary block list is cleared on service restart." = "";
+"To unblock previously blocked clients, restart the CTRIOS service. The temporary block list is cleared on service restart." = "";

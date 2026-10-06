@@ -26,7 +26,7 @@
 "Are you sure you want to reset all settings to their defaults?" = "Are you sure you want to reset all settings to their defaults?";
 
 /* No comment provided by engineer. */
-"Are you sure you want to restart the VNC service?" = "Are you sure you want to restart the VNC service?";
+"Are you sure you want to restart the VNC service?" = "Are you sure you want to restart the CTRIOS service?";
 
 /* No comment provided by engineer. */
 "Bind address must be a valid IPv4/IPv6 literal, or empty to listen on all interfaces." = "Bind address must be a valid IPv4/IPv6 literal, or empty to listen on all interfaces.";

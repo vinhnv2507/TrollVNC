@@ -174,7 +174,7 @@ int SBSLaunchApplicationWithIdentifierAndURLAndLaunchOptions(CFStringRef bundleI
     BOOL launched = [serviceTask launchAndReturnError:&error];
     if (!launched) {
 #if DEBUG
-        NSLog(@"[TVNC] Failed to launch service: %@", error);
+        NSLog(@"[CTRIOS] Failed to launch service: %@", error);
 #endif
         return;
     }

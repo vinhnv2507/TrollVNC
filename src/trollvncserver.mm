@@ -399,7 +399,7 @@ static void printUsageAndExit(const char *prog) {
 
     fprintf(stderr, "Basic:\n");
     fprintf(stderr, "  -b host    Bind host address (IPv4/IPv6 literal, default to all)\n");
-    fprintf(stderr, "  -p port    VNC TCP port (default: %d)\n", gPort);
+    fprintf(stderr, "  -p port    CTRIOS TCP port (default: %d)\n", gPort);
     fprintf(stderr, "  -c port    Client management TCP port (0=off, default: 0)\n");
     fprintf(stderr, "  -n name    Desktop name (default: %s)\n", [gDesktopName UTF8String]);
     fprintf(stderr, "  -v         View-only (ignore input)\n");
@@ -463,7 +463,7 @@ static void printUsageAndExit(const char *prog) {
     fprintf(stderr, "Environment:\n");
     fprintf(
         stderr,
-        "  TROLLVNC_PASSWORD                 Classic VNC password (enables VNC auth when set; first 8 chars used)\n");
+        "  TROLLVNC_PASSWORD                 Classic CTRIOS password (enables CTRIOS auth when set; first 8 chars used)\n");
     fprintf(stderr,
             "  TROLLVNC_VIEWONLY_PASSWORD        View-only password; passwords stored as [full..., view-only...]\n");
     fprintf(stderr, "  TROLLVNC_REPEATER_RETRY_INTERVAL  Repeater retry interval (default: 0)\n\n");
@@ -1616,10 +1616,10 @@ static void parseCLI(int argc, const char *argv[]) {
             const char *val = optarg ? optarg : "off";
             if (strcasecmp(val, "on") == 0 || strcmp(val, "1") == 0 || strcasecmp(val, "true") == 0) {
                 gFileTransferEnabled = YES;
-                TVLog(@"CLI: TightVNC 1.x file transfer extension enabled (-T %s)", [@(val) UTF8String]);
+                TVLog(@"CLI: CTRIOS 1.x file transfer extension enabled (-T %s)", [@(val) UTF8String]);
             } else if (strcasecmp(val, "off") == 0 || strcmp(val, "0") == 0 || strcasecmp(val, "false") == 0) {
                 gFileTransferEnabled = NO;
-                TVLog(@"CLI: TightVNC 1.x file transfer extension disabled (-T %s)", [@(val) UTF8String]);
+                TVLog(@"CLI: CTRIOS 1.x file transfer extension disabled (-T %s)", [@(val) UTF8String]);
             } else {
                 TVPrintError("Invalid -T value: %s (expected on|off|1|0|true|false)", val);
                 exit(EXIT_FAILURE);
@@ -5606,7 +5606,7 @@ static void tvScheduleInitialUnlockCheckAfterFirstClient(void) {
                        dispatch_get_main_queue(), ^{
             tvVerifyStartupUnlockAndOpenSettings(1);
         });
-        TVLog(@"One-shot unlock check scheduled after first VNC client of this boot (1s)");
+        TVLog(@"One-shot unlock check scheduled after first CTRIOS client of this boot (1s)");
     });
 }
 
@@ -7962,7 +7962,7 @@ static void clientGoneHook(rfbClientPtr cl) {
 static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
     // Gác cổng bản quyền: chưa kích hoạt (sai/thiếu/hết hạn license) thì từ chối.
     if (CIOS_ENFORCE_LICENSE && !gLicenseValid) {
-        TVLog(@"VNC: từ chối client — chưa kích hoạt bản quyền");
+        TVLog(@"CTRIOS: từ chối client — chưa kích hoạt bản quyền");
         return RFB_CLIENT_REFUSE;
     }
 
@@ -8576,7 +8576,7 @@ static void setupRfbClassicAuthentication(void) {
         gScreen->authPasswdFirstViewOnly = fullCount;
         gScreen->passwordCheck = tvCheckPasswordByList;
 
-        TVLog(@"Classic VNC authentication enabled via env: full=%d, view-only=%d", fullCount, viewCount);
+        TVLog(@"Classic CTRIOS authentication enabled via env: full=%d, view-only=%d", fullCount, viewCount);
     }
 }
 
@@ -8651,7 +8651,7 @@ static void setupRfbFileTransferExtension(void) {
         return;
     }
 
-    TVLog(@"TightVNC 1.x file transfer extension registered");
+    TVLog(@"CTRIOS 1.x file transfer extension registered");
     rfbRegisterTightVNCFileTransferExtension();
 
     gFileTransferRegistered = YES;
@@ -8687,7 +8687,7 @@ static void tvStartRfbEventThread(void) {
     int rc = pthread_create(&gRfbEventThread, NULL, tvRfbEventThreadMain, NULL);
     if (rc != 0) {
         gRfbEventThreadRunning.store(0, std::memory_order_relaxed);
-        TVPrintError("Failed to create VNC event thread (rc=%d)", rc);
+        TVPrintError("Failed to create CTRIOS event thread (rc=%d)", rc);
         exit(EXIT_FAILURE);
     }
 }
@@ -8709,7 +8709,7 @@ static void initializeAndRunRfbServer(void) {
     TVLog(@"License: %@ (máy %@)", gLicenseValid ? @"đã kích hoạt" : @"CHƯA kích hoạt",
           tvDeviceUDID() ?: @"?");
     rfbInitServer(gScreen);
-    TVLog(@"VNC server initialized on port %d, %dx%d, name '%@'", gPort, gWidth, gHeight, gDesktopName);
+    TVLog(@"CTRIOS server initialized on port %d, %dx%d, name '%@'", gPort, gWidth, gHeight, gDesktopName);
 
     if (isRepeaterEnabled()) {
         static CFTimeInterval sRetryInterval = 0.0;
@@ -8720,12 +8720,12 @@ static void initializeAndRunRfbServer(void) {
 
         static rfbClientPtr sClient = NULL;
         if (gRepeaterMode == 2) {
-            TVLog(@"VNC server running in repeater mode");
+            TVLog(@"CTRIOS server running in repeater mode");
             static NSString *sRepeaterId = [NSString stringWithFormat:@"%d", gRepeaterId];
             const char *repeaterId = [sRepeaterId UTF8String];
             sClient = rfbUltraVNCRepeaterMode2Connection(gScreen, gRepeaterHost, gRepeaterPort, repeaterId);
         } else {
-            TVLog(@"VNC server running in viewer mode");
+            TVLog(@"CTRIOS server running in viewer mode");
             sClient = rfbReverseConnection(gScreen, gRepeaterHost, gRepeaterPort);
         }
 
