@@ -34,8 +34,8 @@ static void report(NSString *state, NSString *message) {
     NSDictionary *body = @{@"job": jobID, @"state": state, @"message": message,
                            @"version": targetVersion};
     NSData *data = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
-    [data writeToFile:[jobDirectory stringByAppendingPathComponent:@"status.json"] atomically:YES];
-    if ([state isEqualToString:@"error"]) {
+    if (jobDirectory) [data writeToFile:[jobDirectory stringByAppendingPathComponent:@"status.json"] atomically:YES];
+    if (jobDirectory && [state isEqualToString:@"error"]) {
         unlink([jobDirectory stringByAppendingPathComponent:@"ControlIOS.tipa"].fileSystemRepresentation);
         unlink([jobDirectory stringByAppendingPathComponent:@"updater"].fileSystemRepresentation);
     }
@@ -110,6 +110,8 @@ static NSString *fileSHA(NSString *path) {
 
 int main(int argc, char **argv) {
     @autoreleasepool {
+        if (argc == 2 && strcmp(argv[1], "--check") == 0)
+            return getuid() == 0 && getgid() == 0 ? 0 : 2;
         if (argc != 7 || getuid() != 0) return 2;
         // job, version, SHA256, package URL, TrollStore helper, existing app path
         jobID = @(argv[1]); targetVersion = @(argv[2]);
@@ -122,8 +124,34 @@ int main(int argc, char **argv) {
             ![url.scheme isEqualToString:@"http"] || !TVUpdateLANHost(url.host.UTF8String) ||
             url.user || url.password || url.query || url.fragment ||
             ![url.path isEqualToString:[NSString stringWithFormat:@"/%@/ControlIOS.tipa", jobID]]) return 2;
-        jobDirectory = [@(argv[0]) stringByDeletingLastPathComponent];
+        jobDirectory = [NSString stringWithFormat:@"/var/tmp/controlios-update-%@.app", jobID];
         statusURL = [[url URLByDeletingLastPathComponent] URLByAppendingPathComponent:@"status"];
+        NSString *detached = [jobDirectory stringByAppendingPathComponent:@"updater"];
+        if (![@(argv[0]) isEqualToString:detached]) {
+            // Stage as root, before the installer can delete the original bundle.
+            // Never reuse a pre-existing path, including a symlink or mobile-owned directory.
+            if (mkdir(jobDirectory.fileSystemRepresentation, 0700) != 0) {
+                jobDirectory = nil; // Do not touch a previous job's files.
+                report(@"error", @"Không tạo được thư mục cập nhật riêng; chưa cài gói"); return 8;
+            }
+            NSDictionary *info = @{@"CFBundleIdentifier": @"com.controlios.localupdater",
+                @"CFBundleExecutable": @"updater", @"CFBundlePackageType": @"APPL",
+                @"NSAppTransportSecurity": @{@"NSAllowsArbitraryLoads": @YES}};
+            struct stat staged = {};
+            if (![info writeToFile:[jobDirectory stringByAppendingPathComponent:@"Info.plist"] atomically:YES] ||
+                ![[NSFileManager defaultManager] copyItemAtPath:@(argv[0]) toPath:detached error:nil] ||
+                chown(detached.fileSystemRepresentation, 0, 0) != 0 ||
+                chmod(detached.fileSystemRepresentation, 0700) != 0 ||
+                lstat(detached.fileSystemRepresentation, &staged) != 0 ||
+                !S_ISREG(staged.st_mode) || staged.st_uid != 0) {
+                report(@"error", @"Không chuẩn bị được bộ cập nhật quyền root; chưa cài gói"); return 8;
+            }
+            NSMutableArray<NSString *> *arguments = [NSMutableArray array];
+            for (int i = 1; i < argc; ++i) [arguments addObject:@(argv[i])];
+            int result = spawn(detached, arguments, NO);
+            if (result) report(@"error", [NSString stringWithFormat:@"Không khởi chạy được bộ cập nhật: %d", result]);
+            return result ? 8 : 0;
+        }
         int lockFD = open("/var/tmp/controlios-update.lock", O_CREAT | O_RDWR | O_NOFOLLOW, 0600);
         if (lockFD < 0 || flock(lockFD, LOCK_EX | LOCK_NB) != 0) {
             report(@"error", @"Đang có một lượt cập nhật khác trên máy"); return 3;

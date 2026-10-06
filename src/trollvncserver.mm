@@ -67,7 +67,9 @@
 #import "TVNCSocket.h"
 #import "TVNCTouchLockPolicy.h"
 #import "TVNCLocalUpdate.h"
+#import "TVNCUpdateRootSpawn.h"
 #import <spawn.h>
+#import <sys/wait.h>
 #import "FBSOrientationObserver.h"
 #import "IOKitSPI.h"
 #import "Logging.h"
@@ -5835,10 +5837,38 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
             if (access(candidate.fileSystemRepresentation, X_OK) == 0) { helper = candidate; break; }
         }
     }
-    if (!helper || access(updater.fileSystemRepresentation, X_OK) != 0 || getuid() != 0)
+    if (!helper)
         return [@"ERR LocalUpdateUnavailable TrollStore/helper missing\n" dataUsingEncoding:NSUTF8StringEncoding];
-    if ([request isEqualToString:@"check"])
-        return [@"OK LAN_UPDATE_1\n" dataUsingEncoding:NSUTF8StringEncoding];
+    if (access(updater.fileSystemRepresentation, X_OK) != 0)
+        return [@"ERR LocalUpdateUnavailable ControlIOS updater missing\n" dataUsingEncoding:NSUTF8StringEncoding];
+    BOOL checking = [request isEqualToString:@"check"];
+    if (checking) {
+        // Test the actual root launch without downloading or installing anything.
+        posix_spawnattr_t attr;
+        posix_spawnattr_init(&attr);
+        int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
+        posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
+        pid_t pid = 0;
+        const char *args[] = {updater.fileSystemRepresentation, "--check", NULL};
+        extern char **environ;
+        if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, NULL, &attr,
+                                        (char *const *)args, environ);
+        posix_spawnattr_destroy(&attr);
+        if (error) return [[NSString stringWithFormat:@"ERR LocalUpdateUnavailable RootSpawn %d\n", error]
+                           dataUsingEncoding:NSUTF8StringEncoding];
+        int result = 0;
+        for (int i = 0; i < 30; ++i) {
+            pid_t exited = waitpid(pid, &result, WNOHANG);
+            if (exited == pid)
+                return [(WIFEXITED(result) && WEXITSTATUS(result) == 0 ? @"OK LAN_UPDATE_1\n" :
+                         @"ERR LocalUpdateUnavailable updater root check failed\n") dataUsingEncoding:NSUTF8StringEncoding];
+            if (exited < 0 && errno != EINTR) break;
+            usleep(100000);
+        }
+        kill(pid, SIGKILL);
+        waitpid(pid, &result, 0);
+        return [@"ERR LocalUpdateUnavailable updater root check timeout\n" dataUsingEncoding:NSUTF8StringEncoding];
+    }
     if (parts.count != 4 || !TVUpdateHex(parts[0].UTF8String, 32) ||
         !TVUpdateVersion(parts[1].UTF8String) || !TVUpdateHex(parts[2].UTF8String, 64))
         return [@"ERR BadUpdateArguments\n" dataUsingEncoding:NSUTF8StringEncoding];
@@ -5849,29 +5879,19 @@ static NSData *tvCtlLocalUpdate(NSString *request) {
         return [@"ERR BadUpdateLANURL\n" dataUsingEncoding:NSUTF8StringEncoding];
     if ([@PACKAGE_VERSION compare:parts[1] options:NSNumericSearch] != NSOrderedAscending)
         return [@"ERR UpdateNotNewer\n" dataUsingEncoding:NSUTF8StringEncoding];
-    // A root-only, unpredictable directory protects the executable from replacement.
-    NSString *directory = [NSString stringWithFormat:@"/var/tmp/controlios-update-%@.app", parts[0]];
-    if (mkdir(directory.fileSystemRepresentation, 0700) != 0)
-        return [@"ERR UpdateAlreadyRequested\n" dataUsingEncoding:NSUTF8StringEncoding];
-    NSString *detached = [directory stringByAppendingPathComponent:@"updater"];
-    NSDictionary *updaterInfo = @{@"CFBundleIdentifier": @"com.controlios.localupdater",
-        @"CFBundleExecutable": @"updater", @"CFBundlePackageType": @"APPL",
-        @"NSAppTransportSecurity": @{@"NSAllowsArbitraryLoads": @YES}};
-    if (![updaterInfo writeToFile:[directory stringByAppendingPathComponent:@"Info.plist"] atomically:YES])
-        return [@"ERR CannotStageUpdaterInfo\n" dataUsingEncoding:NSUTF8StringEncoding];
-    if (![[NSFileManager defaultManager] copyItemAtPath:updater toPath:detached error:nil] ||
-        chmod(detached.fileSystemRepresentation, 0700) != 0)
-        return [@"ERR CannotStageUpdater\n" dataUsingEncoding:NSUTF8StringEncoding];
-    const char *args[] = {detached.fileSystemRepresentation, parts[0].UTF8String,
+    // The root child stages itself. A mobile-owned executable must never be
+    // staged by the screen server and subsequently executed with root privileges.
+    const char *args[] = {updater.fileSystemRepresentation, parts[0].UTF8String,
         parts[1].UTF8String, parts[2].UTF8String, parts[3].UTF8String,
         helper.fileSystemRepresentation, app.fileSystemRepresentation, NULL};
     posix_spawnattr_t attr;
     posix_spawnattr_init(&attr);
+    int error = TVUpdateRootAttributes(&attr, TVUpdatePersonaFunctions());
     posix_spawnattr_setflags(&attr, POSIX_SPAWN_CLOEXEC_DEFAULT);
     pid_t pid = 0;
     extern char **environ;
-    int error = posix_spawn(&pid, detached.fileSystemRepresentation, NULL, &attr,
-                           (char *const *)args, environ);
+    if (!error) error = posix_spawn(&pid, updater.fileSystemRepresentation, NULL, &attr,
+                                    (char *const *)args, environ);
     posix_spawnattr_destroy(&attr);
     if (error) return [[NSString stringWithFormat:@"ERR UpdateSpawn %d\n", error] dataUsingEncoding:NSUTF8StringEncoding];
     return [[NSString stringWithFormat:@"OK %@\n", parts[0]] dataUsingEncoding:NSUTF8StringEncoding];
