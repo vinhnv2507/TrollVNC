@@ -1,5 +1,18 @@
 # Changelog
 
+## [4.28] - 2026-10-07
+
+- Extend the existing protection/touch lock with experimental physical Power
+  filtering. Tagged PC Power events remain available; volume is unchanged.
+- Hold the physical Power button continuously for three seconds to turn off
+  protection. Consume the escape gesture's paired release to avoid also sleeping
+  the display; short presses and repeats cannot create a delayed unlock.
+- Invalidate held-button timers across PC lock changes, including rapid off/on,
+  and serialize conditional escape with lock writers to preserve newer requests.
+- Show physical Power counters and the three-second escape instruction in
+  connection diagnostics. Callback verification confirms delivery; physical
+  suppression still requires testing on the target iPhone/iOS version.
+
 ## [4.17] - 2026-10-04
 
 - Move touch locking to an explicitly activated HID monitor on a dedicated

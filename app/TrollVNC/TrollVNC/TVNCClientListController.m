@@ -1275,8 +1275,16 @@ void TVNCConfirmFreeRAM(UIViewController *presenter) {
                 touchVerified ? @"Bộ lọc phản hồi" : @"Bộ lọc KHÔNG phản hồi",
                 touch[@"blocked"] ?: @"0", touch[@"remote_seen"] ?: @"0"]
             : @"Không đọc được trạng thái bộ lọc cảm ứng";
-        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Khóa cảm ứng",
-            touchRequested ? (touchVerified ? @"✓" : @"✗") : @"○"], @"detail": touchDetail}];
+        BOOL powerProtection = [touch[@"power_lock_experimental"] isEqualToString:@"1"];
+        if (powerProtection) {
+            touchDetail = [touchDetail stringByAppendingFormat:
+                @"\nChặn nút nguồn vật lý (thử nghiệm)\nGiữ nút nguồn %@ giây để tắt khóa bảo vệ\nNguồn: nhận %@ · lọc %@ · mở khóa %@",
+                touch[@"power_hold_seconds"] ?: @"3", touch[@"power_seen"] ?: @"0",
+                touch[@"power_blocked"] ?: @"0", touch[@"power_escapes"] ?: @"0"];
+        }
+        [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ %@",
+            touchRequested ? (touchVerified ? @"✓" : @"✗") : @"○",
+            powerProtection ? @"Khóa bảo vệ" : @"Khóa cảm ứng"], @"detail": touchDetail}];
         [rows addObject:@{@"title": [NSString stringWithFormat:@"%@ Keeper",
                                                                keeper ? @"✓" : @"○"],
                           @"detail": keeper ? @"keeperd đang chạy · cổng 46753"

@@ -57,6 +57,7 @@
 #import <mach/mach_host.h>
 #import <mach/mach_time.h>
 #import <malloc/malloc.h>
+#import <mutex>
 #import <vector>
 
 #import <Photos/Photos.h>
@@ -5070,7 +5071,10 @@ static NSData *tvCtlFrontmostApp(void) {
 static const char *kTvTouchLockNotification = "com.controlios.touchlock.changed";
 static NSString *const kTvControlIOSBundleID = @"com.controlios.app";
 static int gTvTouchLockStateToken = -1;
-static std::atomic<bool> gTvTouchLockEnabled{false};
+// One atomic snapshot prevents a timer from mixing the enabled bit with the
+// epoch of a newer lock request. Writers and conditional escape share a mutex.
+static std::atomic<uint64_t> gTvTouchLockState{0};
+static std::mutex gTvTouchLockStateMutex;
 
 static void tvInitializeTouchLockState(void) {
     static dispatch_once_t once;
@@ -5080,35 +5084,49 @@ static void tvInitializeTouchLockState(void) {
         uint64_t state = 0;
         if (gTvTouchLockStateToken >= 0 &&
             notify_get_state(gTvTouchLockStateToken, &state) == NOTIFY_STATUS_OK)
-            gTvTouchLockEnabled.store(state != 0, std::memory_order_release);
+            gTvTouchLockState.store(state ? 1 : 0, std::memory_order_release);
     });
 }
 
-static BOOL tvSetTouchLockNotifyState(BOOL enabled) {
-    tvInitializeTouchLockState();
+// Caller holds gTvTouchLockStateMutex and has initialized the notification.
+static BOOL tvWriteTouchLockStateLocked(BOOL enabled) {
     if (gTvTouchLockStateToken < 0)
         return NO;
-    BOOL previous = gTvTouchLockEnabled.load(std::memory_order_acquire);
+    uint64_t previous = gTvTouchLockState.load(std::memory_order_acquire);
+    uint64_t next = ((previous & ~1ULL) + 2) | (enabled ? 1 : 0);
     int status = notify_set_state(gTvTouchLockStateToken, enabled ? 1 : 0);
     if (status == NOTIFY_STATUS_OK) {
         // Enforce immediately; the UI overlay follows the notification later.
-        gTvTouchLockEnabled.store(enabled, std::memory_order_release);
+        gTvTouchLockState.store(next, std::memory_order_release);
         status = notify_post(kTvTouchLockNotification);
         if (status != NOTIFY_STATUS_OK) {
-            notify_set_state(gTvTouchLockStateToken, previous ? 1 : 0);
-            gTvTouchLockEnabled.store(previous, std::memory_order_release);
+            notify_set_state(gTvTouchLockStateToken, previous & 1);
+            // Do not resurrect a timer from before a failed state transition.
+            gTvTouchLockState.store(((next & ~1ULL) + 2) | (previous & 1),
+                                   std::memory_order_release);
         }
     }
     return status == NOTIFY_STATUS_OK;
 }
 
+static BOOL tvSetTouchLockNotifyState(BOOL enabled) {
+    tvInitializeTouchLockState();
+    std::lock_guard<std::mutex> guard(gTvTouchLockStateMutex);
+    return tvWriteTouchLockStateLocked(enabled);
+}
+
 static BOOL tvGetTouchLockNotifyState(void) {
     tvInitializeTouchLockState();
+    std::lock_guard<std::mutex> guard(gTvTouchLockStateMutex);
     uint64_t state = 0;
     if (gTvTouchLockStateToken >= 0 &&
-        notify_get_state(gTvTouchLockStateToken, &state) == NOTIFY_STATUS_OK)
-        gTvTouchLockEnabled.store(state != 0, std::memory_order_release);
-    return gTvTouchLockEnabled.load(std::memory_order_acquire);
+        notify_get_state(gTvTouchLockStateToken, &state) == NOTIFY_STATUS_OK) {
+        uint64_t previous = gTvTouchLockState.load(std::memory_order_acquire);
+        if ((state != 0) != ((previous & 1) != 0))
+            gTvTouchLockState.store(((previous & ~1ULL) + 2) | (state ? 1 : 0),
+                                   std::memory_order_release);
+    }
+    return (gTvTouchLockState.load(std::memory_order_acquire) & 1) != 0;
 }
 
 static NSData *tvCtlHomeAudit(BOOL clear) {
@@ -5134,6 +5152,10 @@ static std::atomic<uint64_t> gTvTouchLockPhysicalSeen{0};
 static std::atomic<uint64_t> gTvTouchLockBlocked{0};
 static std::atomic<uint64_t> gTvTouchLockRemoteSeen{0};
 static std::atomic<uint64_t> gTvTouchLockLastPhysicalSender{0};
+static std::atomic<uint64_t> gTvTouchLockPowerSeen{0};
+static std::atomic<uint64_t> gTvTouchLockPowerBlocked{0};
+static std::atomic<uint64_t> gTvTouchLockPowerEscapes{0};
+static TVNCPowerHold gTvTouchLockPowerHold; // Access only on the HID queue.
 static const uint64_t kTvTouchLockProbeSender = 0x8000000817319373ULL;
 static const char *gTvTouchLockFilterMode = "unavailable";
 
@@ -5148,6 +5170,14 @@ struct TVTouchEventAdapter {
             IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsagePage) == kHIDPage_Consumer &&
             IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsage) == kHIDUsage_Csmr_Menu;
     }
+    bool power(IOHIDEventRef event) const {
+        return IOHIDEventGetType(event) == kIOHIDEventTypeKeyboard &&
+            IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsagePage) == kHIDPage_Consumer &&
+            IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardUsage) == kHIDUsage_Csmr_Power;
+    }
+    bool down(IOHIDEventRef event) const {
+        return IOHIDEventGetIntegerValue(event, kIOHIDEventFieldKeyboardDown) != 0;
+    }
     unsigned childCount(IOHIDEventRef event) const {
         CFArrayRef children = IOHIDEventGetChildren(event);
         return children ? (unsigned)CFArrayGetCount(children) : 0;
@@ -5156,6 +5186,28 @@ struct TVTouchEventAdapter {
         return (IOHIDEventRef)CFArrayGetValueAtIndex(IOHIDEventGetChildren(event), index);
     }
 };
+
+static void tvSchedulePowerEscape(uint64_t timer, uint64_t state) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,
+        (int64_t)(kTvPowerEscapeHoldSeconds * NSEC_PER_SEC)), gTvTouchLockQueue, ^{
+        BOOL unlocked = NO;
+        {
+            std::lock_guard<std::mutex> guard(gTvTouchLockStateMutex);
+            uint64_t current = gTvTouchLockState.load(std::memory_order_acquire);
+            if (current != state ||
+                !gTvTouchLockPowerHold.ready(timer, current, TVNCMonotonicSeconds())) return;
+            // Compare and write in the same critical section. A concurrent PC
+            // relock must not be undone by an earlier physical-button timer.
+            unlocked = tvWriteTouchLockStateLocked(NO);
+            gTvTouchLockPowerHold.finish(timer);
+        }
+        if (unlocked) gTvTouchLockPowerEscapes.fetch_add(1, std::memory_order_relaxed);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            TVLog(@"Protection power-hold escape: unlocked=%d hold=3s", unlocked);
+        });
+        // notify_post updates the existing overlay without foregrounding apps.
+    });
+}
 
 static boolean_t tvTouchLockFilter(void *target, void *refcon, void *sender, IOHIDEventRef event) {
     (void)target;
@@ -5171,12 +5223,19 @@ static boolean_t tvTouchLockFilter(void *target, void *refcon, void *sender, IOH
         return true;
     }
     unsigned sources = TVNCTouchLockSources(event, TVTouchEventAdapter{getSender});
-    BOOL enabled = gTvTouchLockEnabled.load(std::memory_order_acquire);
-    BOOL consumed = TVNCTouchLockBlocks(enabled, sources);
-    if (sources & (TVNCTouchSourcePhysical | TVNCTouchSourcePhysicalHome)) {
+    uint64_t state = gTvTouchLockState.load(std::memory_order_acquire);
+    BOOL enabled = (state & 1) != 0;
+    TVNCPowerDecision power = gTvTouchLockPowerHold.observe(sources, state, TVNCMonotonicSeconds());
+    if (power.timer) tvSchedulePowerEscape(power.timer, state);
+    // The power tracker balances an in-flight key pair across lock changes.
+    BOOL consumed = TVNCTouchLockBlocks(enabled, sources & ~TVNCTouchSourcePhysicalPower) || power.consume;
+    if (sources & (TVNCTouchSourcePhysical | TVNCTouchSourcePhysicalHome | TVNCTouchSourcePhysicalPower)) {
         gTvTouchLockPhysicalSeen.fetch_add(1, std::memory_order_relaxed);
         gTvTouchLockLastPhysicalSender.store(senderID, std::memory_order_relaxed);
     }
+    if (sources & TVNCTouchSourcePhysicalPower)
+        gTvTouchLockPowerSeen.fetch_add(1, std::memory_order_relaxed);
+    if (power.consume) gTvTouchLockPowerBlocked.fetch_add(1, std::memory_order_relaxed);
     if (sources & TVNCTouchSourceRemote)
         gTvTouchLockRemoteSeen.fetch_add(1, std::memory_order_relaxed);
     if (consumed) gTvTouchLockBlocked.fetch_add(1, std::memory_order_relaxed);
@@ -5260,9 +5319,8 @@ static void tvInstallTouchLockHIDFilter(void) {
         dispatch_queue_attr_make_with_qos_class(DISPATCH_QUEUE_SERIAL, QOS_CLASS_USER_INTERACTIVE, 0));
     notify_register_dispatch(kTvTouchLockNotification, &gTvTouchLockChangeToken,
         gTvTouchLockQueue, ^(int token) {
-            uint64_t state = 0;
-            if (notify_get_state(token, &state) == NOTIFY_STATUS_OK)
-                gTvTouchLockEnabled.store(state != 0, std::memory_order_release);
+            (void)token;
+            (void)tvGetTouchLockNotifyState();
         });
     registerFilter(gTvTouchLockHIDClient, tvTouchLockFilter, NULL, (void *)getSenderID);
     setMatching(gTvTouchLockHIDClient, NULL); // Receive all physical and injected sources.
@@ -5278,7 +5336,7 @@ static void tvInstallTouchLockHIDFilter(void) {
         BOOL verified = tvVerifyTouchLockFilter();
         TVLog(@"Touch lock HID filter callback verified=%d", verified);
     });
-    TVLog(@"Touch lock HID filter installed on dedicated queue; physical touch/Home blocked, remote input preserved");
+    TVLog(@"Protection HID filter installed: physical touch/Home/Power; hold Power 3s to unlock; remote input preserved");
 }
 
 static int gTvLockResetToken = 0;
@@ -5319,13 +5377,16 @@ static NSData *tvCtlTouchLock(NSString *argument) {
     if ([state isEqualToString:@"details"]) {
         (void)tvVerifyTouchLockFilter();
         return [[NSString stringWithFormat:
-            @"OK\nrequested=%d\nfilter_installed=%d\nfilter_verified=%d\nfilter_mode=%s\nphysical_seen=%llu\nblocked=%llu\nremote_seen=%llu\nlast_physical_sender=0x%llx\n",
+            @"OK\nrequested=%d\nfilter_installed=%d\nfilter_verified=%d\nfilter_mode=%s\nphysical_seen=%llu\nblocked=%llu\nremote_seen=%llu\nlast_physical_sender=0x%llx\npower_lock_experimental=1\npower_hold_seconds=3\npower_seen=%llu\npower_blocked=%llu\npower_escapes=%llu\n",
             tvGetTouchLockNotifyState(), gTvTouchLockHIDClient != NULL,
             gTvTouchLockFilterVerified.load(std::memory_order_acquire), gTvTouchLockFilterMode,
             (unsigned long long)gTvTouchLockPhysicalSeen.load(std::memory_order_relaxed),
             (unsigned long long)gTvTouchLockBlocked.load(std::memory_order_relaxed),
             (unsigned long long)gTvTouchLockRemoteSeen.load(std::memory_order_relaxed),
-            (unsigned long long)gTvTouchLockLastPhysicalSender.load(std::memory_order_relaxed)]
+            (unsigned long long)gTvTouchLockLastPhysicalSender.load(std::memory_order_relaxed),
+            (unsigned long long)gTvTouchLockPowerSeen.load(std::memory_order_relaxed),
+            (unsigned long long)gTvTouchLockPowerBlocked.load(std::memory_order_relaxed),
+            (unsigned long long)gTvTouchLockPowerEscapes.load(std::memory_order_relaxed)]
             dataUsingEncoding:NSUTF8StringEncoding];
     }
     if ([state isEqualToString:@"status"]) {
