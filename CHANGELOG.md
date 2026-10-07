@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.29] - 2026-10-07
+
+- Keep screen capture running for on-device JavaScript automation even with
+  zero PC viewers, so OCR, colors and image checks observe current frames.
+- Serialize capture demand changes on the main queue and recheck current
+  viewer/script state when each queued transition runs. Stop capture only
+  after both the last viewer and the running script have finished.
+
 ## [4.28] - 2026-10-07
 
 - Extend the existing protection/touch lock with experimental physical Power

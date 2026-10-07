@@ -21,6 +21,7 @@ CTRIOS is a CTRIOS server for iOS devices, allowing remote access and control of
 - Enable secure WebSocket connections without pain.
 - Bonjour/mDNS auto-discovery on the local network.
 - [Experimental protection lock with physical Power hold to unlock](docs/khoa-bao-ve.md)
+- Fresh screen capture for on-device JavaScript OCR/color checks without PC viewers (4.29+).
 - [Reverse CTRIOS](#reverse-ctrios-reverse-connection)
 - [Pre-seeded configuration](#managed-configuration-preconfigured-deployment)
 

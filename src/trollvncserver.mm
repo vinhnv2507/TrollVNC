@@ -6118,6 +6118,7 @@ static NSString *gAutoScript = nil;
 static dispatch_queue_t gAutoQueue = nil;
 static std::atomic<bool> gAutoStop{false};
 static std::atomic<bool> gAutoRunning{false};
+static void tvRefreshCaptureDemand(void);
 static std::atomic<bool> gAutoTrace{true}; // tự ghi từng lệnh + kết quả vào nhật ký
 
 static NSString *tvAutoScriptPath(void) {
@@ -6844,6 +6845,9 @@ static void tvAutoStart(void) {
     dispatch_async(gAutoQueue, ^{
         @autoreleasepool {
             gAutoRunning.store(true);
+            // Auto-click OCR/color/image reads need fresh frames even when
+            // there are no PC viewers. Capture transitions stay on main.
+            tvRefreshCaptureDemand();
             gAutoTrace.store(true); // mỗi lần chạy mặc định ghi tiến trình
             JSContext *ctx = [[JSContext alloc] init];
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
@@ -6856,6 +6860,7 @@ static void tvAutoStart(void) {
             TVLog(@"Auto-JS: chạy");
             [ctx evaluateScript:script]; // lỗi/dừng -> exceptionHandler nuốt gọn
             gAutoRunning.store(false);
+            tvRefreshCaptureDemand();
             tvAutoLog(@"■ dừng");
             TVLog(@"Auto-JS: xong/dừng");
         }
@@ -7926,6 +7931,24 @@ static void tvPublishClientDisconnectedNotif(NSString *host) {
 static BOOL gIsCaptureStarted = NO;
 static BOOL gIsClipboardStarted = NO;
 
+static void tvRefreshCaptureDemand(void) {
+    dispatch_async(dispatch_get_main_queue(), ^{
+        // Evaluate demand when the queued block runs, not when requested:
+        // a disconnect or finishing script must not stop a newer script/viewer.
+        BOOL needed = gClientCount > 0 || gAutoRunning.load(std::memory_order_acquire);
+        if (needed && !gIsCaptureStarted && gFrameHandler) {
+            gIsCaptureStarted = YES;
+            [[ScreenCapturer sharedCapturer] startCaptureWithFrameHandler:gFrameHandler];
+            TVLog(@"Screen capture started (clients=%d, auto=%d).", gClientCount,
+                  gAutoRunning.load(std::memory_order_acquire));
+        } else if (!needed && gIsCaptureStarted) {
+            [[ScreenCapturer sharedCapturer] endCapture];
+            gIsCaptureStarted = NO;
+            TVLog(@"No viewers or running script; screen capture stopped.");
+        }
+    });
+}
+
 #if !TARGET_OS_SIMULATOR
 static BOOL gRestoreAssist = NO;
 #endif
@@ -7960,11 +7983,7 @@ static void clientGoneHook(rfbClientPtr cl) {
     NSString *host = (cl && cl->host) ? [NSString stringWithUTF8String:cl->host] : @"";
     TVLog(@"Client %@ disconnected, active clients=%d", host, gClientCount);
 
-    if (gIsCaptureStarted && gClientCount == 0) {
-        [[ScreenCapturer sharedCapturer] endCapture];
-        gIsCaptureStarted = NO;
-        TVLog(@"No clients remaining; screen capture stopped.");
-    }
+    tvRefreshCaptureDemand();
 
     if (gIsClipboardStarted && gClientCount == 0) {
         [[ClipboardManager sharedManager] stop];
@@ -8089,12 +8108,7 @@ static enum rfbNewClientAction newClientHook(rfbClientPtr cl) {
     // Notify client connected
     tvPublishClientConnectedNotif(host);
 
-    if (!gIsCaptureStarted && gClientCount > 0 && gFrameHandler) {
-        // Start capture when entering non-zero client population.
-        gIsCaptureStarted = YES;
-        [[ScreenCapturer sharedCapturer] startCaptureWithFrameHandler:gFrameHandler];
-        TVLog(@"Screen capture started (clients=%d).", gClientCount);
-    }
+    tvRefreshCaptureDemand();
 
     if (gClipboardEnabled && !gIsClipboardStarted && gClientCount > 0) {
         gIsClipboardStarted = YES;
