@@ -55,5 +55,8 @@ Test cả bố cục thấp/cao, các dạng OCR thời gian thực tế, ranh g
 ngược, nút bật/tắt, popup, mở lại sau 5 lượt vuốt và 10.000 vòng lặp.
 Trên 172.30.2.133 đã xác nhận OCR 00:29 và ảnh tiếp tục cập nhật trong
 JavaScriptCore của ControlIOS 4.29 khi số PC xem màn hình bằng 0.
+Với ảnh 752x1338 đã đọc rõ bộ đếm 02:30 → 02:22 và tìm đúng nút dưới.
+Lượt thử tiếp theo đọc 01:13 → 01:08, chờ 68 giây, nhận diện nền nút bật
+4/5 điểm và bấm tại x=0.886, y=0.262. Ảnh sau thao tác có bộ đếm mới 09:59.
 Điều kiện nhận Xu còn phụ thuộc trạng thái tài khoản/live của Shopee;
 log “Đã bấm CLAIM” chỉ xác nhận thao tác, không xác nhận nhận thưởng.

@@ -36,6 +36,10 @@ for(const [s,value] of [['00:00',0],['Xem 00:29 để nhận',29],['01.02\n02;09
 for(const color of ['EA5438','FE5C3A','EE6B4B']) assert.equal(base.c.warmButtonColor(color),true);
 for(const color of ['FFFFFF','885B60','B78080','000000','','EA5438oops']) assert.equal(base.c.warmButtonColor(color),false);
 const ready=engine({getColor:()=> 'FE5C3A'});assert.equal(ready.c.readyButton({x:.89,y:.193}),true);
+let sample=0;const nativeReady=engine({getColor:()=>['DA3410','D93511','D42F0B','F5522F','F6522F'][sample++]});
+assert.equal(nativeReady.c.readyButton({x:.886,y:.262}),true,'Actual enabled reward background on device 133');
+let whiteSample=0;const glyphOnly=engine({getColor:()=>['FFFFFF','FFFFFF','FFFFFF','FE5C3A','2F4D85'][whiteSample++]});
+assert.equal(glyphOnly.c.readyButton({x:.886,y:.262}),false,'One warm sample and white glyph are insufficient');
 const popup=engine({getColor:(x,y)=>Math.abs(x-.5)>.1?'FFFFFF':'FE5C3A'});
 assert.equal(popup.c.popupWhiteCard({x:.5,y:.71}),true);
 assert.equal(popup.c.readyButton({x:.5,y:.71}),true);
