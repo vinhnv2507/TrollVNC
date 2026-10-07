@@ -1,0 +1,59 @@
+Shopee Live cho ControlIOS — script 1.1.0
+Cần ControlIOS trên iPhone phiên bản 4.29 trở lên.
+
+Cách chạy
+1. Đẩy Shopee-Live-ControlIOS.js xuống iPhone tại:
+   /var/mobile/Media/ControlIOS/Shopee-Live-ControlIOS.js
+2. Dán nội dung Shopee-Live-ControlIOS-Start.js vào Auto-click JavaScript
+   trên ControlIOS PC, chọn máy rồi bấm Đẩy, Chạy.
+3. Bấm Dừng để ngừng. File được chuẩn bị trên 172.30.2.133; không tự chạy
+   liên tục sau khi bàn giao.
+4. Khi chạy OCR, dùng ảnh rõ (khuyến nghị độ nét 100%). Ở ảnh chỉ rộng
+   264 px, chữ nhỏ có thể sai cả chữ số. Máy 133 đã đặt độ nét 100% để thử;
+   setscale là giá trị lúc chạy, có thể được PC hoặc lần khởi động mới đổi lại.
+
+Thiết lập
+- START_FROM_CURRENT: false: đóng Shopee, mở URL livestream và chờ 20 giây
+  như mã AutoTouch gốc. Đổi thành true để dùng live đang mở.
+- REGIONS.REWARD_HEADER: vùng tìm nhãn Phần thưởng bên phải màn hình.
+  Script suy ra dòng thời gian và vùng nút từ vị trí nhãn và chữ Xem/Watch,
+  hỗ trợ hai bố cục đã kiểm tra; không dùng một tọa độ bấm cố định.
+- OCR_NEXT_LINE_GAP: khoảng cách quét tiếp để chọn nút thấp nhất.
+
+Các điều chỉnh
+- Nhận diện cả “00:29”, “00: 29”, “00. 29”, “00/29” và “00 10”.
+  Vùng đọc chỉ bao dòng thời gian, tránh nhầm số Xu ở phía dưới.
+- Khi có hai dòng đếm ngược, chọn dòng thấp nhất tương ứng nút Nhận
+  thấp nhất, không lấy thời gian của phần thưởng phía trên.
+- Chỉ bấm khi tìm được chữ của nút và ít nhất 2/5 điểm nền có màu đỏ/cam
+  sáng. Chữ trắng riêng lẻ và nền đỏ tối/xám không đủ điều kiện.
+- Popup điểm danh phải có nền thẻ trắng và nút đang bật.
+- Kiểm tra nút Nhận sẵn sàng trước khi đọc thời gian, tránh vuốt bỏ thưởng
+  khi bộ đếm đã hết.
+- Sau khi vuốt/mở lại app, tìm lại vị trí bảng Phần thưởng.
+- ControlIOS 4.29 giữ ảnh chụp mới khi script chạy, kể cả không có PC xem
+  màn hình; bản cũ có thể đọc lại ảnh cũ khi người xem cuối ngắt kết nối.
+
+Luồng giữ từ bản gốc
+Mở live → điểm danh nếu có → đọc thời gian hai lần.
+Thời gian không đổi hoặc >600 giây: vuốt lên.
+Thời gian <30 hoặc >60 giây: chờ hết rồi tìm nút Nhận.
+Thời gian 30..60 giây: chờ time-29 giây rồi vuốt.
+Không đọc được thời gian 5 lần: vuốt. Sau 5 lượt vuốt vì thiếu thời gian:
+mở lại Shopee. Bộ đếm này được sửa để có thể đạt đủ 5 lượt.
+
+Chuyển API AutoTouch
+sleep dùng giây; tap/swipe/OCR dùng tỉ lệ màn hình 0..1; getColor trả hex.
+OCR đồng bộ thay callback. Vuốt dùng swipe liên tục của ControlIOS.
+Nhật ký dùng log, vòng lặp while tránh đệ quy lâu dài.
+Danh sách màu số và hàm acceptedColor của mã cũ được giữ để tham khảo;
+luồng bấm hiện dùng readyButton kiểm tra nhiều điểm nền.
+
+Kiểm tra
+node scripts/shopee-live/calibration.test.cjs
+Test cả bố cục thấp/cao, các dạng OCR thời gian thực tế, ranh giới đếm
+ngược, nút bật/tắt, popup, mở lại sau 5 lượt vuốt và 10.000 vòng lặp.
+Trên 172.30.2.133 đã xác nhận OCR 00:29 và ảnh tiếp tục cập nhật trong
+JavaScriptCore của ControlIOS 4.29 khi số PC xem màn hình bằng 0.
+Điều kiện nhận Xu còn phụ thuộc trạng thái tài khoản/live của Shopee;
+log “Đã bấm CLAIM” chỉ xác nhận thao tác, không xác nhận nhận thưởng.
