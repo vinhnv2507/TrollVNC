@@ -1,9 +1,9 @@
-// ControlIOS Shopee Live 1.1.0 — căn theo bảng Phần thưởng, cần iOS ControlIOS 4.29+.
+// ControlIOS Shopee Live 1.1.1 — OCR và đồng hồ chạy trên iPhone, cần ControlIOS 4.29+.
 // Tọa độ 0..1 theo khung màn hình. Bấm Dừng trên PC để ngừng.
 // Mặc định mở lại Shopee. Đổi START_FROM_CURRENT thành true để dùng live đang mở.
 
 var CONFIG = {
-    SCRIPT_VERSION: "1.1.0",
+    SCRIPT_VERSION: "1.1.1",
     AUTO_RUN: true,
     START_FROM_CURRENT: false,
     APP_ID: "com.beeasy.shopee.vn",
@@ -35,6 +35,10 @@ var noTimeCount = 0;
 var swipeCount = 0;
 var currentState = OPEN_URL ? "OPEN_APP" : "SCAN_TIME";
 var rewardPanel = null;
+var timerLine = null;
+var lastTimeSample = null;
+var pendingClaim = null;
+var claimCandidate = null;
 
 function message(text) {
     log(String(text));
@@ -48,15 +52,54 @@ function swipeUpRandom() {
     // ControlIOS có swipe liên tục, không có touchMove từng điểm như AutoTouch.
     swipe(0.5, 0.82, randomBetween(0.46, 0.54), 0.08, 0.64);
     rewardPanel = null;
+    timerLine = null;
+    claimCandidate = null;
+    pendingClaim = null;
     sleep(0.5);
 }
 
-function countdown(seconds) {
-    var remaining = Math.max(0, Math.ceil(seconds));
-    while (remaining > 0 && !STOP_SCRIPT) {
-        message("WAIT: " + remaining + "s");
-        sleep(1);
-        remaining--;
+function clockMillis() {
+    return typeof now === "function" ? now() : Date.now();
+}
+
+function formatMMSS(seconds) {
+    seconds = Math.max(0, Math.ceil(seconds));
+    return Math.floor(seconds / 60) + ":" + ("0" + seconds % 60).slice(-2);
+}
+
+function countdown(seconds, sampledAt, checkClaim) {
+    // Thời hạn tính từ lúc lấy ảnh OCR, không từ lúc OCR hoàn tất.
+    // Mỗi lượt tính lại bằng đồng hồ iPhone; sleep/OCR chậm không cộng dồn sai số.
+    var deadline = (sampledAt === undefined ? clockMillis() : sampledAt) + Math.max(0, seconds) * 1000;
+    var lastLog = -1;
+    var nextCheck = clockMillis();
+    while (!STOP_SCRIPT) {
+        var remaining = Math.max(0, (deadline - clockMillis()) / 1000);
+        if (remaining <= 0) {
+            // Kiểm tra lần cuối trước quyết định vuốt ở mốc time-29.
+            if (checkClaim) {
+                var atDeadline = cachedReadyClaim();
+                if (atDeadline) pendingClaim = atDeadline;
+            }
+            break;
+        }
+        if (checkClaim && clockMillis() >= nextCheck) {
+            var ready = cachedReadyClaim();
+            if (ready) {
+                pendingClaim = ready;
+                message("Nút Nhận đã bật trước thời hạn: nhận ngay");
+                return true;
+            }
+            nextCheck = clockMillis() + 5000;
+            remaining = Math.max(0, (deadline - clockMillis()) / 1000);
+            if (remaining <= 0) break;
+        }
+        var whole = Math.ceil(remaining);
+        if (lastLog < 0 || lastLog - whole >= 5 || whole <= 5 && lastLog !== whole) {
+            message("WAIT: " + whole + "s (" + formatMMSS(whole) + ")");
+            lastLog = whole;
+        }
+        sleep(Math.min(1, remaining));
     }
     return !STOP_SCRIPT;
 }
@@ -85,7 +128,7 @@ function acceptedColor(point, colors) {
     return false;
 }
 
-function findBottomText(words, region) {
+function findBottomText(words, region, firstAlias) {
     // findText trả một tâm chữ, không trả danh sách rectangle như at.ocr.
     // Tìm tiếp phía dưới kết quả để lấy nút thấp nhất; số lượt luôn có giới hạn.
     var best = null;
@@ -103,6 +146,9 @@ function findBottomText(words, region) {
             if (nextY <= fromY) break;
             fromY = nextY;
         }
+        // Các alias là cách OCR đọc cùng một chữ. Khi đã tìm được, không quét
+        // lại cả bảng theo mọi cách viết nữa; vẫn tìm đủ các dòng của alias đó.
+        if (best && (firstAlias === true || firstAlias === "ready" && readyButton(best, true))) break;
     }
     return best;
 }
@@ -110,7 +156,25 @@ function findBottomText(words, region) {
 function clickBottomClaim() {
     if (!locateRewardPanel()) return null;
     var r = claimRegion();
-    return findBottomText(["nhân", "nhận", "nhan", "nhin", "claim", "aim"], r);
+    var p = findBottomText(["nhân", "nhận", "nhan", "nhin", "claim", "aim"], r, "ready");
+    if (p) {
+        p.foundAt = clockMillis();
+        claimCandidate = p;
+    }
+    return p;
+}
+
+function cachedReadyClaim() {
+    var p = claimCandidate;
+    if (!p || !readyButton(p, true)) return null;
+    // Kiểm tra lại CHỮ trong vùng nhỏ trước khi dùng vị trí cũ, không chỉ màu.
+    var fresh = findText(p.text, Math.max(0.78,p.x-0.07), Math.max(0,p.y-0.015),
+                         Math.min(0.995,p.x+0.07), Math.min(0.46,p.y+0.015));
+    if (!fresh || Math.abs(fresh.x-p.x)>0.04 || Math.abs(fresh.y-p.y)>0.015 || !readyButton(fresh)) return null;
+    fresh.text = p.text;
+    fresh.foundAt = clockMillis();
+    claimCandidate = fresh;
+    return fresh;
 }
 
 function clickButtonClaim2() {
@@ -146,19 +210,21 @@ function locateRewardPanel() {
 }
 
 function timerRegion() {
+    if (timerLine) return timerLine;
     var panel = locateRewardPanel();
     var r = panel ? [0.63, panel.y + 0.010, 0.995, Math.min(0.46, panel.y + 0.20)] : REGIONS.TIME;
-    var caption = findBottomText(["xem", "watch"], r);
+    var caption = findBottomText(["xem", "watch"], r, true);
     // Tách đúng dòng có bộ đếm, tránh cắt mất hai số đầu hoặc nhầm số Xu.
-    return caption ? [0.63, Math.max(0.08, caption.y - 0.016), 0.995, caption.y + 0.016] : r;
+    if (caption) timerLine = [0.63, Math.max(0.08, caption.y - 0.016), 0.995, caption.y + 0.016];
+    return timerLine || r;
 }
 
 function claimRegion() {
     var panel = locateRewardPanel();
     if (!panel) return REGIONS.CLAIM;
-    var upper = [0.63, panel.y + 0.010, 0.995, Math.min(0.46, panel.y + 0.20)];
-    var caption = findBottomText(["xem", "watch"], upper);
-    return [0.78, caption ? caption.y + 0.016 : panel.y + 0.025,
+    // Không tìm dòng Xem trước mỗi lần tìm Nhận: khi thưởng sẵn sàng,
+    // dòng Xem dưới đã đổi thành Nhấn để nhận thưởng.
+    return [0.78, panel.y + 0.025,
             0.995, Math.min(0.46, panel.y + 0.20)];
 }
 
@@ -174,7 +240,7 @@ function warmButtonColor(hex) {
     return !!c && c[0] >= 215 && c[1] >= 25 && c[1] <= 185 && c[2] <= 130 && c[0] - c[1] >= 45;
 }
 
-function readyButton(p) {
+function readyButton(p, quiet) {
     var probes = [[-0.030,0.008],[0.030,0.008],[0,0.011],[-0.022,-0.008],[0.022,-0.008]];
     var hits = 0;
     for (var i = 0; i < probes.length; i++) {
@@ -182,7 +248,7 @@ function readyButton(p) {
         var y = Math.max(0, Math.min(1, p.y + probes[i][1]));
         if (warmButtonColor(getColor(x,y))) hits++;
     }
-    message("Màu nền nút: " + hits + "/5 điểm đang bật");
+    if (!quiet) message("Màu nền nút: " + hits + "/5 điểm đang bật");
     return hits >= 2;
 }
 
@@ -216,10 +282,14 @@ function parseTimeMMSS(text) {
 
 function readTimeMMSS() {
     var r = timerRegion();
+    var sampledAt = clockMillis();
     var text = ocr(r[0], r[1], r[2], r[3]);
     message("TIME OCR: " + String(text || "").replace(/\s+/g, " ").trim());
     var seconds = parseTimeMMSS(text);
-    message(seconds === null ? "NO MM:SS" : "TIME: " + seconds + "s");
+    lastTimeSample = seconds === null ? null : {seconds: seconds, sampledAt: sampledAt};
+    if (seconds === null) timerLine = null;
+    message(seconds === null ? "NO MM:SS" : "TIME: " + formatMMSS(seconds) + " = " + seconds + "s; OCR " +
+            ((clockMillis()-sampledAt)/1000).toFixed(1) + "s");
     return seconds;
 }
 
@@ -252,6 +322,7 @@ function scanTimeStep1() {
     // Nhận phần thưởng đã sẵn sàng trước khi đọc bộ đếm cũ/đã về 00:00.
     var pending = clickBottomClaim();
     if (pending && readyButton(pending)) {
+        pendingClaim = pending;
         currentState = "CLAIM";
         return;
     }
@@ -262,6 +333,13 @@ function scanTimeStep1() {
     var time2 = readTimeMMSS();
     if (time2 === null) { handleNoTime(); return; }
     message("TIME1=" + time1 + " | TIME2=" + time2);
+    var sampledAt = lastTimeSample ? lastTimeSample.sampledAt : clockMillis();
+    var newlyReady = cachedReadyClaim();
+    if (newlyReady) {
+        pendingClaim = newlyReady;
+        currentState = "CLAIM";
+        return;
+    }
 
     if (time1 === time2 || time2 > 600) {
         message(time1 === time2 ? "Time không đổi: vuốt" : "Time > 600s: vuốt");
@@ -269,12 +347,13 @@ function scanTimeStep1() {
         sleep(2);
         currentState = "SCAN_TIME";
     } else if (time2 < 30 || time2 > 60) {
-        if (countdown(time2)) currentState = "CLAIM";
+        if (countdown(time2, sampledAt, true)) currentState = "CLAIM";
     } else {
         // Giữ công thức gốc time2 - 29: 30..60s thì chờ 1..31s rồi vuốt.
         var waitSeconds = time2 - 29;
         message("Chờ " + waitSeconds + "s để còn khoảng 29s rồi vuốt");
-        if (countdown(waitSeconds)) {
+        if (countdown(waitSeconds, sampledAt, true)) {
+            if (pendingClaim) { currentState = "CLAIM"; return; }
             swipeUpRandom();
             sleep(2);
             currentState = "SCAN_TIME";
@@ -284,7 +363,10 @@ function scanTimeStep1() {
 
 function tryClaim() {
     message("FIND CLAIM");
-    var claim = clickBottomClaim();
+    // Kết quả vừa tìm được dùng ngay, tránh quét toàn bảng lần thứ hai.
+    var claim = pendingClaim;
+    pendingClaim = null;
+    if (!claim || clockMillis() - claim.foundAt > 2000) claim = cachedReadyClaim() || clickBottomClaim();
     if (!claim) {
         message("NO CLAIM: quét time tiếp");
         currentState = "SCAN_TIME";
@@ -293,6 +375,8 @@ function tryClaim() {
     if (readyButton(claim)) {
         tap(claim.x, claim.y);
         message("Đã bấm CLAIM; chưa xác nhận nhận thưởng");
+        timerLine = null;
+        claimCandidate = null;
     } else {
         message("WRONG COLOR: không bấm CLAIM");
     }
@@ -308,6 +392,9 @@ function finishOpenApp() {
 
 function openAppAndCheckin() {
     rewardPanel = null;
+    timerLine = null;
+    claimCandidate = null;
+    pendingClaim = null;
     killApp(CONFIG.APP_ID);
     sleep(2);
     openURL(CONFIG.LIVE_URL);

@@ -1,4 +1,4 @@
-Shopee Live cho ControlIOS — script 1.1.0
+Shopee Live cho ControlIOS — script 1.1.1
 Cần ControlIOS trên iPhone phiên bản 4.29 trở lên.
 
 Cách chạy
@@ -6,8 +6,8 @@ Cách chạy
    /var/mobile/Media/ControlIOS/Shopee-Live-ControlIOS.js
 2. Dán nội dung Shopee-Live-ControlIOS-Start.js vào Auto-click JavaScript
    trên ControlIOS PC, chọn máy rồi bấm Đẩy, Chạy.
-3. Bấm Dừng để ngừng. File được chuẩn bị trên 172.30.2.133; không tự chạy
-   liên tục sau khi bàn giao.
+3. Bấm Dừng để ngừng. Bộ nạp mặc định dùng livestream đang mở. Đổi
+   startFromCurrent thành false nếu muốn mở lại Shopee theo mã AutoTouch gốc.
 4. Khi chạy OCR, dùng ảnh rõ (khuyến nghị độ nét 100%). Ở ảnh chỉ rộng
    264 px, chữ nhỏ có thể sai cả chữ số. Máy 133 đã đặt độ nét 100% để thử;
    setscale là giá trị lúc chạy, có thể được PC hoặc lần khởi động mới đổi lại.
@@ -30,6 +30,15 @@ Các điều chỉnh
 - Popup điểm danh phải có nền thẻ trắng và nút đang bật.
 - Kiểm tra nút Nhận sẵn sàng trước khi đọc thời gian, tránh vuốt bỏ thưởng
   khi bộ đếm đã hết.
+- MM:SS được tính thành phút * 60 + giây: 09:15 = 555 giây, 01:08 = 68
+  giây, 00:29 = 29 giây. Thời hạn tính từ lúc lấy ảnh OCR; thời gian OCR
+  và độ trễ sleep được trừ vào thời gian chờ. Nhật ký WAIT hiển thị cả giây
+  và MM:SS còn lại, lấy theo đồng hồ thực trên iPhone.
+- Giữ vùng OCR của dòng thời gian để lần đọc tiếp theo không phải tìm
+  lại toàn bảng. Nếu OCR không đọc được, tìm lại vùng ở lượt kế tiếp.
+- Nút vừa xác nhận sẵn sàng được dùng ngay khi bấm, không quét toàn bảng
+  lần thứ hai. Trong lúc chờ, kiểm tra nền nút mỗi 5 giây; khi nút bật,
+  đọc lại chữ trong vùng nhỏ trước khi nhận sớm. Kiểm tra lại khi hết hạn.
 - Sau khi vuốt/mở lại app, tìm lại vị trí bảng Phần thưởng.
 - ControlIOS 4.29 giữ ảnh chụp mới khi script chạy, kể cả không có PC xem
   màn hình; bản cũ có thể đọc lại ảnh cũ khi người xem cuối ngắt kết nối.
@@ -52,7 +61,8 @@ luồng bấm hiện dùng readyButton kiểm tra nhiều điểm nền.
 Kiểm tra
 node scripts/shopee-live/calibration.test.cjs
 Test cả bố cục thấp/cao, các dạng OCR thời gian thực tế, ranh giới đếm
-ngược, nút bật/tắt, popup, mở lại sau 5 lượt vuốt và 10.000 vòng lặp.
+ngược, OCR/sleep chậm, nút Nhận bật sớm và ở thời hạn cuối, nút bật/tắt,
+popup, mở lại sau 5 lượt vuốt và 10.000 vòng lặp.
 Trên 172.30.2.133 đã xác nhận OCR 00:29 và ảnh tiếp tục cập nhật trong
 JavaScriptCore của ControlIOS 4.29 khi số PC xem màn hình bằng 0.
 Với ảnh 752x1338 đã đọc rõ bộ đếm 02:30 → 02:22 và tìm đúng nút dưới.
@@ -60,3 +70,13 @@ Lượt thử tiếp theo đọc 01:13 → 01:08, chờ 68 giây, nhận diện 
 4/5 điểm và bấm tại x=0.886, y=0.262. Ảnh sau thao tác có bộ đếm mới 09:59.
 Điều kiện nhận Xu còn phụ thuộc trạng thái tài khoản/live của Shopee;
 log “Đã bấm CLAIM” chỉ xác nhận thao tác, không xác nhận nhận thưởng.
+
+Kiểm tra bổ sung script 1.1.1 trên 172.30.2.133 ngày 08/10/2026:
+- Tìm đúng nút Nhận dưới tại x=0.886, y=0.293; xác nhận nền 4/5 điểm
+  đang bật rồi bấm mà không quét lại toàn bảng. Ảnh sau không còn nút dưới.
+- OCR 00:29, đo thời gian OCR 1,9 giây; tính chờ còn 27,12 giây.
+- Chờ thử thời hạn 5 giây theo đồng hồ iPhone hoàn tất sau 6,15 giây
+  khi máy đang tải. Sai số của lượt sleep cuối có thể còn; không cộng dồn
+  độ trễ qua từng giây như bản cũ.
+- Test tự động kiểm tra 09:15 = 555 giây và OCR chậm 4,5 giây được trừ
+  vào thời gian chờ. Đây là test mô phỏng; lượt thử trực tiếp đọc 00:29.
