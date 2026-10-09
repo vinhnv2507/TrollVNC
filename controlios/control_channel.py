@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import tempfile
 from dataclasses import dataclass
@@ -327,6 +328,19 @@ class ControlChannel:
         if not name:
             raise ControlError("Tên thiết bị trống")
         return name
+
+    async def device_info(self) -> dict[str, str]:
+        """Đọc tên, serial và UDID từ daemon CTRIOS."""
+        reply = (await self.command("deviceinfo")).strip()
+        if not reply.startswith("OK "):
+            raise ControlError(f"Không đọc được thông tin thiết bị: {reply}")
+        try:
+            value = json.loads(base64.b64decode(reply[3:].strip(), validate=True))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ControlError("Thông tin thiết bị trả về không hợp lệ") from exc
+        if not isinstance(value, dict):
+            raise ControlError("Thông tin thiết bị không phải object")
+        return {str(k): str(v) for k, v in value.items() if v is not None}
 
     async def server_version(self) -> str:
         """Phiên bản IPA ControlIOS đang chạy trên máy."""

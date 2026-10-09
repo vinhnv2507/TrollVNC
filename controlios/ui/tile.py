@@ -37,7 +37,9 @@ def device_ip_line(spec: DeviceSpec) -> str:
     """Dòng 1: IP, kèm version IPA nếu đã biết."""
 
     version = (getattr(spec, "ios_version", "") or "").strip().lstrip("vV")
-    return f"{spec.host}  ·  v{version}" if version else spec.host
+    serial = (getattr(spec, "serial_number", "") or "").strip()
+    suffix = f"  ·  {serial}" if serial else ""
+    return f"{spec.host}{suffix}  ·  v{version}" if version else f"{spec.host}{suffix}"
 
 
 def device_group_line(spec: DeviceSpec) -> str:
@@ -59,6 +61,9 @@ def device_tooltip(spec: DeviceSpec) -> str:
     version = (getattr(spec, "ios_version", "") or "").strip()
     if version:
         lines.append(f"ControlIOS {version.lstrip('vV')}")
+    serial = (getattr(spec, "serial_number", "") or "").strip()
+    if serial:
+        lines.append(f"Serial: {serial}")
     lines.append(device_group_line(spec))
     alias = device_alias(spec)
     if alias:
@@ -297,10 +302,12 @@ class DeviceTile(QWidget):
         )
         alias = device_alias(self.spec)
         if alias:
+            serial = (getattr(self.spec, "serial_number", "") or "").strip()
+            display_name = f"{alias} - {serial}" if serial else alias
             painter.setPen(QColor("#f2f5f8"))
             painter.drawText(
                 name_rect, Qt.AlignVCenter | Qt.AlignLeft,
-                metrics.elidedText(alias, Qt.ElideRight, text_width - 12),
+                metrics.elidedText(display_name, Qt.ElideRight, text_width - 12),
             )
         if (getattr(self.spec, "note", "") or "").strip():
             painter.setPen(QColor("#f0b429"))

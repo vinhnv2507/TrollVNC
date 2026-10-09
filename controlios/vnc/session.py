@@ -558,8 +558,12 @@ class VncSession:
             try:
                 self._set_state(State.CONNECTING)
                 async with self._sem:
+                    # Manager CTLIOS dùng cùng control token làm mật khẩu RFB.
+                    # Viewer VNC bên ngoài không có token nên bị từ chối ở lớp
+                    # xác thực trước khi nhận framebuffer.
+                    vnc_password = self.spec.password or self.settings.control_token or None
                     cm = asyncvnc.connect(
-                        self.spec.host, self.spec.port, password=self.spec.password
+                        self.spec.host, self.spec.port, password=vnc_password
                     )
                     client = await asyncio.wait_for(cm.__aenter__(), timeout=15)
                 try:

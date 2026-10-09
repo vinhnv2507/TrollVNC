@@ -512,6 +512,7 @@ class ScanWorker(QThread):
 
 class DeviceNameWorker(QThread):
     found = Signal(str, str)
+    info = Signal(str, str, str)
     version = Signal(str, str)
     failed = Signal(str, str)
     refreshed = Signal(str)
@@ -562,11 +563,20 @@ class DeviceNameWorker(QThread):
                 else:
                     self.version.emit(device.key, version)
                 try:
-                    name = await asyncio.wait_for(channel.device_name(), 3.0)
-                except (ControlError, ValueError, TimeoutError) as error:
-                    errors.append(str(error) or "Hết thời gian đọc tên")
+                    metadata = await asyncio.wait_for(channel.device_info(), 3.0)
+                except (ControlError, ValueError, TimeoutError, TypeError):
+                    # ControlIOS trước 4.31 chưa có deviceinfo; giữ tương thích
+                    # bằng lệnh devicename cũ để cập nhật tên ngay.
+                    try:
+                        name = await asyncio.wait_for(channel.device_name(), 3.0)
+                    except (ControlError, ValueError, TimeoutError, TypeError) as error:
+                        errors.append(str(error) or "Hết thời gian đọc tên")
+                    else:
+                        self.found.emit(device.key, name)
                 else:
-                    self.found.emit(device.key, name)
+                    self.info.emit(device.key, metadata.get("name", ""), metadata.get("serial", ""))
+                    if metadata.get("name"):
+                        self.found.emit(device.key, metadata["name"])
                 if errors:
                     self.failed.emit(device.key, "; ".join(errors))
                 else:
@@ -2693,7 +2703,7 @@ class MultiDetailWindow(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self, registry_path: Path = DEFAULT_REGISTRY) -> None:
         super().__init__()
-        self.setWindowTitle(f"Control IOS PC {__version__}")
+        self.setWindowTitle(f"Manager CTLIOS {__version__}")
         self.resize(1500, 950)
         self.registry_path = registry_path
         self.registry = Registry.load(registry_path)
@@ -2896,7 +2906,7 @@ class MainWindow(QMainWindow):
         self.stats_label = QLabel("")
         self.statusBar().addPermanentWidget(self.stats_label)
         self.pc_version_label = QLabel(f"PC {__version__}")
-        self.pc_version_label.setToolTip("Phiên bản Control IOS PC đang chạy")
+        self.pc_version_label.setToolTip("Phiên bản Manager CTLIOS đang chạy")
         self.statusBar().addPermanentWidget(self.pc_version_label)
 
         self.bridge.frame.connect(self._on_frame)
@@ -3713,6 +3723,9 @@ class MainWindow(QMainWindow):
         )
         self._device_name_worker = worker
         worker.found.connect(self._on_device_name_found)
+        info_slot = getattr(self, "_on_device_info_found", None)
+        if info_slot is not None:
+            worker.info.connect(info_slot)
         worker.version.connect(self._on_device_version_found)
         worker.failed.connect(self._on_device_name_failed)
         worker.refreshed.connect(self._on_metadata_refreshed)
@@ -3739,6 +3752,18 @@ class MainWindow(QMainWindow):
             device.name = value
         self.registry.save(self.registry_path)
         self._sync_tile_spec(device)
+
+    def _on_device_info_found(self, key: str, name: str, serial: str) -> None:
+        device = next((d for d in self.registry.devices if d.key == key), None)
+        if not device:
+            return
+        changed = False
+        if serial.strip() and device.serial_number != serial.strip():
+            device.serial_number = serial.strip()
+            changed = True
+        if changed:
+            self.registry.save(self.registry_path)
+            self._sync_tile_spec(device)
 
     def _on_device_version_found(self, key: str, version: str) -> None:
         device = next((d for d in self.registry.devices if d.key == key), None)

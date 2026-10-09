@@ -14,10 +14,16 @@ try {
 catch { }
 $python = $null
 foreach ($candidate in ($candidates | Select-Object -Unique)) {
-    & $candidate -c "import xml.parsers.expat, PyInstaller, PySide6, requests, socks" 2>$null
-    if ($LASTEXITCODE -eq 0) {
-        $python = $candidate
-        break
+    try {
+        & $candidate -c "import xml.parsers.expat, PyInstaller, PySide6, requests, socks" 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) {
+            $python = $candidate
+            break
+        }
+    }
+    catch {
+        # A broken optional venv must not stop the fallback Python 3.11 probe.
+        continue
     }
 }
 if (-not $python) {
@@ -26,7 +32,7 @@ if (-not $python) {
 $spec = Join-Path $projectRoot 'ControlIOS.spec'
 $defaultDistRoot = Join-Path $projectRoot 'dist'
 $runningBuild = Get-Process -ErrorAction SilentlyContinue | Where-Object {
-    $_.Path -like "$defaultDistRoot\ControlIOS PC\*"
+    $_.Path -like "$defaultDistRoot\Manager CTLIOS\*"
 } | Select-Object -First 1
 $distRoot = if ($runningBuild) {
     # Không đóng app người dùng đang chạy; đóng gói sang thư mục kế bên.
@@ -35,15 +41,15 @@ $distRoot = if ($runningBuild) {
 else {
     $defaultDistRoot
 }
-$outputRoot = Join-Path $distRoot 'ControlIOS PC'
+$outputRoot = Join-Path $distRoot 'Manager CTLIOS'
 $resolvedOutput = [System.IO.Path]::GetFullPath($outputRoot)
 $resolvedProject = [System.IO.Path]::GetFullPath($projectRoot).TrimEnd('\') + '\'
 if (-not $resolvedOutput.StartsWith($resolvedProject, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "Build output escaped project: $resolvedOutput"
 }
-$userConfigRoot = Join-Path $env:APPDATA 'ControlIOS PC\config'
+$userConfigRoot = Join-Path $env:APPDATA 'Manager CTLIOS\config'
 $legacyConfigRoot = Join-Path $defaultDistRoot 'ControlIOS PC\config'
-$backupBase = Join-Path $projectRoot 'backups\ControlIOS PC'
+$backupBase = Join-Path $projectRoot 'backups\Manager CTLIOS'
 
 # Dữ liệu máy/nhóm nằm ở AppData, ngoài dist, nên PyInstaller không thể xoá nó.
 # Vẫn chụp thêm một bản theo thời gian trước mỗi build để có thể quay lại nếu

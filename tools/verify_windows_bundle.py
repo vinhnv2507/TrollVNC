@@ -27,15 +27,15 @@ def verify(archive_path: Path, seconds: float = 7.0) -> list[str]:
             raise SystemExit(f"Unsafe archive members: {bad[:5]}")
         if archive.testzip() is not None:
             raise SystemExit("Archive CRC verification failed")
-        if "ControlIOS PC.exe" not in names:
-            raise SystemExit("ControlIOS PC.exe is not at ZIP root")
+        if "Manager CTLIOS.exe" not in names:
+            raise SystemExit("Manager CTLIOS.exe is not at ZIP root")
         for runtime in ("vcruntime140.dll", "vcruntime140_1.dll"):
             root_name = f"_internal/{runtime}"
             if root_name not in names:
                 raise SystemExit(f"ZIP is missing {runtime} at _internal root")
         with tempfile.TemporaryDirectory(prefix="controlios-smoke-", ignore_cleanup_errors=True) as folder:
             archive.extractall(folder)
-            exe = Path(folder) / "ControlIOS PC.exe"
+            exe = Path(folder) / "Manager CTLIOS.exe"
             process = subprocess.Popen([str(exe)], cwd=folder)
             try:
                 time.sleep(seconds)

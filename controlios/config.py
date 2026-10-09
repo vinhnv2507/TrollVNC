@@ -23,7 +23,7 @@ if getattr(sys, "frozen", False):
     # xoá/rebuild dist, danh sách máy và nhóm vẫn được giữ lại.
     _legacy_project_root = Path(sys.executable).resolve().parent
     _appdata = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
-    PROJECT_ROOT = _appdata / "ControlIOS PC"
+    PROJECT_ROOT = _appdata / "Manager CTLIOS"
 else:
     _legacy_project_root = None
     PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -57,6 +57,10 @@ def _migrate_legacy_frozen_data() -> None:
     if _legacy_project_root is None:
         return
     old_config = _legacy_project_root / "config"
+    if not old_config.is_dir():
+        # Manager CTLIOS is the renamed portable folder; import the previous
+        # ControlIOS PC portable config once so device lists are preserved.
+        old_config = _legacy_project_root.parent / "ControlIOS PC" / "config"
     new_config = PROJECT_ROOT / "config"
     if not old_config.is_dir():
         return
@@ -171,6 +175,7 @@ class DeviceSpec:
     ios_version: str = ""
     # Tên đọc từ iPhone; tên hiển thị tự đặt trên PC được giữ riêng.
     device_name: str = ""
+    serial_number: str = ""
     custom_name: bool = False
     # Chất lượng riêng của màn hình lớn. None = dùng mặc định toàn cục.
     live_fps: Optional[float] = None

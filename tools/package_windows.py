@@ -18,7 +18,7 @@ def safe_member(name: str) -> bool:
 
 def package(source: Path, output: Path) -> tuple[str, int]:
     source = source.resolve()
-    exe = source / "ControlIOS PC.exe"
+    exe = source / "Manager CTLIOS.exe"
     if not exe.is_file():
         raise SystemExit(f"Missing executable: {exe}")
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -43,11 +43,11 @@ def package(source: Path, output: Path) -> tuple[str, int]:
         bad = [name for name in archive.namelist() if not safe_member(name)]
         if bad:
             raise SystemExit(f"Invalid ZIP members: {bad[:5]}")
-        if "ControlIOS PC.exe" not in archive.namelist():
-            raise SystemExit("ZIP is missing ControlIOS PC.exe at its root")
+        if "Manager CTLIOS.exe" not in archive.namelist():
+            raise SystemExit("ZIP is missing Manager CTLIOS.exe at its root")
         with tempfile.TemporaryDirectory(prefix="controlios-zip-test-") as folder:
             archive.extractall(folder)
-            extracted = Path(folder) / "ControlIOS PC.exe"
+            extracted = Path(folder) / "Manager CTLIOS.exe"
             if not extracted.is_file() or extracted.stat().st_size != exe.stat().st_size:
                 raise SystemExit("ZIP extraction verification failed")
 

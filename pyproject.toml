@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "controlios"
-version = "0.2.41"
+version = "0.2.42"
 description = "Control IOS PC — điều khiển nhiều thiết bị iOS qua CTRIOS, control socket và SSH"
 readme = "README.md"
 requires-python = ">=3.11"
