@@ -4,6 +4,8 @@ const vm = require('node:vm');
 const assert = require('node:assert/strict');
 const root = path.join(__dirname, '..');
 const catalog = JSON.parse(fs.readFileSync(path.join(root, 'app/TrollVNC/TrollVNC/AutoClickJS.json'), 'utf8'));
+assert.deepEqual(JSON.parse(fs.readFileSync(path.join(root, 'prefs/TrollVNCPrefs/Resources/AutoClickJS.json'), 'utf8')), catalog,
+    'App and installed preference bundle must ship the same API reference');
 const native = fs.readFileSync(path.join(root, 'src/trollvncserver.mm'), 'utf8');
 const names = new Set([...native.matchAll(/ctx\[@"([A-Za-z]+)"\]\s*=/g)].map(m => m[1]));
 const prelude = new Set([...native.matchAll(/function ([A-Za-z]+)\(/g)].map(m => m[1]));

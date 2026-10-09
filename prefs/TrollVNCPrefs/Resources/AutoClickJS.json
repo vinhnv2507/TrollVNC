@@ -1,1 +1,490 @@
-../../../app/TrollVNC/TrollVNC/AutoClickJS.json
+{
+  "schema": 1,
+  "commands": [
+    {
+      "group": "Chạm và vuốt",
+      "name": "tap",
+      "signature": "tap(x, y)",
+      "description": "Chạm một lần. x và y là tỉ lệ 0..1, không phải pixel.",
+      "code": "tap(0.5, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "tapRegion",
+      "signature": "tapRegion(x1, y1, x2, y2)",
+      "description": "Chạm ngẫu nhiên trong hình chữ nhật.",
+      "code": "tapRegion(0.4, 0.7, 0.6, 0.9);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "doubleTap",
+      "signature": "doubleTap(x, y)",
+      "description": "Chạm hai lần liên tiếp.",
+      "code": "doubleTap(0.5, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "twoFingerTap",
+      "signature": "twoFingerTap(x, y)",
+      "description": "Chạm bằng hai ngón.",
+      "code": "twoFingerTap(0.5, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "threeFingerTap",
+      "signature": "threeFingerTap(x, y)",
+      "description": "Chạm bằng ba ngón.",
+      "code": "threeFingerTap(0.5, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "longPress",
+      "signature": "longPress(x, y, giây)",
+      "description": "Nhấn giữ; thời lượng tính bằng giây.",
+      "code": "longPress(0.5, 0.5, 1);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "swipe",
+      "signature": "swipe(x1, y1, x2, y2, giây)",
+      "description": "Vuốt từ điểm đầu đến điểm cuối.",
+      "code": "swipe(0.5, 0.8, 0.5, 0.2, 0.6);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "swipeUp",
+      "signature": "swipeUp(khoảng, giây)",
+      "description": "Vuốt lên quanh tâm; mặc định khoảng 0.4, thời lượng 0.3 giây.",
+      "code": "swipeUp(0.6, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "swipeDown",
+      "signature": "swipeDown(khoảng, giây)",
+      "description": "Vuốt xuống quanh tâm.",
+      "code": "swipeDown(0.6, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "swipeLeft",
+      "signature": "swipeLeft(khoảng, giây)",
+      "description": "Vuốt sang trái quanh tâm.",
+      "code": "swipeLeft(0.6, 0.5);\n"
+    },
+    {
+      "group": "Chạm và vuốt",
+      "name": "swipeRight",
+      "signature": "swipeRight(khoảng, giây)",
+      "description": "Vuốt sang phải quanh tâm.",
+      "code": "swipeRight(0.6, 0.5);\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "sleep",
+      "signature": "sleep(giây)",
+      "description": "Chờ trên iPhone. 0.5 nghĩa là nửa giây, không dùng mili giây như một số API AutoTouch.",
+      "code": "sleep(1);\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "wait",
+      "signature": "wait(giây)",
+      "description": "Tên khác của sleep.",
+      "code": "wait(1);\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "random",
+      "signature": "random(min, max)",
+      "description": "Trả về số thực ngẫu nhiên giữa hai giới hạn.",
+      "code": "sleep(random(1, 3));\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "now",
+      "signature": "now() → mili giây",
+      "description": "Đồng hồ thời gian trên iPhone; dùng tính thời hạn thay vì cộng số lượt sleep.",
+      "code": "var deadline = now() + 10 * 1000;\nwhile (now() < deadline) {\n  sleep(Math.min(1, (deadline - now()) / 1000));\n}\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "stop",
+      "signature": "stop()",
+      "description": "Dừng kịch bản hiện tại ngay tại lời gọi.",
+      "code": "stop();\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "repeat",
+      "signature": "repeat(số lần, hàm)",
+      "description": "Gọi hàm với chỉ số 0..n-1; thêm sleep khi lặp thao tác.",
+      "code": "repeat(3, function(i) {\n  log(\"Lần \" + (i + 1));\n  sleep(1);\n});\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "retry",
+      "signature": "retry(số lần, hàm) → boolean",
+      "description": "Thử cho đến khi hàm trả true. Chờ 0.5 giây giữa các lần thất bại.",
+      "code": "retry(3, function() {\n  return !!findText(\"Nhận\", 0.7, 0.1, 1, 0.5);\n});\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "while",
+      "signature": "while (điều kiện)",
+      "description": "Vòng lặp phải có sleep hoặc API thao tác để có điểm nhận lệnh Dừng.",
+      "code": "while (true) {\n  log(\"Đang chạy\");\n  sleep(1);\n}\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "for",
+      "signature": "for (...)",
+      "description": "Lặp số lần xác định.",
+      "code": "for (var i = 0; i < 5; i++) {\n  log(\"Lần \" + (i + 1));\n  sleep(1);\n}\n"
+    },
+    {
+      "group": "Chờ, vòng lặp và thời gian",
+      "name": "if",
+      "signature": "if (điều kiện)",
+      "description": "Kiểm tra điều kiện trước khi thực hiện.",
+      "code": "var p = findText(\"Nhận\", 0.7, 0.1, 1, 0.5);\nif (p) {\n  log(JSON.stringify(p));\n}\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "ocr",
+      "signature": "ocr(x1?, y1?, x2?, y2?) → string",
+      "description": "Đọc chữ bằng Vision trên iPhone. Bỏ vùng để đọc toàn màn. Trả chuỗi, không trả danh sách rectangle. Vùng nhỏ giúp OCR nhanh và tránh đọc nhầm.",
+      "code": "var text = ocr(0.65, 0.15, 1, 0.4);\nlog(text);\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "findText",
+      "signature": "findText(chữ, x1?, y1?, x2?, y2?) → {x,y} | null",
+      "description": "Tìm một dòng chứa chuỗi, không phân biệt hoa/thường; không tự bỏ dấu tiếng Việt. Kết quả là tâm của cả vùng chữ OCR, cần kiểm tra trước khi tap.",
+      "code": "var p = findText(\"Nhận\", 0.8, 0.15, 1, 0.45);\nif (p) {\n  log(\"Tìm thấy: \" + JSON.stringify(p));\n}\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "waitText",
+      "signature": "waitText(chữ, giây?) → {x,y} | null",
+      "description": "Tìm chữ trong toàn màn, mặc định thử khoảng 10 giây; thời gian thực có thể dài hơn do OCR.",
+      "code": "var p = waitText(\"Điểm danh\", 10);\nlog(JSON.stringify(p));\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "tapText",
+      "signature": "tapText(chữ) → boolean",
+      "description": "Tìm chữ trong toàn màn rồi chạm tâm dòng; dùng findText với vùng nhỏ nếu màn có nhiều kết quả.",
+      "code": "var found = tapText(\"Điểm danh\");\nlog(\"Đã tìm và bấm: \" + found);\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "getColor",
+      "signature": "getColor(x, y) → hex RGB",
+      "description": "Trả chuỗi 6 ký tự, ví dụ FF3B30; trả chuỗi rỗng khi chưa có ảnh.",
+      "code": "var color = getColor(0.5, 0.5);\nlog(color);\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "matchColor",
+      "signature": "matchColor(x, y, hex, tolerance) → boolean",
+      "description": "So màu RGB với sai số mỗi kênh. Nên truyền tolerance rõ ràng, ví dụ 15.",
+      "code": "if (matchColor(0.5, 0.5, \"FF3B30\", 15)) {\n  log(\"Màu khớp\");\n}\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "waitColor",
+      "signature": "waitColor(x, y, hex, giây, tolerance) → boolean",
+      "description": "Chờ màu khớp hoặc hết thời gian.",
+      "code": "var matched = waitColor(0.5, 0.5, \"34C759\", 10, 15);\nlog(\"Khớp: \" + matched);\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "tapIfColor",
+      "signature": "tapIfColor(x, y, hex, tolerance?) → boolean",
+      "description": "Chỉ chạm khi màu khớp; tolerance mặc định 15.",
+      "code": "tapIfColor(0.5, 0.5, \"FF3B30\", 15);\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "findImage",
+      "signature": "findImage(path, x1?, y1?, x2?, y2?, tolerance?) → {x,y} | null",
+      "description": "Tìm ảnh mẫu trên ảnh màn hình đang thu. tolerance mặc định 24; ảnh mẫu cần đúng kích thước theo độ nét ảnh đang thu.",
+      "code": "var p = findImage(\"/var/mobile/Media/ControlIOS/template.png\", 0, 0, 1, 1, 24);\nlog(JSON.stringify(p));\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "waitImage",
+      "signature": "waitImage(path, giây?) → {x,y} | null",
+      "description": "Tìm ảnh trên toàn màn; mặc định thử khoảng 10 giây.",
+      "code": "var p = waitImage(\"/var/mobile/Media/ControlIOS/template.png\", 10);\nlog(JSON.stringify(p));\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "tapImage",
+      "signature": "tapImage(path) → boolean",
+      "description": "Tìm ảnh trên toàn màn rồi chạm tâm kết quả.",
+      "code": "log(tapImage(\"/var/mobile/Media/ControlIOS/template.png\"));\n"
+    },
+    {
+      "group": "OCR, màu và ảnh",
+      "name": "saveScreenshot",
+      "signature": "saveScreenshot(path) → boolean",
+      "description": "Lưu ảnh màn hình PNG trên iPhone. Thư mục đích phải tồn tại.",
+      "code": "log(saveScreenshot(\"/var/mobile/Media/ControlIOS/screen.png\"));\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "launchApp",
+      "signature": "launchApp(bundleID)",
+      "description": "Mở ứng dụng theo bundle ID. Chờ ứng dụng hiển thị trước khi OCR hoặc bấm.",
+      "code": "launchApp(\"com.beeasy.shopee.vn\");\nsleep(3);\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "killApp",
+      "signature": "killApp(bundleID)",
+      "description": "Đóng ứng dụng theo bundle ID.",
+      "code": "killApp(\"com.beeasy.shopee.vn\");\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "openURL",
+      "signature": "openURL(url)",
+      "description": "Mở URL bằng ứng dụng mặc định.",
+      "code": "openURL(\"https://example.com\");\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "openURLIn",
+      "signature": "openURLIn(bundleID, url)",
+      "description": "Mở URL trong ứng dụng được chỉ định.",
+      "code": "openURLIn(\"com.apple.mobilesafari\", \"https://example.com\");\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "httpGet",
+      "signature": "httpGet(url) → string",
+      "description": "Gửi GET từ iPhone, không từ PC. Trả nội dung phản hồi; có thể rỗng khi lỗi. Lời gọi đồng bộ có thể chờ đến khoảng 25 giây.",
+      "code": "var response = httpGet(\"https://example.com\");\nlog(response);\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "httpPost",
+      "signature": "httpPost(url, body, contentType?) → string",
+      "description": "Gửi POST từ iPhone. Trả nội dung phản hồi; không trả object status code.",
+      "code": "var response = httpPost(\"https://example.com\", JSON.stringify({hello: \"world\"}), \"application/json\");\nlog(response);\n"
+    },
+    {
+      "group": "Ứng dụng và kết nối",
+      "name": "freeRAM",
+      "signature": "freeRAM() → string",
+      "description": "Yêu cầu giải phóng RAM; trả phản hồi dịch vụ, một số ứng dụng nền có thể bị đóng.",
+      "code": "log(freeRAM());\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "readFile",
+      "signature": "readFile(path) → string",
+      "description": "Đọc tệp UTF-8 trên iPhone; rỗng nếu thiếu hoặc lỗi.",
+      "code": "var text = readFile(\"/var/mobile/Media/ControlIOS/data.txt\");\nlog(text);\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "writeFile",
+      "signature": "writeFile(path, text) → boolean",
+      "description": "Ghi tệp UTF-8 trên iPhone. Thư mục đích phải tồn tại.",
+      "code": "log(writeFile(\"/var/mobile/Media/ControlIOS/data.txt\", \"Nội dung\"));\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "fileExists",
+      "signature": "fileExists(path) → boolean",
+      "description": "Kiểm tra tệp hoặc thư mục tồn tại.",
+      "code": "log(fileExists(\"/var/mobile/Media/ControlIOS/data.txt\"));\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "setVar",
+      "signature": "setVar(key, value)",
+      "description": "Lưu giá trị JSON qua các lần chạy script trên máy này.",
+      "code": "setVar(\"runs\", 1);\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "getVar",
+      "signature": "getVar(key, mặc định?) → value",
+      "description": "Đọc biến đã lưu; trả mặc định hoặc null nếu chưa có.",
+      "code": "var runs = getVar(\"runs\", 0);\nlog(runs);\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "getClipboard",
+      "signature": "getClipboard() → string",
+      "description": "Đọc văn bản clipboard trên iPhone.",
+      "code": "log(getClipboard());\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "setClipboard",
+      "signature": "setClipboard(text)",
+      "description": "Ghi clipboard trên iPhone.",
+      "code": "setClipboard(\"Nội dung cần chép\");\n"
+    },
+    {
+      "group": "Tệp và dữ liệu",
+      "name": "JSON",
+      "signature": "JSON.parse / JSON.stringify",
+      "description": "JavaScript có sẵn JSON. Bắt lỗi khi đọc JSON từ tệp.",
+      "code": "try {\n  var data = JSON.parse(readFile(\"/var/mobile/Media/ControlIOS/data.json\"));\n  log(JSON.stringify(data));\n} catch (e) {\n  log(\"JSON không hợp lệ: \" + e);\n}\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "home",
+      "signature": "home()",
+      "description": "Bấm Home bằng điều khiển trên máy.",
+      "code": "home();\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "key",
+      "signature": "key(tên phím)",
+      "description": "Gửi tên phím đến bộ phát sự kiện iOS; khả năng hỗ trợ tùy tên phím và ứng dụng.",
+      "code": "key(\"a\");\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "typeText",
+      "signature": "typeText(text)",
+      "description": "Gõ vào ô nhập đang được chọn.",
+      "code": "typeText(\"Nội dung\");\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "volumeUp",
+      "signature": "volumeUp()",
+      "description": "Tăng âm lượng một nấc.",
+      "code": "volumeUp();\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "volumeDown",
+      "signature": "volumeDown()",
+      "description": "Giảm âm lượng một nấc.",
+      "code": "volumeDown();\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "mute",
+      "signature": "mute()",
+      "description": "Gửi thao tác chuyển trạng thái im lặng.",
+      "code": "mute();\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "lockScreen",
+      "signature": "lockScreen()",
+      "description": "Gửi thao tác nút nguồn để khóa màn hình.",
+      "code": "lockScreen();\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "assistiveTouch",
+      "signature": "assistiveTouch(boolean)",
+      "description": "Bật hoặc tắt AssistiveTouch.",
+      "code": "assistiveTouch(true);\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "screenWidth",
+      "signature": "screenWidth() → pixel",
+      "description": "Chiều rộng màn nguồn; tap/OCR vẫn dùng tỉ lệ 0..1.",
+      "code": "log(screenWidth());\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "screenHeight",
+      "signature": "screenHeight() → pixel",
+      "description": "Chiều cao màn nguồn; không phải chiều cao ảnh đã giảm độ nét.",
+      "code": "log(screenHeight());\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "log",
+      "signature": "log(text)",
+      "description": "Ghi nội dung vào nhật ký chạy trên iPhone.",
+      "code": "log(\"AutoClickJS đã sẵn sàng\");\n"
+    },
+    {
+      "group": "Phím, màn hình và nhật ký",
+      "name": "setTrace",
+      "signature": "setTrace(boolean)",
+      "description": "Bật/tắt nhật ký từng API. log() vẫn hoạt động. Mặc định bật ở mỗi lần chạy.",
+      "code": "setTrace(false);\nlog(\"Chỉ ghi nhật ký do script chọn\");\n"
+    }
+  ],
+  "templates": [
+    {
+      "name": "Kiểm tra an toàn",
+      "description": "Chỉ ghi nhật ký, không chạm màn hình.",
+      "code": "// Mẫu đầu tiên: chỉ kiểm tra API và nhật ký.\nlog(\"AutoClickJS đang chạy trên iPhone\");\nlog(\"Màn hình: \" + screenWidth() + \" × \" + screenHeight());\nsleep(1);\nlog(\"Hoàn tất\");\n"
+    },
+    {
+      "name": "Chạm 5 lần",
+      "description": "Chờ 3 giây để chuyển ứng dụng, rồi chạm giữa màn 5 lần.",
+      "code": "// Đổi x và y theo nút cần chạm; tỉ lệ 0..1.\nsleep(3);\nfor (var i = 0; i < 5; i++) {\n  tap(0.5, 0.5);\n  log(\"Đã chạm lần \" + (i + 1));\n  sleep(1);\n}\n"
+    },
+    {
+      "name": "Tìm chữ trong vùng",
+      "description": "OCR bên phải, ghi vị trí; bỏ chú thích tap khi đã kiểm tra đúng nút.",
+      "code": "// Bắt đầu với log; xác nhận vùng trước khi bật tap.\nsleep(3);\nvar p = findText(\"Nhận\", 0.8, 0.1, 1, 0.45);\nif (p) {\n  log(\"Vị trí: \" + JSON.stringify(p));\n  // tap(p.x, p.y);\n} else {\n  log(\"Không thấy nút trong vùng đã chọn\");\n}\n"
+    },
+    {
+      "name": "Đọc MM:SS và tính chờ",
+      "description": "Đổi phút:giây thành thời hạn; trừ độ trễ OCR và sleep.",
+      "code": "// Chọn vùng chỉ chứa một dòng thời gian.\nsleep(3);\nvar sampledAt = now();\nvar text = ocr(0.65, 0.15, 1, 0.4);\nlog(\"OCR: \" + text);\nvar m = text.replace(/：/g, \":\").match(/(?:^|[^0-9])(\\d{1,2})\\s*[:.;/]\\s*(\\d{2})(?!\\d)/);\nif (m && Number(m[2]) < 60) {\n  var seconds = Number(m[1]) * 60 + Number(m[2]);\n  var deadline = sampledAt + seconds * 1000;\n  log(\"Thời gian: \" + seconds + \" giây\");\n  while (now() < deadline) {\n    sleep(Math.min(1, (deadline - now()) / 1000));\n  }\n  log(\"Đến hạn; tìm lại nút và kiểm tra trước khi bấm\");\n} else {\n  log(\"Không đọc được MM:SS hợp lệ\");\n}\n"
+    },
+    {
+      "name": "Lặp có điều kiện màu",
+      "description": "Đọc màu mỗi giây; mẫu chỉ ghi nhật ký để tránh bấm nhầm.",
+      "code": "sleep(3);\nwhile (true) {\n  if (matchColor(0.5, 0.5, \"FF3B30\", 15)) {\n    log(\"Màu khớp\");\n    // tap(0.5, 0.5);\n  }\n  sleep(1);\n}\n"
+    }
+  ],
+  "help": [
+    {
+      "title": "Bắt đầu trong 4 bước",
+      "body": "1. Mở Thư viện và chọn mẫu Kiểm tra an toàn.\n2. Sửa code, bấm Kiểm tra để tìm lỗi cú pháp.\n3. Bấm Chạy; xem trạng thái và Nhật ký.\n4. Bấm Dừng khi cần. Lưu để đặt tên script và dùng lại.\n\nChọn mẫu hoặc chèn lệnh không tự chạy script. Thoát màn hình soạn code không dừng auto."
+    },
+    {
+      "title": "Tọa độ và thời gian",
+      "body": "Gốc (0,0) ở góc trên trái; (1,1) ở góc dưới phải. tap(0.5,0.5) là giữa màn. OCR dùng x1,y1,x2,y2, ví dụ vùng bên phải: 0.7,0.1,1,0.5.\n\nsleep(1) = 1 giây. now() trả mili giây. MM:SS → phút × 60 + giây; 01:08 = 68 giây. Tính thời hạn từ lúc bắt đầu OCR để trừ độ trễ."
+    },
+    {
+      "title": "Chạy trên iPhone, PC có thể tắt",
+      "body": "Chạm, vuốt, OCR, màu, vòng lặp và HTTP chạy trong dịch vụ ControlIOS trên iPhone. PC chỉ gửi code và xem nhật ký. Script tiếp tục khi đóng màn hình này hoặc PC ngắt kết nối.\n\nCần giữ dịch vụ ControlIOS bật. Khởi động lại iPhone/dịch vụ kết thúc lượt chạy; script không tự chạy lại. Phiên bản iOS 4.29 trở lên giữ ảnh mới khi script chạy dù không có PC xem."
+    },
+    {
+      "title": "OCR nhận được chữ nhưng bấm sai",
+      "body": "findText trả tâm của dòng OCR chứa chuỗi, không nhất thiết là tâm riêng của từ. Nếu có nhiều nút cùng chữ, giới hạn vùng OCR. Luôn kiểm tra p khác null. Nút bị vô hiệu hóa vẫn có chữ: kết hợp kiểm tra màu nền. Chữ trắng ở một điểm không đủ xác nhận nút bật.\n\nOCR phụ thuộc độ nét, nền và trạng thái ứng dụng. Vùng nhỏ, ảnh rõ giúp chính xác hơn. Lưu ảnh bằng saveScreenshot để đối chiếu. OCR thất bại không đồng nghĩa nút không tồn tại."
+    },
+    {
+      "title": "Vòng lặp và nút Dừng",
+      "body": "Thêm sleep trong vòng lặp để giảm tải và cho dịch vụ nhận lệnh Dừng. Không dùng while(true) {} hoặc phép tính dài không gọi API.\n\nDừng có thể chờ lời gọi OCR/HTTP đang xử lý hoàn tất. Bấm Dừng không xóa code. Đóng giao diện không tự dừng script. Không bấm Chạy lượt khác khi lượt cũ chưa dừng."
+    },
+    {
+      "title": "Chuyển từ AutoTouch",
+      "body": "Không có đối tượng at.*. Dùng tap, swipe, findText, ocr, getColor trực tiếp. Tọa độ là tỉ lệ 0..1; sleep dùng giây. ocr trả chuỗi; findText/findImage trả {x,y} hoặc null. getColor trả hex RGB.\n\nAPI có callback hay danh sách rectangle của AutoTouch cần viết lại luồng; không chỉ đổi tên hàm. Tra tab Lệnh để xem đúng chữ ký và giá trị trả về của ControlIOS."
+    },
+    {
+      "title": "Lưu, thư viện và tệp .js",
+      "body": "Bản nháp tự lưu sau khi sửa và khi đóng màn hình. Bấm Lưu để tạo/cập nhật một script có tên trong Thư viện. Nhấn giữ script để đổi tên, xuất .js hoặc xóa. Nhập .js qua menu Tệp; thao tác này chỉ nạp code, không chạy.\n\nThư viện nằm trên iPhone tại /var/mobile/Media/ControlIOS/AutoClickJS. Mẫu có sẵn chỉ là điểm bắt đầu; cần chỉnh vùng/tọa độ theo máy."
+    },
+    {
+      "title": "Kiểm tra cú pháp và báo lỗi",
+      "body": "Kiểm tra dùng bộ phân tích JavaScript trên iPhone, không thực thi code. Nó phát hiện lỗi cú pháp, không xác nhận tên API, quyền ứng dụng hoặc OCR sẽ thành công.\n\nLỗi khi chạy hiện trong Nhật ký, kèm dòng nếu dịch vụ xác định được. Dùng Đi tới dòng để xem code. Khi cần hỗ trợ, chép trạng thái và nhật ký; kiểm tra và bỏ dữ liệu riêng tư trước khi chia sẻ."
+    },
+    {
+      "title": "Thư viện hàm dùng chung",
+      "body": "Dịch vụ nạp các hàm có sẵn như swipeUp, tapText, repeat trước khi chạy code. Tệp /var/mobile/Library/controlios/prelude.js chứa hàm dùng chung do PC gửi xuống và được nạp trước script.\n\nCó thể dùng readFile rồi eval cho tệp JavaScript đã kiểm tra; chỉ chạy code từ nguồn bạn tin cậy. Tệp không có sẵn trên iPhone sẽ không đọc được. Đường dẫn D:\\... trên PC không dùng được trong script iOS."
+    }
+  ]
+}
