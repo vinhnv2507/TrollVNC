@@ -69,6 +69,8 @@
 #import "TVNCTouchLockPolicy.h"
 #import "TVNCLocalUpdate.h"
 #import "TVNCUpdateIPC.h"
+#import "TVNCLicensePolicy.h"
+#import "TVNCJSExecutionLimit.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import "FBSOrientationObserver.h"
@@ -110,6 +112,9 @@ static NSString *gLicenseToken = nil;  // "khoá có ích": token control lấy 
 static long long gLicenseExpiry = 0;   // epoch giây, 0 = vĩnh viễn
 static BOOL gTrialValid = NO;
 static long long gTrialRemaining = 0;
+static std::recursive_mutex gLicenseMutex;
+static TVNCLicensePolicy gLicensePolicy;
+static BOOL tvServiceAllowed(void);
 
 // Giữ các assertion sống suốt vòng đời daemon. Chúng chỉ chặn idle
 // timeout; thao tác khóa thủ công bằng nút Power vẫn có hiệu lực.
@@ -3067,7 +3072,7 @@ NS_INLINE NSString *keysymToString(rfbKeySym ks) {
 
 static void kbdAddEvent(rfbBool down, rfbKeySym keySym, rfbClientPtr cl) {
     (void)cl;
-    if (gViewOnly)
+    if (gViewOnly || !tvServiceAllowed())
         return;
 
     STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
@@ -3256,7 +3261,7 @@ static void wheelScheduleFlush(rfbClientPtr cl, CGPoint anchorPoint, double dela
     rfbIncrClientRef(cl);
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delaySec * NSEC_PER_SEC)), gWheelQueue, ^{
         TVClientState *st2 = tvGetClientState(cl);
-        if (!st2) {
+        if (!st2 || !tvServiceAllowed()) {
             rfbDecrClientRef(cl);
             return;
         }
@@ -3358,7 +3363,7 @@ static void tvRecordHomeAudit(NSString *source, NSString *detail) {
 }
 
 static void ptrAddEvent(int buttonMask, int x, int y, rfbClientPtr cl) {
-    if (gViewOnly)
+    if (gViewOnly || !tvServiceAllowed())
         return;
 
     STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
@@ -6009,11 +6014,8 @@ static NSData *tvCtlOpenURL(NSString *urlString) {
 
 #pragma mark - License (kích hoạt bản quyền)
 
-// Bật/tắt GÁC CỔNG bản quyền. 0 = KHÔNG gác (để TEST tự do), 1 = bắt buộc
-// license hợp lệ mới phục vụ. License vẫn được đọc/hiển thị khi = 0, chỉ không
-// chặn. Khi hoàn thiện đổi thành 1.
+// Runtime enforcement applies to live sessions and scripts, not just startup.
 #define CIOS_ENFORCE_LICENSE 1
-#define CIOS_TRIAL_SECONDS 600
 
 // KHOÁ CÔNG KHAI của bạn (65 byte, 04||X||Y). Sinh bằng
 // `tools/controlios_keygen.py genkeys` rồi DÁN mảng đó vào đây. Khoá riêng đi kèm
@@ -6045,28 +6047,44 @@ static NSString *tvTrialPath(void) {
 }
 
 static void tvTrialLoad(void) {
+    std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
     gTrialValid = NO;
     gTrialRemaining = 0;
-    NSString *raw = [NSString stringWithContentsOfFile:tvTrialPath()
+    NSString *path = tvTrialPath();
+    BOOL exists = [[NSFileManager defaultManager] fileExistsAtPath:path];
+    NSString *raw = [NSString stringWithContentsOfFile:path
                                                encoding:NSUTF8StringEncoding error:NULL];
-    long long started = raw.longLongValue;
-    if (started <= 0) {
-        [[NSFileManager defaultManager] createDirectoryAtPath:[tvTrialPath() stringByDeletingLastPathComponent]
+    NSScanner *scanner = [NSScanner scannerWithString:raw ?: @""];
+    long long started = 0;
+    if (![scanner scanLongLong:&started] || !scanner.isAtEnd) started = 0;
+    if (!exists) {
+        [[NSFileManager defaultManager] createDirectoryAtPath:[path stringByDeletingLastPathComponent]
                                    withIntermediateDirectories:YES attributes:nil error:NULL];
         started = (long long)time(NULL);
-        [@(started).description writeToFile:tvTrialPath() atomically:YES
-                                   encoding:NSUTF8StringEncoding error:NULL];
+        if (![@(started).description writeToFile:path atomically:YES
+                                   encoding:NSUTF8StringEncoding error:NULL]) started = 0;
     }
-    long long elapsed = (long long)time(NULL) - started;
-    gTrialRemaining = MAX(0, (long long)CIOS_TRIAL_SECONDS - elapsed);
-    gTrialValid = gTrialRemaining > 0;
+    double now = [[NSDate date] timeIntervalSince1970];
+    // A future/corrupt persisted trial record must not grant a new trial.
+    if (started > (long long)now) started = 0;
+    double uptime = [[NSProcessInfo processInfo] systemUptime];
+    gLicensePolicy.trial(started, now, uptime);
+    gTrialValid = gLicensePolicy.allowed(now, uptime);
+    gTrialRemaining = gLicensePolicy.remaining(now, uptime);
     TVLog(@"License: dùng thử %@, còn %lld giây",
           gTrialValid ? @"đang chạy" : @"đã hết", gTrialRemaining);
 }
 
 static BOOL tvServiceAllowed(void) {
 #if CIOS_ENFORCE_LICENSE
-    return gLicenseValid || gTrialValid;
+    std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
+    double now = [[NSDate date] timeIntervalSince1970];
+    double uptime = [[NSProcessInfo processInfo] systemUptime];
+    BOOL allowed = gLicensePolicy.allowed(now, uptime);
+    gLicenseValid = allowed && gLicensePolicy.kind() == TVNCLicensePolicy::Kind::License;
+    gTrialValid = allowed && gLicensePolicy.kind() == TVNCLicensePolicy::Kind::Trial;
+    gTrialRemaining = gTrialValid ? gLicensePolicy.remaining(now, uptime) : 0;
+    return allowed;
 #else
     return YES;
 #endif
@@ -6104,11 +6122,15 @@ static NSData *tvB64UrlDecode(NSString *s) {
 // hạn. Đặt gLicenseValid/gLicenseToken/gLicenseExpiry. Gọi lúc khởi động và khi
 // `relicense`.
 static void tvLicenseLoad(void) {
+    std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
     gLicenseValid = NO;
     gLicenseToken = nil;
     gLicenseExpiry = 0;
     gTrialValid = NO;
     gTrialRemaining = 0;
+    // Start/preserve the installation's trial even when a license is present.
+    // Removing or replacing the license later must not start another ten minutes.
+    tvTrialLoad();
 
     NSString *lic = [[NSString stringWithContentsOfFile:tvLicensePath()
                                                encoding:NSUTF8StringEncoding
@@ -6161,6 +6183,14 @@ static void tvLicenseLoad(void) {
         tvTrialLoad();
         return;
     }
+    if (![p[@"udid"] isKindOfClass:NSString.class] ||
+        ![p[@"exp"] isKindOfClass:NSNumber.class] ||
+        ![p[@"tok"] isKindOfClass:NSString.class] ||
+        [p[@"exp"] doubleValue] < 0 ||
+        [p[@"exp"] doubleValue] != (double)[p[@"exp"] longLongValue]) {
+        TVLog(@"License: thiếu/sai trường udid, exp hoặc tok");
+        return;
+    }
     NSString *udid = p[@"udid"];
     long long exp = [p[@"exp"] longLongValue];
     NSString *tok = p[@"tok"];
@@ -6170,9 +6200,12 @@ static void tvLicenseLoad(void) {
         tvTrialLoad();
         return;
     }
-    if (exp != 0 && (long long)time(NULL) > exp) {
+    gLicensePolicy.license(exp, [[NSDate date] timeIntervalSince1970],
+                           [[NSProcessInfo processInfo] systemUptime]);
+    gLicenseExpiry = exp;
+    if (!tvServiceAllowed()) {
         TVLog(@"License: đã hết hạn (%lld)", exp);
-        tvTrialLoad();
+        // A correctly signed but expired license does not fall back to trial.
         return;
     }
 
@@ -6191,6 +6224,8 @@ static void tvLicenseLoad(void) {
 // `license` — trả trạng thái kích hoạt (cho phép kể cả khi CHƯA kích hoạt để app
 // hiện UDID + trạng thái).
 static NSData *tvCtlLicenseStatus(void) {
+    std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
+    tvServiceAllowed(); // Refresh the countdown even without viewers/PC requests.
     NSString *udid = tvDeviceUDID() ?: @"";
     NSString *s = gLicenseValid
         ? [NSString stringWithFormat:@"OK valid exp=%lld udid=%@\n", gLicenseExpiry, udid]
@@ -6230,7 +6265,7 @@ static CGPoint tvAutoPoint(double rx, double ry) {
 // Ngủ theo nhịp nhỏ để DỪNG nhanh khi có yêu cầu dừng.
 static void tvAutoSleep(double sec) {
     double slept = 0;
-    while (slept < sec && !gAutoStop.load()) {
+    while (slept < sec && !gAutoStop.load() && tvServiceAllowed()) {
         double step = (sec - slept) < 0.1 ? (sec - slept) : 0.1;
         if (step <= 0)
             break;
@@ -6307,7 +6342,7 @@ static BOOL tvSetAssistiveTouch(int mode); // định nghĩa ở dưới
 
 // Dừng HỢP TÁC: có yêu cầu dừng thì ném exception để JS thoát ngay ở lệnh kế.
 static void tvJSStopIfNeeded(void) {
-    if (gAutoStop.load()) {
+    if (gAutoStop.load() || !tvServiceAllowed()) {
         JSContext *c = [JSContext currentContext];
         c.exception = [JSValue valueWithNewErrorFromMessage:@"__STOP__" inContext:c];
     }
@@ -6521,6 +6556,7 @@ static NSString *tvHttpRequest(NSString *method, NSString *urlStr, NSString *bod
 // thể làm sập daemon khiến phiên VNC nối lại/màn đen). Đây là bộ HID mà điều
 // khiển VNC đang dùng nên chắc chắn hoạt động.
 static void tvAutoTap(STHIDEventGenerator *gen, CGPoint p, NSUInteger fingers) {
+    if (gAutoStop.load() || !tvServiceAllowed()) return;
     if (fingers < 1)
         fingers = 1;
     if (fingers > 3)
@@ -6531,6 +6567,24 @@ static void tvAutoTap(STHIDEventGenerator *gen, CGPoint p, NSUInteger fingers) {
     [gen touchDownAtPoints:pts touchCount:fingers];
     usleep(60000); // giữ 60ms cho hệ nhận là một cú chạm
     [gen liftUpAtPoints:pts touchCount:fingers];
+}
+
+static void tvAutoSwipe(STHIDEventGenerator *gen, CGPoint from, CGPoint to, double duration) {
+    if (gAutoStop.load() || !tvServiceAllowed()) return;
+    if (!std::isfinite(duration) || duration <= 0) duration = 0.3;
+    [gen touchDownAtPoints:&from touchCount:1];
+    double started = [[NSProcessInfo processInfo] systemUptime];
+    while (!gAutoStop.load() && tvServiceAllowed()) {
+        double fraction = MIN(1.0, ([[NSProcessInfo processInfo] systemUptime] - started) / duration);
+        CGPoint point = CGPointMake(from.x + (to.x - from.x) * fraction,
+                                    from.y + (to.y - from.y) * fraction);
+        [gen _updateTouchPoints:&point count:1];
+        from = fraction >= 1.0 ? to : from;
+        if (fraction >= 1.0) break;
+        tvAutoSleep(1.0 / 60.0);
+    }
+    // Release even if the gesture was interrupted by expiry/Stop.
+    [gen dispatchHandResetEvent];
 }
 
 // ---- Tìm CHỮ trên màn (OCR + toạ độ) : findText -> tâm ô chứa chuỗi con ----
@@ -6673,6 +6727,7 @@ static BOOL tvSaveScreenshot(NSString *path) {
 
 // Cài API native cho JS (kiểu AutoTouch). gen bắt trong block.
 static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
+    NSSet *existing = [NSSet setWithArray:[[ctx evaluateScript:@"Object.getOwnPropertyNames(this)"] toArray]];
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
         c.exception = e;
         NSString *m = [e toString];
@@ -6748,9 +6803,7 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     };
     ctx[@"swipe"] = ^(double x1, double y1, double x2, double y2, double sec) {
         tvTrace([NSString stringWithFormat:@"swipe %.3f,%.3f -> %.3f,%.3f", x1, y1, x2, y2]);
-        [gen dragLinearWithStartPoint:tvAutoPoint(x1, y1)
-                             endPoint:tvAutoPoint(x2, y2)
-                             duration:sec > 0 ? sec : 0.3];
+        tvAutoSwipe(gen, tvAutoPoint(x1, y1), tvAutoPoint(x2, y2), sec);
         tvJSStopIfNeeded();
     };
     ctx[@"home"] = ^{
@@ -6761,7 +6814,7 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx[@"key"] = ^(NSString *k) { tvTrace([@"key " stringByAppendingString:(k ?: @"")]); [gen keyPress:k]; };
     ctx[@"typeText"] = ^(NSString *s) {
         tvTrace([@"typeText " stringByAppendingString:(s ?: @"")]);
-        for (NSUInteger i = 0; i < s.length && !gAutoStop.load(); i++)
+        for (NSUInteger i = 0; i < s.length && !gAutoStop.load() && tvServiceAllowed(); i++)
             [gen keyPress:[s substringWithRange:NSMakeRange(i, 1)]];
         tvJSStopIfNeeded();
     };
@@ -6908,6 +6961,12 @@ static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx[@"volumeDown"] = ^{ tvTrace(@"volumeDown"); [gen volumeDecrementPress]; };
     ctx[@"mute"] = ^{ tvTrace(@"mute"); [gen mutePress]; };
     ctx[@"lockScreen"] = ^{ tvTrace(@"lockScreen"); [gen powerPress]; };
+    NSMutableArray<NSString *> *nativeNames = [NSMutableArray array];
+    for (NSString *name in [[ctx evaluateScript:@"Object.getOwnPropertyNames(this)"] toArray])
+        if (![existing containsObject:name]) [nativeNames addObject:name];
+    TVNCGuardNativeAPIs(ctx, nativeNames, ^BOOL {
+        return !gAutoStop.load() && tvServiceAllowed();
+    });
 }
 
 // Prelude JS: hàm tiện ích thuần JS dựng trên các API native, nạp TRƯỚC kịch bản.
@@ -6928,7 +6987,15 @@ static NSString *const kAutoPrelude =
 // thêm hàm tiện ích JS mới mà KHÔNG phải cài lại app.
 static NSString *tvUserPreludePath(void) { return @"/var/mobile/Library/controlios/prelude.js"; }
 
+static bool tvAutoShouldTerminate(JSContextRef context, void *data) {
+    (void)context;
+    (void)data;
+    return gAutoStop.load() || !tvServiceAllowed();
+}
+
 static void tvAutoStart(void) {
+    std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
+    if (!tvServiceAllowed()) return;
     NSString *script = gAutoScript ?: @"";
     if (script.length == 0)
         return;
@@ -6939,11 +7006,23 @@ static void tvAutoStart(void) {
         gAutoQueue = dispatch_queue_create("com.controlios.autoclick", DISPATCH_QUEUE_SERIAL);
     dispatch_async(gAutoQueue, ^{
         @autoreleasepool {
+            if (gAutoStop.load() || !tvServiceAllowed()) {
+                gAutoRunning.store(false);
+                tvRefreshCaptureDemand();
+                return;
+            }
             // Auto-click OCR/color/image reads need fresh frames even when
             // there are no PC viewers. Capture transitions stay on main.
             tvRefreshCaptureDemand();
             gAutoTrace.store(true); // mỗi lần chạy mặc định ghi tiến trình
             JSContext *ctx = [[JSContext alloc] init];
+            TVNCJSExecutionLimit executionLimit(ctx.JSGlobalContextRef, tvAutoShouldTerminate, nullptr);
+            if (!executionLimit.installed()) {
+                tvAutoLog(@"⚠ Không có bộ ngắt JavaScript an toàn; không chạy script.");
+                gAutoRunning.store(false);
+                tvRefreshCaptureDemand();
+                return;
+            }
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
             [ctx evaluateScript:kAutoPrelude withSourceURL:[NSURL URLWithString:@"controlios://builtins.js"]];
             NSString *userLib = [NSString stringWithContentsOfFile:tvUserPreludePath()
@@ -6964,6 +7043,43 @@ static void tvAutoStart(void) {
 
 static void tvAutoStop(void) {
     gAutoStop.store(true);
+}
+
+static void tvStartLicenseExpiryWatchdog(void) {
+    static dispatch_source_t timer = nil;
+    if (timer) return;
+    dispatch_queue_t queue = dispatch_queue_create("com.controlios.license-expiry", DISPATCH_QUEUE_SERIAL);
+    timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, queue);
+    dispatch_source_set_timer(timer, DISPATCH_TIME_NOW, NSEC_PER_SEC / 4, NSEC_PER_SEC / 50);
+    __block BOOL deniedHandled = NO;
+    dispatch_source_set_event_handler(timer, ^{
+        @autoreleasepool {
+            std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
+            if (tvServiceAllowed()) {
+                deniedHandled = NO;
+                return;
+            }
+            if (deniedHandled) return;
+            deniedHandled = YES;
+            tvAutoStop();
+            tvDisconnectAllClients();
+            tvAutoLog(@"■ Hết thời gian dùng thử hoặc license hết hạn: đã ngắt xem và dừng AutoClickJS.");
+            TVLog(@"License: service expired; clients disconnected and automation stopped");
+            // UIKit/capture changes stay on main; the timer and JS interrupt
+            // remain independent of main/PC so stalled UI cannot extend use.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                std::lock_guard<std::recursive_mutex> mainGuard(gLicenseMutex);
+                if (tvServiceAllowed()) return; // A renewed license wins over queued cleanup.
+                tvSetTouchLockNotifyState(NO);
+                STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
+                [gen dispatchHandResetEvent];
+                [gen releaseEveryKeys];
+                gPointerActive.store(false, std::memory_order_relaxed);
+                tvRefreshCaptureDemand();
+            });
+        }
+    });
+    dispatch_resume(timer);
 }
 
 static BOOL tvAutoSetScript(NSString *script) {
@@ -7649,6 +7765,27 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // working without one so the on-device TrollVNC app is unaffected.
     BOOL isLoopback = (caddr.sin_addr.s_addr == htonl(INADDR_LOOPBACK));
 
+    // Authenticate before dispatch, including status and renewal commands.
+    // Keeping these commands reachable after expiry lets the owner activate.
+    if (!isLoopback && cmd.length > 0) {
+        NSString *token = nil;
+        {
+            std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
+            token = [gTvCtlToken copy];
+        }
+        NSString *prefix = token.length > 0 ? [NSString stringWithFormat:@"auth %@ ", token] : nil;
+        if (prefix && [cmd hasPrefix:prefix]) {
+            cmd = [[cmd substringFromIndex:prefix.length]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        } else {
+            TVLog(@"Control socket: unauthorized command from %s", ip ? ip : "?");
+            const char *deny = "ERR Unauthorized\n";
+            tvCtlWriteAll(cfd, deny, strlen(deny));
+            close(cfd);
+            return;
+        }
+    }
+
     // Kích hoạt bản quyền. Cho phép `license` (hỏi trạng thái) và `relicense`
     // (nạp lại sau khi app ghi file license) KỂ CẢ khi chưa kích hoạt — để app
     // kích hoạt được. Mọi lệnh khác đòi license hợp lệ.
@@ -7665,26 +7802,14 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         close(cfd);
         return;
     }
-    if (CIOS_ENFORCE_LICENSE && !tvServiceAllowed()) {
+    BOOL recoveryCommand = [@[@"version", @"deviceinfo", @"devicename", @"count",
+                             @"autostatus", @"autolog", @"autostop",
+                             @"touchlock off", @"touchlock status", @"touchlock details"] containsObject:cmd];
+    if (!recoveryCommand && !tvServiceAllowed()) {
         const char *deny = "ERR NotActivated\n";
         tvCtlWriteAll(cfd, deny, strlen(deny));
         close(cfd);
         return;
-    }
-
-    if (!isLoopback && cmd.length > 0) {
-        NSString *prefix =
-            gTvCtlToken.length > 0 ? [NSString stringWithFormat:@"auth %@ ", gTvCtlToken] : nil;
-        if (prefix && [cmd hasPrefix:prefix]) {
-            cmd = [[cmd substringFromIndex:prefix.length]
-                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-        } else {
-            TVLog(@"Control socket: unauthorized command from %s", ip ? ip : "?");
-            const char *deny = "ERR Unauthorized\n";
-              tvCtlWriteAll(cfd, deny, strlen(deny));
-            close(cfd);
-            return;
-        }
     }
 
     NSData *resp = nil;
@@ -8044,7 +8169,8 @@ static void tvRefreshCaptureDemand(void) {
     dispatch_async(dispatch_get_main_queue(), ^{
         // Evaluate demand when the queued block runs, not when requested:
         // a disconnect or finishing script must not stop a newer script/viewer.
-        BOOL needed = gClientCount > 0 || gAutoRunning.load(std::memory_order_acquire);
+        BOOL needed = tvServiceAllowed() &&
+                      (gClientCount > 0 || gAutoRunning.load(std::memory_order_acquire));
         if (needed && !gIsCaptureStarted && gFrameHandler) {
             gIsCaptureStarted = YES;
             [[ScreenCapturer sharedCapturer] startCaptureWithFrameHandler:gFrameHandler];
@@ -8668,6 +8794,7 @@ static void setupRfbEventHandlers(void) {
 }
 
 static rfbBool tvCheckPasswordByList(rfbClientPtr cl, const char *passwd, int len) {
+    if (!tvServiceAllowed()) return FALSE;
     // Check if client host is blocked
     if (gBlockedHosts && cl && cl->host) {
         NSString *host = [NSString stringWithUTF8String:cl->host];
@@ -8681,7 +8808,7 @@ static rfbBool tvCheckPasswordByList(rfbClientPtr cl, const char *passwd, int le
         }
     }
 
-    rfbBool rc = rfbCheckPasswordByList(cl, passwd, len);
+    rfbBool rc = rfbCheckPasswordByList(cl, passwd, len) && tvServiceAllowed();
 
     TVClientState *st = tvGetClientState(cl);
     NSString *updateKey = nil;
@@ -9226,6 +9353,7 @@ int main(int argc, const char *argv[]) {
         tvInstallBKSFrontmostMonitor();
         tvEnsureKeeperAtStartup();
         tvStartWiFiIPWatchdog();
+        tvStartLicenseExpiryWatchdog();
     }
 
     CFRunLoopRun();

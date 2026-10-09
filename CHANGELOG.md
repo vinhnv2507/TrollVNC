@@ -1,5 +1,16 @@
 # Changelog
 
+## [4.32] - 2026-10-09
+
+- Enforce trial/license deadlines during live use. Disconnect viewers, stop
+  AutoClickJS and release protection/input when the deadline is reached, without
+  depending on PC requests or reopening the app.
+- Interrupt CPU-only JavaScript loops, guard native actions before execution,
+  and stop capture after expiry. Keep activation/status reachable for renewal.
+- Refresh trial countdowns, deny expired signed licenses without a fresh trial,
+  and prevent wall-clock rollback from extending a running session.
+- Add native policy and JavaScriptCore regression checks to all release builds.
+
 ## [4.29] - 2026-10-07
 
 - Keep screen capture running for on-device JavaScript automation even with

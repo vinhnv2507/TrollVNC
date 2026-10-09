@@ -96,6 +96,13 @@ jobs:
           clang++ -std=c++17 -fobjc-arc -framework Foundation -Wall -Wextra -Werror tests/update_ipc.mm -o /tmp/controlios-update-ipc-test
           /tmp/controlios-update-ipc-test
 
+      - name: Test live license expiry and JavaScript interruption
+        run: |
+          clang++ -std=c++17 -Wall -Wextra -Werror tests/license_policy.cpp -o /tmp/controlios-license-policy-test
+          /tmp/controlios-license-policy-test
+          clang++ -std=c++17 -fobjc-arc -framework Foundation -framework JavaScriptCore -pthread -Wall -Wextra -Werror tests/license_execution.mm -o /tmp/controlios-license-execution-test
+          /tmp/controlios-license-execution-test
+
       - name: Install dependencies
         run: |
           # Install xcbeautify for build output formatting
