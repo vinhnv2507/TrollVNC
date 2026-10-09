@@ -521,6 +521,31 @@ class DevicePool:
 
         self._call_coro(run())
 
+    def check_license(self, key: str, on_done) -> None:
+        if not self._loop:
+            raise RuntimeError("Kênh kết nối chưa khởi động")
+        async def run():
+            try:
+                status = await self._channel(key).license_status()
+                on_done(key, status, "")
+            except Exception as exc:
+                on_done(key, None, str(exc))
+        self._call_coro(run())
+
+    def activate_license(self, key: str, license_key: str, on_done) -> None:
+        if not self._loop:
+            raise RuntimeError("Kênh kết nối chưa khởi động")
+        async def run():
+            try:
+                status = await self._channel(key).activate_license(license_key)
+                # No framebuffer connection is required to activate; reconnect
+                # the selected device only after the iPhone confirms success.
+                self._reconnect_now([key])
+                on_done(key, status, "")
+            except Exception as exc:
+                on_done(key, None, str(exc))
+        self._call_coro(run())
+
     def _bulk_app_action(self, keys: Iterable[str], describe, action,
                          on_event=None, on_done=None) -> None:
         """Chạy một thao tác app trên nhiều máy rồi **tổng kết lại**.

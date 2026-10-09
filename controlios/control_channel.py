@@ -18,6 +18,7 @@ import base64
 import json
 import logging
 import tempfile
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
@@ -64,6 +65,45 @@ class NotPatchedError(ControlError):
 
 class UnauthorizedError(ControlError):
     """Sai token."""
+
+
+@dataclass(frozen=True)
+class LicenseStatus:
+    state: str
+    udid: str
+    expiry: int = 0
+    remaining: int = 0
+
+    @property
+    def description(self) -> str:
+        if self.state == "valid":
+            return "Đã kích hoạt"
+        if self.state == "trial":
+            return f"Dùng thử: còn {self.remaining // 60}:{self.remaining % 60:02d}"
+        return "Chưa kích hoạt / đã hết hạn"
+
+    @property
+    def expires_text(self) -> str:
+        if self.state != "valid":
+            return "—"
+        return datetime.fromtimestamp(self.expiry).strftime("%d/%m/%Y %H:%M") if self.expiry else "Vĩnh viễn"
+
+
+def parse_license_status(text: str) -> LicenseStatus:
+    parts = text.strip().split()
+    if len(parts) < 2 or parts[0] != "OK" or parts[1] not in {"valid", "trial", "invalid"}:
+        raise ControlError("Không đọc được trạng thái bản quyền từ iPhone")
+    fields = dict(p.split("=", 1) for p in parts[2:] if "=" in p)
+    try:
+        expiry = int(fields.get("exp", "0"))
+        remaining = int(fields.get("remaining", "0"))
+        if expiry < 0 or remaining < 0:
+            raise ValueError()
+        if parts[1] == "valid" and expiry:
+            datetime.fromtimestamp(expiry)  # Reject an unrenderable remote date.
+        return LicenseStatus(parts[1], fields.get("udid", ""), expiry, remaining)
+    except (ValueError, OverflowError, OSError):
+        raise ControlError("Trạng thái bản quyền iPhone trả về không hợp lệ") from None
 
 
 def _exc_detail(exc: BaseException) -> str:
@@ -226,6 +266,57 @@ class ControlChannel:
         text = data.decode("utf-8", errors="replace")
         self._raise_for_error(text, line)
         return text
+
+    async def license_status(self) -> LicenseStatus:
+        try:
+            return parse_license_status(await self.command("license"))
+        except NotPatchedError:
+            raise ControlError("iOS chưa hỗ trợ bản quyền; cập nhật ControlIOS 4.33 trở lên để nhập key qua LAN") from None
+
+    async def activate_license(self, license_key: str) -> LicenseStatus:
+        data = license_key.strip().encode("utf-8")
+        if not data or len(data) > 16384:
+            raise ControlError("Key phải có nội dung và không vượt quá 16 KB")
+        # The key is a framed body, never a command-line argument. This avoids
+        # the iOS command header's 1024-byte limit and keeps keys out of errors.
+        writer = None
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(self.host, self.port), self.timeout)
+            writer.write(f"{self._auth_prefix()}activate {len(data)}\n".encode() + data)
+            await asyncio.wait_for(writer.drain(), self.timeout)
+            response = (await asyncio.wait_for(reader.read(), max(15, self.timeout))).decode("utf-8", errors="replace")
+        except (OSError, asyncio.TimeoutError):
+            raise ControlError("Chưa nhận được xác nhận kích hoạt. Bấm Kiểm tra trạng thái trước khi thử lại") from None
+        finally:
+            if writer:
+                writer.close()
+                try:
+                    await asyncio.wait_for(writer.wait_closed(), 1)
+                except Exception:
+                    writer.transport.abort()
+        reasons = {
+            "LicenseSignature": "Key có chữ ký không hợp lệ",
+            "LicenseDeviceMismatch": "Key được cấp cho thiết bị khác; kiểm tra lại UDID",
+            "LicenseExpired": "Key đã hết hạn sử dụng",
+            "LicenseTokenMismatch": "Key không khớp cấu hình kết nối hiện tại; cần cấp lại key phù hợp",
+            "LicenseFormat": "Chuỗi key sai định dạng",
+            "LicensePayload": "Key thiếu hoặc sai thông tin kích hoạt",
+            "LicenseSize": "Key vượt giới hạn kích thước",
+            "LicenseIncomplete": "Truyền key chưa hoàn tất; hãy thử lại",
+            "LicenseSaveFailed": "iPhone không lưu được key",
+            "Unknown": "Cần cập nhật ControlIOS 4.33 trở lên để nhập key qua Manager",
+            "NotActivated": "Bản iOS hiện tại chưa nhận key qua LAN khi hết dùng thử; cập nhật 4.33 trở lên",
+        }
+        if response.startswith("ERR "):
+            code = response.strip().split()[1]
+            if code in reasons:
+                raise ControlError(reasons[code])
+            self._raise_for_error(response, "activate")
+        status = parse_license_status(response)
+        if status.state != "valid":
+            raise ControlError("iPhone chưa xác nhận key hợp lệ; bấm Kiểm tra trạng thái")
+        return status
 
     async def _command_with_connect_retry(
             self, line: str, read_timeout: Optional[float] = None,

@@ -3117,6 +3117,7 @@ class MainWindow(QMainWindow):
         install_ipa.triggered.connect(self._install_ipa)
         update_ios = file_menu.addAction("Cập nhật ControlIOS qua LAN…")
         update_ios.triggered.connect(self._update_ios)
+        file_menu.addAction("Kích hoạt bản quyền qua LAN…").triggered.connect(lambda: self._activate_ios())
         file_menu.addAction("PC → Ảnh iOS").triggered.connect(self._push_photo)
         # Alias rõ ràng cho việc duyệt và tải dữ liệu từ iOS (giữ nguyên hành vi
         # cũ của nút iOS → PC nhưng không chiếm thêm chỗ trên thanh chính).
@@ -3442,6 +3443,8 @@ class MainWindow(QMainWindow):
         multi_action.triggered.connect(
             lambda _checked=False, keys=list(targets): self._open_multi_detail(keys)
         )
+        menu.addAction("Kích hoạt bản quyền qua LAN…").triggered.connect(
+            lambda _checked=False, keys=list(targets): self._activate_ios(keys))
         menu.addSeparator()
         apps_menu = menu.addMenu("Ứng dụng")
         apps_action = apps_menu.addAction("Nạp ứng dụng đã cài…")
@@ -4216,6 +4219,26 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(
             f"{label} độ sáng {repeat} nấc trên {len(targets)} máy", 4000
         )
+
+    def _activate_ios(self, targets=None) -> None:
+        dialog = getattr(self, "activation_dialog", None)
+        if dialog is not None and (dialog.isVisible() or dialog.pending):
+            dialog.showNormal()
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        # Expired devices have no live framebuffer; select by registry/grid,
+        # never filter targets by VNC connection state.
+        if targets is None:
+            targets = list(self.grid.selection) or ([self.detail.key] if self.detail.key else [])
+        devices = [d for d in self.registry.devices if d.key in targets]
+        if not devices:
+            QMessageBox.information(self, "Chưa chọn máy", "Chọn thiết bị ở lưới, kể cả máy đã hết dùng thử.")
+            return
+        from .activation import ActivationDialog
+        self.activation_dialog = ActivationDialog(self.pool, devices, self)
+        self.activation_dialog.activated.connect(lambda _key: self._refresh_device_names())
+        self.activation_dialog.show()
 
     def _update_ios(self) -> None:
         dialog = getattr(self, "ios_update_dialog", None)

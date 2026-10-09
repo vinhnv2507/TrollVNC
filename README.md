@@ -10,6 +10,12 @@ hình vừa *bơm* được thao tác chuột/phím — không cần CTRIOS view
 Nút **Shopee** mở bảng lưu cookie và proxy riêng từng tài khoản, kiểm tra đơn
 gần đây và voucher ngay trong tool. Xem [hướng dẫn bảng Shopee](docs/shopee-pc.md).
 
+Manager CTLIOS 0.2.43 có **File… → Kích hoạt bản quyền qua LAN…**, hoặc bấm
+chuột phải vào máy → **Kích hoạt bản quyền qua LAN…**. Chọn máy, copy UDID để
+cấp key, dán key vào dòng tương ứng rồi bấm kích hoạt. iOS cần ControlIOS 4.33
+trở lên; máy đã hết dùng thử vẫn nhập được key mà không cần mở màn hình iPhone.
+Key sai không thay key hiện có. Sau khi kích hoạt, Manager tự thử kết nối lại.
+
 ```powershell
 D:\ControlIOS\.venv\Scripts\python.exe main.py
 ```
