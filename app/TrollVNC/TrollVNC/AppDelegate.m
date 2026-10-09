@@ -94,6 +94,13 @@ static void TVScheduleKeeperCheck(NSTimeInterval delay) {
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
     // Override point for customization after application launch.
+    // A fresh app container gets a new install id. The daemon uses it to keep
+    // the ten-minute trial separate across uninstall/reinstall cycles.
+    NSUserDefaults *installDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.controlios.app"];
+    if (![installDefaults stringForKey:@"InstallID"].length) {
+        [installDefaults setObject:NSUUID.UUID.UUIDString forKey:@"InstallID"];
+        [installDefaults synchronize];
+    }
     [[TVNCServiceCoordinator sharedCoordinator] registerServiceMonitor];
     [[TVNCHotspotManager sharedManager] registerWithName:@"ControlIOS"];
     // Để UIKit dựng xong màn hình trước; socket/SBS tuyệt đối không chặn main thread.

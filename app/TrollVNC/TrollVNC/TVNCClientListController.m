@@ -1399,6 +1399,12 @@ static NSString *const kTVNCLicensePath = @"/var/mobile/Library/controlios/licen
                 status = [NSString stringWithFormat:@"✓ Đã kích hoạt — hạn %@",
                           [f stringFromDate:[NSDate dateWithTimeIntervalSince1970:exp]]];
             }
+        } else if ([reply containsString:@"trial"]) {
+            long long remaining = 0;
+            for (NSString *field in [reply componentsSeparatedByString:@" "])
+                if ([field hasPrefix:@"remaining="])
+                    remaining = [[field substringFromIndex:10] longLongValue];
+            status = [NSString stringWithFormat:@"⚠ Dùng thử — còn %lld phút", (remaining + 59) / 60];
         } else if ([reply containsString:@"invalid"]) {
             status = @"✗ Chưa kích hoạt";
         }
