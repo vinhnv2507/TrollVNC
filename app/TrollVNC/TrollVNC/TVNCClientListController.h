@@ -49,8 +49,6 @@ FOUNDATION_EXPORT void TVNCConfirmFreeRAM(UIViewController *presenter);
 
 @end
 
-/// Tự động chạm: soạn kịch bản (tap/swipe/wait/home…), gửi xuống daemon và
-/// Bật/Tắt. Vòng lặp chạy TRONG DAEMON nên tiếp tục dù thoát app.
 /// On-device health check for manager/server, VNC, control socket and Keeper.
 @interface TVNCDiagnosticsController : UITableViewController
 
@@ -58,6 +56,7 @@ FOUNDATION_EXPORT void TVNCConfirmFreeRAM(UIViewController *presenter);
 
 @end
 
+/// AutoClickJS: editor, local script library, API reference and live on-device logs.
 @interface TVNCAutoClickController : UIViewController
 
 @property(nonatomic, strong) UIColor *primaryColor;

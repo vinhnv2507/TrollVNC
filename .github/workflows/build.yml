@@ -103,6 +103,12 @@ jobs:
           # Install 7zip for compression
           brew install xcbeautify ldid-procursus p7zip make
 
+      - name: Test AutoClickJS examples and syntax checker
+        run: |
+          node tests/autoclickjs.test.cjs
+          clang -fobjc-arc -framework Foundation -framework JavaScriptCore tests/autoclick_syntax.m -o /tmp/controlios-js-syntax-test
+          /tmp/controlios-js-syntax-test
+
       - name: Checkout roothide/theos
         uses: actions/checkout@v4
         with:

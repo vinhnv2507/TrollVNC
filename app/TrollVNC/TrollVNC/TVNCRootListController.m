@@ -284,14 +284,14 @@ NS_INLINE BOOL TVNCIsValidBindHostLiteral(NSString *host) {
                                                                             action:nil];
     self.navigationItem.backBarButtonItem.tintColor = _primaryColor;
 
-    // Nút "Công cụ" (menu): App Data / Tự động chạm / Kích hoạt. Gộp lại cho gọn
+    // Nút "Công cụ" (menu): App Data / AutoClickJS / Kích hoạt.
     // thanh nav. Đặt TRƯỚC nhánh managed để hiện cả ở màn hình quản lý.
     __weak typeof(self) weakSelf = self;
     UIAction *appDataAct = [UIAction actionWithTitle:@"Reset dữ liệu app"
                                                image:[UIImage systemImageNamed:@"externaldrive"]
                                           identifier:nil
                                              handler:^(__kindof UIAction *a) { [weakSelf showAppData]; }];
-    UIAction *autoAct = [UIAction actionWithTitle:@"Tự động chạm"
+    UIAction *autoAct = [UIAction actionWithTitle:@"AutoClickJS"
                                             image:[UIImage systemImageNamed:@"hand.tap"]
                                        identifier:nil
                                           handler:^(__kindof UIAction *a) { [weakSelf showAutoClick]; }];

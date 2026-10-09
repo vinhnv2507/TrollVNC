@@ -6584,9 +6584,14 @@ static BOOL tvSaveScreenshot(NSString *path) {
 // Cài API native cho JS (kiểu AutoTouch). gen bắt trong block.
 static void tvInstallJSApi(JSContext *ctx, STHIDEventGenerator *gen) {
     ctx.exceptionHandler = ^(JSContext *c, JSValue *e) {
+        c.exception = e;
         NSString *m = [e toString];
         if (![m containsString:@"__STOP__"]) {
-            tvAutoLog([@"⚠ lỗi: " stringByAppendingString:(m ?: @"")]);
+            int line = [[e valueForProperty:@"line"] toInt32];
+            NSString *source = [[e valueForProperty:@"sourceURL"] toString];
+            tvAutoLog([NSString stringWithFormat:@"⚠ lỗi%@ [%@]: %@",
+                line > 0 ? [NSString stringWithFormat:@" dòng %d", line] : @"",
+                source.length && ![source isEqualToString:@"undefined"] ? source : @"AutoClickJS", m ?: @""]);
             TVLog(@"Auto-JS lỗi: %@", m);
         }
     };
@@ -6834,31 +6839,31 @@ static NSString *const kAutoPrelude =
 static NSString *tvUserPreludePath(void) { return @"/var/mobile/Library/controlios/prelude.js"; }
 
 static void tvAutoStart(void) {
-    if (gAutoRunning.load())
-        return;
     NSString *script = gAutoScript ?: @"";
     if (script.length == 0)
         return;
+    if (gAutoRunning.exchange(true))
+        return; // Mark before dispatch so concurrent Start commands cannot queue two runs.
     gAutoStop.store(false);
     if (!gAutoQueue)
         gAutoQueue = dispatch_queue_create("com.controlios.autoclick", DISPATCH_QUEUE_SERIAL);
     dispatch_async(gAutoQueue, ^{
         @autoreleasepool {
-            gAutoRunning.store(true);
             // Auto-click OCR/color/image reads need fresh frames even when
             // there are no PC viewers. Capture transitions stay on main.
             tvRefreshCaptureDemand();
             gAutoTrace.store(true); // mỗi lần chạy mặc định ghi tiến trình
             JSContext *ctx = [[JSContext alloc] init];
             tvInstallJSApi(ctx, [STHIDEventGenerator sharedGenerator]);
-            [ctx evaluateScript:kAutoPrelude]; // hàm tiện ích (swipeUp, tapText, retry…)
+            [ctx evaluateScript:kAutoPrelude withSourceURL:[NSURL URLWithString:@"controlios://builtins.js"]];
             NSString *userLib = [NSString stringWithContentsOfFile:tvUserPreludePath()
                                                           encoding:NSUTF8StringEncoding error:NULL];
-            if (userLib.length)
-                [ctx evaluateScript:userLib]; // thư viện hàm PC đẩy xuống (không cần cài lại)
+            if (userLib.length && !ctx.exception)
+                [ctx evaluateScript:userLib withSourceURL:[NSURL fileURLWithPath:tvUserPreludePath()]];
             tvAutoLog(@"▶ bắt đầu");
             TVLog(@"Auto-JS: chạy");
-            [ctx evaluateScript:script]; // lỗi/dừng -> exceptionHandler nuốt gọn
+            if (!ctx.exception && !gAutoStop.load())
+                [ctx evaluateScript:script withSourceURL:[NSURL URLWithString:@"controlios://AutoClickJS.js"]];
             gAutoRunning.store(false);
             tvRefreshCaptureDemand();
             tvAutoLog(@"■ dừng");
@@ -6871,14 +6876,16 @@ static void tvAutoStop(void) {
     gAutoStop.store(true);
 }
 
-static void tvAutoSetScript(NSString *script) {
-    gAutoScript = [script copy];
+static BOOL tvAutoSetScript(NSString *script) {
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:[tvAutoScriptPath() stringByDeletingLastPathComponent]
    withIntermediateDirectories:YES
                     attributes:nil
                          error:NULL];
-    [script writeToFile:tvAutoScriptPath() atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    if (![script writeToFile:tvAutoScriptPath() atomically:YES encoding:NSUTF8StringEncoding error:NULL])
+        return NO;
+    gAutoScript = [script copy];
+    return YES;
 }
 
 static void tvAutoLoadFromDisk(void) {
@@ -7742,9 +7749,19 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         if (!script) {
             resp = [@"ERR BadScript\n" dataUsingEncoding:NSUTF8StringEncoding];
         } else {
-            tvAutoSetScript(script);
-            resp = [@"OK\n" dataUsingEncoding:NSUTF8StringEncoding];
+            resp = [(tvAutoSetScript(script) ? @"OK\n" : @"ERR SaveScript\n") dataUsingEncoding:NSUTF8StringEncoding];
         }
+    } else if ([cmd isEqualToString:@"autoreload"]) {
+        // The iOS editor writes the complete file atomically. Never send long
+        // source through the 1024-byte command line, or replace a running script.
+        NSString *path = @"/var/mobile/Media/ControlIOS/AutoClickJS/current.js";
+        NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:NULL];
+        NSString *script = [attrs[NSFileSize] unsignedLongLongValue] <= 1024 * 1024
+            ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] : nil;
+        NSString *reply = gAutoRunning.load() ? @"ERR AlreadyRunning\n" :
+            [attrs[NSFileSize] unsignedLongLongValue] > 1024 * 1024 ? @"ERR ScriptTooLarge\n" :
+            !script.length ? @"ERR NoScript\n" : tvAutoSetScript(script) ? @"OK\n" : @"ERR SaveScript\n";
+        resp = [reply dataUsingEncoding:NSUTF8StringEncoding];
     } else if ([cmd isEqualToString:@"autostart"]) {
         tvAutoStart();
         resp = [(gAutoScript.length == 0 ? @"ERR NoScript\n"

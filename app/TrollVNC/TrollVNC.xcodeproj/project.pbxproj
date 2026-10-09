@@ -51,6 +51,12 @@
 		CC91EF902E6C2208002F5B2A /* TVNCClientListController.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF8F2E6C2208002F5B2A /* TVNCClientListController.m */; };
 		CC91EF932E6CA6C5002F5B2A /* TVNCClientCell.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF922E6CA6C5002F5B2A /* TVNCClientCell.m */; };
 		CC91EF972E6EF165002F5B2A /* TVNCListItemsController.m in Sources */ = {isa = PBXBuildFile; fileRef = CC91EF962E6EF165002F5B2A /* TVNCListItemsController.m */; };
+		AC4300000000000000000004 /* TVNCAutoClickController.m in Sources */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000001; };
+		AC4300000000000000000005 /* TVNCAutoClickController.m in Sources */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000001; };
+		AC4300000000000000000006 /* AutoClickJS.json in Resources */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000002; };
+		AC4300000000000000000007 /* AutoClickJS.json in Resources */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000002; };
+		AC4300000000000000000008 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000003; };
+		AC4300000000000000000009 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000003; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -101,6 +107,9 @@
 		CC91EF942E6E03BD002F5B2A /* Control.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Control.h; sourceTree = "<group>"; };
 		CC91EF952E6EF165002F5B2A /* TVNCListItemsController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = TVNCListItemsController.h; sourceTree = "<group>"; };
 		CC91EF962E6EF165002F5B2A /* TVNCListItemsController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TVNCListItemsController.m; sourceTree = "<group>"; };
+		AC4300000000000000000001 /* TVNCAutoClickController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TVNCAutoClickController.m; sourceTree = "<group>"; };
+		AC4300000000000000000002 /* AutoClickJS.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AutoClickJS.json; sourceTree = "<group>"; };
+		AC4300000000000000000003 /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,6 +117,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC4300000000000000000008 /* JavaScriptCore.framework in Frameworks */,
 				61C756672E65B72E00B2B371 /* NetworkExtension.framework in Frameworks */,
 				CC1BF93E2F101B2F00111D96 /* SpringBoardServices.tbd in Frameworks */,
 				61C756BE2E65BDAC00B2B371 /* Preferences.tbd in Frameworks */,
@@ -119,6 +129,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC4300000000000000000009 /* JavaScriptCore.framework in Frameworks */,
 				615401BF2EB1180C009FDD6F /* NetworkExtension.framework in Frameworks */,
 				615401C12EB1180C009FDD6F /* Preferences.Sim.tbd in Frameworks */,
 			);
@@ -170,6 +181,7 @@
 		61C756652E65B72E00B2B371 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				AC4300000000000000000003 /* JavaScriptCore.framework */,
 				615EFE9E2F1602D700187EAF /* CoreServices.framework */,
 				61C756662E65B72E00B2B371 /* NetworkExtension.framework */,
 			);
@@ -179,6 +191,8 @@
 		61C756B72E65BDAC00B2B371 /* TrollVNC */ = {
 			isa = PBXGroup;
 			children = (
+				AC4300000000000000000002 /* AutoClickJS.json */,
+				AC4300000000000000000001 /* TVNCAutoClickController.m */,
 				615401CD2EB11954009FDD6F /* Libraries */,
 				615401CC2EB11943009FDD6F /* Resources */,
 				61C756992E65BDAC00B2B371 /* AppDelegate.h */,
@@ -299,6 +313,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC4300000000000000000006 /* AutoClickJS.json in Resources */,
 				615360AA2E65BEFD00643E64 /* Main.storyboard in Resources */,
 				61C756CE2E65BE6F00B2B371 /* LaunchScreen.storyboard in Resources */,
 				61C756B82E65BDAC00B2B371 /* Assets.xcassets in Resources */,
@@ -309,6 +324,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC4300000000000000000007 /* AutoClickJS.json in Resources */,
 				615401C32EB1180C009FDD6F /* Main.storyboard in Resources */,
 				615401C42EB1180C009FDD6F /* LaunchScreen.storyboard in Resources */,
 				615401C52EB1180C009FDD6F /* Assets.xcassets in Resources */,
@@ -363,6 +379,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC4300000000000000000004 /* TVNCAutoClickController.m in Sources */,
 				CC91EF932E6CA6C5002F5B2A /* TVNCClientCell.m in Sources */,
 				61C756BF2E65BDAC00B2B371 /* AppDelegate.m in Sources */,
 				61C756C02E65BDAC00B2B371 /* main.m in Sources */,
@@ -386,6 +403,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC4300000000000000000005 /* TVNCAutoClickController.m in Sources */,
 				615401B02EB1180C009FDD6F /* TVNCClientCell.m in Sources */,
 				615401B12EB1180C009FDD6F /* AppDelegate.m in Sources */,
 				615401B22EB1180C009FDD6F /* main.m in Sources */,
@@ -447,7 +465,7 @@
 					"DEBUG=1",
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.29\\\"",
+					"PACKAGE_VERSION=\\\"4.30\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -467,7 +485,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.29;
+				MARKETING_VERSION = 4.30;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
@@ -501,7 +519,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.29\\\"",
+					"PACKAGE_VERSION=\\\"4.30\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -521,7 +539,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.29;
+				MARKETING_VERSION = 4.30;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
@@ -677,7 +695,7 @@
 					"DEBUG=1",
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.29\\\"",
+					"PACKAGE_VERSION=\\\"4.30\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -697,7 +715,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.29;
+				MARKETING_VERSION = 4.30;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
@@ -731,7 +749,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.29\\\"",
+					"PACKAGE_VERSION=\\\"4.30\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -751,7 +769,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.29;
+				MARKETING_VERSION = 4.30;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
