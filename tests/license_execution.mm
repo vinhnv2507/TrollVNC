@@ -23,6 +23,7 @@ static bool terminate(JSContextRef, void *data) {
 static void testLoop(NSString *source, bool externalStop) {
     JSContext *context = [JSContext new];
     TestRun run;
+    NSLog(@"Testing interrupt: %@, externalStop=%d", source, externalStop);
     TVNCJSExecutionLimit limit(context.JSGlobalContextRef, terminate, &run);
     assert(limit.installed());
     std::thread watchdog;

@@ -9,12 +9,13 @@
 class TVNCJSExecutionLimit {
 public:
     using Callback = bool (*)(JSContextRef, void *);
-    TVNCJSExecutionLimit(JSGlobalContextRef context, Callback callback, void *data) {
-        auto set = reinterpret_cast<Set>(dlsym(RTLD_DEFAULT, "JSContextGroupSetExecutionTimeLimit"));
+    TVNCJSExecutionLimit(JSGlobalContextRef context, Callback callback, void *data)
+        : callback_(callback), data_(data) {
+        set_ = reinterpret_cast<Set>(dlsym(RTLD_DEFAULT, "JSContextGroupSetExecutionTimeLimit"));
         clear_ = reinterpret_cast<Clear>(dlsym(RTLD_DEFAULT, "JSContextGroupClearExecutionTimeLimit"));
-        if (set && clear_) {
+        if (set_ && clear_) {
             group_ = JSContextGetGroup(context);
-            set(group_, 0.1, callback, data);
+            set_(group_, 0.1, check, this);
         }
     }
     ~TVNCJSExecutionLimit() { if (group_) clear_(group_); }
@@ -22,10 +23,21 @@ public:
     TVNCJSExecutionLimit(const TVNCJSExecutionLimit &) = delete;
     TVNCJSExecutionLimit &operator=(const TVNCJSExecutionLimit &) = delete;
 private:
+    static bool check(JSContextRef context, void *data) {
+        auto *limit = static_cast<TVNCJSExecutionLimit *>(data);
+        if (limit->callback_(context, limit->data_)) return true;
+        // Explicitly rearm. Some system WebKit versions leave the watchdog
+        // inactive after a callback returns false, despite the API contract.
+        limit->set_(limit->group_, 0.1, check, limit);
+        return false;
+    }
     using Set = void (*)(JSContextGroupRef, double, Callback, void *);
     using Clear = void (*)(JSContextGroupRef);
     JSContextGroupRef group_ = nullptr;
+    Set set_ = nullptr;
     Clear clear_ = nullptr;
+    Callback callback_;
+    void *data_;
 };
 
 // Keep the original functions and native permission check private to each

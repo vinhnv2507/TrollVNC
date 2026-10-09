@@ -6573,18 +6573,18 @@ static void tvAutoSwipe(STHIDEventGenerator *gen, CGPoint from, CGPoint to, doub
     if (gAutoStop.load() || !tvServiceAllowed()) return;
     if (!std::isfinite(duration) || duration <= 0) duration = 0.3;
     [gen touchDownAtPoints:&from touchCount:1];
+    CGPoint current = from;
     double started = [[NSProcessInfo processInfo] systemUptime];
     while (!gAutoStop.load() && tvServiceAllowed()) {
         double fraction = MIN(1.0, ([[NSProcessInfo processInfo] systemUptime] - started) / duration);
-        CGPoint point = CGPointMake(from.x + (to.x - from.x) * fraction,
+        current = CGPointMake(from.x + (to.x - from.x) * fraction,
                                     from.y + (to.y - from.y) * fraction);
-        [gen _updateTouchPoints:&point count:1];
-        from = fraction >= 1.0 ? to : from;
+        [gen _updateTouchPoints:&current count:1];
         if (fraction >= 1.0) break;
         tvAutoSleep(1.0 / 60.0);
     }
     // Release even if the gesture was interrupted by expiry/Stop.
-    [gen dispatchHandResetEvent];
+    [gen liftUpAtPoints:&current touchCount:1];
 }
 
 // ---- Tìm CHỮ trên màn (OCR + toạ độ) : findText -> tâm ô chứa chuỗi con ----

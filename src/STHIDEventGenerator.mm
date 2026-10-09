@@ -243,6 +243,7 @@ NS_INLINE void _DTXCalcLinearPinchStartEndPoints(CGRect bounds, CGFloat pixelsSc
 #pragma mark - HID Events
 
 - (void)_sendIOHIDKeyboardEvent:(uint32_t)page usage:(uint32_t)usage isKeyDown:(boolean_t)isKeyDown {
+    @synchronized(_activeKeyCodes) {
     if (page != kHIDPage_Telephony) {
         uint64_t keyCode = ((uint64_t)page << 32) | usage;
         NSNumber *nsKeyCode = @(keyCode);
@@ -253,6 +254,7 @@ NS_INLINE void _DTXCalcLinearPinchStartEndPoints(CGRect bounds, CGFloat pixelsSc
         }
     }
     [self __sendIOHIDKeyboardEvent:page usage:usage isKeyDown:isKeyDown];
+    }
 }
 
 - (void)__sendIOHIDKeyboardEvent:(uint32_t)page usage:(uint32_t)usage isKeyDown:(boolean_t)isKeyDown {
@@ -1647,6 +1649,8 @@ static inline uint32_t hidUsageCodeForCharacter(NSString *key) {
 }
 
 - (void)releaseEveryKeys {
+    // Expiry cleanup can race a native key press already in progress.
+    @synchronized(_activeKeyCodes) {
     for (NSNumber *nsKeyCode in _activeKeyCodes) {
         uint64_t keyCode = [nsKeyCode unsignedLongLongValue];
         uint32_t page = (keyCode >> 32);
@@ -1654,6 +1658,7 @@ static inline uint32_t hidUsageCodeForCharacter(NSString *key) {
         [self __sendIOHIDKeyboardEvent:page usage:usage isKeyDown:false];
     }
     [_activeKeyCodes removeAllObjects];
+    }
 }
 
 - (void)hardwareLock {
