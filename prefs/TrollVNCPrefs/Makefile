@@ -11,6 +11,7 @@ BUNDLE_NAME := TrollVNCPrefs
 # TrollVNCPrefs_FILES += GitHubReleaseUpdater.m
 TrollVNCPrefs_FILES += TVNCClientCell.m
 TrollVNCPrefs_FILES += TVNCClientListController.m
+TrollVNCPrefs_FILES += TVNCAutoClickController.m
 TrollVNCPrefs_FILES += TVNCListItemsController.m
 TrollVNCPrefs_FILES += TVNCRootListController.m
 TrollVNCPrefs_FILES += TVNCSliderCell.m
@@ -28,6 +29,7 @@ TrollVNCPrefs_CODESIGN_FLAGS += -S
 endif
 
 TrollVNCPrefs_FRAMEWORKS += UIKit
+TrollVNCPrefs_FRAMEWORKS += JavaScriptCore
 TrollVNCPrefs_PRIVATE_FRAMEWORKS += Preferences
 TrollVNCPrefs_INSTALL_PATH += /Library/PreferenceBundles
 
