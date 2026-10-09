@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.33] - 2026-10-09
+
+- Accept signed license keys from Manager CTLIOS over the authenticated LAN
+  control channel even after trial/license expiry. No viewer is needed.
+- Verify signature, device identity, expiry and connection token before saving
+  a key atomically. Invalid keys preserve the current license.
+- Share signature verification between startup and activation and add native
+  tests for invalid keys, preservation, expiry and renewal.
+
 ## [4.32] - 2026-10-09
 
 - Enforce trial/license deadlines during live use. Disconnect viewers, stop

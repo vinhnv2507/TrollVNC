@@ -102,6 +102,8 @@ jobs:
           /tmp/controlios-license-policy-test
           clang++ -std=c++17 -fobjc-arc -framework Foundation -framework JavaScriptCore -pthread -Wall -Wextra -Werror tests/license_execution.mm -o /tmp/controlios-license-execution-test
           /tmp/controlios-license-execution-test
+          clang++ -std=c++17 -fobjc-arc -framework Foundation -framework Security -Wall -Wextra -Werror tests/license_activation.mm -o /tmp/controlios-license-activation-test
+          /tmp/controlios-license-activation-test
 
       - name: Install dependencies
         run: |

@@ -471,7 +471,7 @@
 					"DEBUG=1",
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.32\\\"",
+					"PACKAGE_VERSION=\\\"4.33\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -491,7 +491,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.32;
+				MARKETING_VERSION = 4.33;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
@@ -525,7 +525,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.32\\\"",
+					"PACKAGE_VERSION=\\\"4.33\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -545,7 +545,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.32;
+				MARKETING_VERSION = 4.33;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
@@ -701,7 +701,7 @@
 					"DEBUG=1",
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.32\\\"",
+					"PACKAGE_VERSION=\\\"4.33\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -721,7 +721,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.32;
+				MARKETING_VERSION = 4.33;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;
@@ -755,7 +755,7 @@
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"THEBOOTSTRAP=1",
 					"THEOS_PACKAGE_SCHEME=\\\"bootstrap\\\"",
-					"PACKAGE_VERSION=\\\"4.32\\\"",
+					"PACKAGE_VERSION=\\\"4.33\\\"",
 				);
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = TrollVNC/Info.plist;
@@ -775,7 +775,7 @@
 					"$(inherited)",
 					"$(PROJECT_DIR)/TrollVNC",
 				);
-				MARKETING_VERSION = 4.32;
+				MARKETING_VERSION = 4.33;
 				PRODUCT_BUNDLE_IDENTIFIER = com.controlios.app;
 				PRODUCT_MODULE_NAME = TrollVNC;
 				PRODUCT_NAME = ControlIOS;

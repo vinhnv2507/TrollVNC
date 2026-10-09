@@ -70,6 +70,7 @@
 #import "TVNCLocalUpdate.h"
 #import "TVNCUpdateIPC.h"
 #import "TVNCLicensePolicy.h"
+#import "TVNCLicenseActivation.h"
 #import "TVNCJSExecutionLimit.h"
 #import <spawn.h>
 #import <sys/wait.h>
@@ -6109,15 +6110,6 @@ static NSString *tvDeviceUDID(void) {
     return cached;
 }
 
-static NSData *tvB64UrlDecode(NSString *s) {
-    NSMutableString *m = [s mutableCopy];
-    [m replaceOccurrencesOfString:@"-" withString:@"+" options:0 range:NSMakeRange(0, m.length)];
-    [m replaceOccurrencesOfString:@"_" withString:@"/" options:0 range:NSMakeRange(0, m.length)];
-    while (m.length % 4)
-        [m appendString:@"="];
-    return [[NSData alloc] initWithBase64EncodedString:m options:0];
-}
-
 // Đọc + kiểm license: chữ ký ECDSA-P256-SHA256 hợp lệ, đúng UDID máy, chưa hết
 // hạn. Đặt gLicenseValid/gLicenseToken/gLicenseExpiry. Gọi lúc khởi động và khi
 // `relicense`.
@@ -6141,65 +6133,15 @@ static void tvLicenseLoad(void) {
         tvTrialLoad();
         return;
     }
-    NSArray<NSString *> *parts = [lic componentsSeparatedByString:@"."];
-    if (parts.count != 2) {
-        TVLog(@"License: sai định dạng");
-        tvTrialLoad();
+    NSString *error = nil;
+    NSDictionary *payload = TVNCVerifyLicense(lic,
+        [NSData dataWithBytes:kLicensePubKey length:sizeof(kLicensePubKey)], tvDeviceUDID(), &error);
+    if (!payload) {
+        TVLog(@"License: %@", error);
         return;
     }
-    NSData *payload = tvB64UrlDecode(parts[0]);
-    NSData *sig = tvB64UrlDecode(parts[1]);
-    if (!payload || !sig) {
-        TVLog(@"License: base64 hỏng");
-        tvTrialLoad();
-        return;
-    }
-
-    NSData *keyData = [NSData dataWithBytes:kLicensePubKey length:sizeof(kLicensePubKey)];
-    NSDictionary *attrs = @{
-        (id)kSecAttrKeyType : (id)kSecAttrKeyTypeECSECPrimeRandom,
-        (id)kSecAttrKeyClass : (id)kSecAttrKeyClassPublic,
-        (id)kSecAttrKeySizeInBits : @256,
-    };
-    SecKeyRef pub = SecKeyCreateWithData((__bridge CFDataRef)keyData,
-                                         (__bridge CFDictionaryRef)attrs, NULL);
-    if (!pub) {
-        TVLog(@"License: dựng khoá công khai lỗi");
-        tvTrialLoad();
-        return;
-    }
-    BOOL sigOK = SecKeyVerifySignature(pub, kSecKeyAlgorithmECDSASignatureMessageX962SHA256,
-                                       (__bridge CFDataRef)payload, (__bridge CFDataRef)sig, NULL);
-    CFRelease(pub);
-    if (!sigOK) {
-        TVLog(@"License: chữ ký KHÔNG hợp lệ");
-        tvTrialLoad();
-        return;
-    }
-
-    NSDictionary *p = [NSJSONSerialization JSONObjectWithData:payload options:0 error:NULL];
-    if (![p isKindOfClass:[NSDictionary class]]) {
-        TVLog(@"License: payload lỗi");
-        tvTrialLoad();
-        return;
-    }
-    if (![p[@"udid"] isKindOfClass:NSString.class] ||
-        ![p[@"exp"] isKindOfClass:NSNumber.class] ||
-        ![p[@"tok"] isKindOfClass:NSString.class] ||
-        [p[@"exp"] doubleValue] < 0 ||
-        [p[@"exp"] doubleValue] != (double)[p[@"exp"] longLongValue]) {
-        TVLog(@"License: thiếu/sai trường udid, exp hoặc tok");
-        return;
-    }
-    NSString *udid = p[@"udid"];
-    long long exp = [p[@"exp"] longLongValue];
-    NSString *tok = p[@"tok"];
-    NSString *devUDID = tvDeviceUDID();
-    if (udid.length == 0 || ![udid isEqualToString:devUDID]) {
-        TVLog(@"License: sai UDID (license=%@, máy=%@)", udid, devUDID);
-        tvTrialLoad();
-        return;
-    }
+    long long exp = [payload[@"exp"] longLongValue];
+    NSString *tok = payload[@"tok"];
     gLicensePolicy.license(exp, [[NSDate date] timeIntervalSince1970],
                            [[NSProcessInfo processInfo] systemUptime]);
     gLicenseExpiry = exp;
@@ -6232,6 +6174,41 @@ static NSData *tvCtlLicenseStatus(void) {
         : [NSString stringWithFormat:@"OK %@ udid=%@ remaining=%lld\n",
            gTrialValid ? @"trial" : @"invalid", udid, gTrialRemaining];
     return [s dataUsingEncoding:NSUTF8StringEncoding];
+}
+
+static NSData *tvCtlActivateLicense(int fd, NSString *sizeText,
+                                   const uint8_t *pending, size_t pendingLength) {
+    NSScanner *scanner = [NSScanner scannerWithString:sizeText];
+    long long size = 0;
+    if (![scanner scanLongLong:&size] || !scanner.isAtEnd || size <= 0 || size > 16384)
+        return [@"ERR LicenseSize\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSMutableData *data = [NSMutableData dataWithLength:(NSUInteger)size];
+    size_t received = MIN(pendingLength, (size_t)size);
+    if (received) memcpy(data.mutableBytes, pending, received);
+    double deadline = [[NSProcessInfo processInfo] systemUptime] + 8.0;
+    while (received < (size_t)size && [[NSProcessInfo processInfo] systemUptime] < deadline) {
+        ssize_t count = recv(fd, (uint8_t *)data.mutableBytes + received, (size_t)size - received, 0);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) break;
+        received += (size_t)count;
+    }
+    if (received != (size_t)size)
+        return [@"ERR LicenseIncomplete\n" dataUsingEncoding:NSUTF8StringEncoding];
+    NSString *license = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding]
+        stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if (!license.length)
+        return [@"ERR LicenseFormat\n" dataUsingEncoding:NSUTF8StringEncoding];
+    std::lock_guard<std::recursive_mutex> guard(gLicenseMutex);
+    tvServiceAllowed();
+    NSString *error = nil;
+    NSDictionary *payload = TVNCActivateLicense(license,
+        [NSData dataWithBytes:kLicensePubKey length:sizeof(kLicensePubKey)],
+        tvDeviceUDID(), gTvCtlToken, gLicensePolicy.observedTime(), tvLicensePath(), &error);
+    if (!payload)
+        return [[NSString stringWithFormat:@"ERR %@\n", error ?: @"LicenseInvalid"]
+            dataUsingEncoding:NSUTF8StringEncoding];
+    tvLicenseLoad();
+    return tvCtlLicenseStatus();
 }
 
 #pragma mark - Auto-click (kịch bản tự chạy trên máy)
@@ -7789,6 +7766,12 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
     // Kích hoạt bản quyền. Cho phép `license` (hỏi trạng thái) và `relicense`
     // (nạp lại sau khi app ghi file license) KỂ CẢ khi chưa kích hoạt — để app
     // kích hoạt được. Mọi lệnh khác đòi license hợp lệ.
+    if ([cmd hasPrefix:@"activate "]) {
+        NSData *reply = tvCtlActivateLicense(cfd, [cmd substringFromIndex:9], pending, pendingLength);
+        tvCtlWriteAll(cfd, reply.bytes, reply.length);
+        close(cfd);
+        return;
+    }
     if ([cmd isEqualToString:@"license"]) {
         NSData *st = tvCtlLicenseStatus();
         tvCtlWriteAll(cfd, st.bytes, st.length);
