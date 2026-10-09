@@ -71,6 +71,12 @@ a = Analysis(
 # Explicit binaries have priority only after duplicate destinations are removed.
 a.binaries = [entry for entry in a.binaries
               if Path(entry[0]).name.casefold() not in qt_runtime_names]
+# Qt 6.11 imports the unversioned Windows ICU API from System32/icuuc.dll.
+# Dependency discovery may find an unrelated ICU 78 DLL on PATH instead;
+# that library exports suffixed names (ucnv_open_78) and prevents QtCore from
+# loading. Leave this operating-system DLL to the Windows loader.
+a.binaries = [entry for entry in a.binaries
+              if Path(entry[0]).name.casefold() != 'icuuc.dll']
 for runtime_name in sorted(qt_runtime_names):
     runtime_path = pyside_dir / runtime_name
     a.binaries.append((runtime_path.name, str(runtime_path), 'BINARY'))
