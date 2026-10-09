@@ -51,6 +51,10 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
 @property(nonatomic, strong) UIButton *stopButton;
 @property(nonatomic, strong) UIButton *logButton;
 @property(nonatomic, strong) UISegmentedControl *tabs;
+@property(nonatomic, strong) NSLayoutConstraint *tabsHeight;
+@property(nonatomic, strong) UIStackView *controls;
+@property(nonatomic, strong) NSLayoutConstraint *controlsHeight;
+@property(nonatomic, strong) NSMutableArray<UIBarButtonItem *> *keyboardStops;
 @property(nonatomic, strong) UIView *codePane;
 @property(nonatomic, strong) UIView *browserPane;
 @property(nonatomic, strong) UISearchBar *search;
@@ -107,6 +111,8 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     [super viewDidLoad];
     self.title = @"AutoClickJS";
     self.view.backgroundColor = UIColor.systemBackgroundColor;
+    if (self.primaryColor) self.view.tintColor = self.primaryColor;
+    self.keyboardStops = [NSMutableArray new];
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc]
         initWithBarButtonSystemItem:UIBarButtonSystemItemClose target:self action:@selector(dismissSelf)];
     UIBarButtonItem *files = [[UIBarButtonItem alloc] initWithTitle:@"Tệp" style:UIBarButtonItemStylePlain target:nil action:nil];
@@ -159,6 +165,13 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     self.search.delegate = self;
     self.search.placeholder = @"Tìm script, lệnh hoặc hướng dẫn";
     self.search.searchBarStyle = UISearchBarStyleMinimal;
+    UIToolbar *searchKeys = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 0, 320, 44)];
+    UIBarButtonItem *searchStop = [[UIBarButtonItem alloc] initWithTitle:@"Dừng script" style:UIBarButtonItemStylePlain target:self action:@selector(stopScript)];
+    searchStop.tintColor = UIColor.systemRedColor;
+    [self.keyboardStops addObject:searchStop];
+    searchKeys.items = @[[[UIBarButtonItem alloc] initWithTitle:@"Ẩn bàn phím" style:UIBarButtonItemStylePlain target:self action:@selector(hideKeyboard)],
+        [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil], searchStop];
+    self.search.searchTextField.inputAccessoryView = searchKeys;
     self.table = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.table.dataSource = self;
     self.table.delegate = self;
@@ -189,6 +202,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     self.stopButton = [self button:@"Dừng" icon:@"stop.fill" action:@selector(stopScript)];
     self.stopButton.tintColor = UIColor.systemRedColor;
     UIStackView *controls = [[UIStackView alloc] initWithArrangedSubviews:@[save, check, self.runButton, self.stopButton]];
+    self.controls = controls;
     controls.distribution = UIStackViewDistributionFillEqually;
     controls.spacing = 4;
 
@@ -202,6 +216,8 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     self.headerHeights = @[[self.nameButton.heightAnchor constraintEqualToConstant:34], [self.status.heightAnchor constraintEqualToConstant:20]];
     self.positionHeight = [self.position.heightAnchor constraintEqualToConstant:18];
     self.logHeaderHeight = [logHeader.heightAnchor constraintEqualToConstant:32];
+    self.tabsHeight = [self.tabs.heightAnchor constraintEqualToConstant:32];
+    self.controlsHeight = [controls.heightAnchor constraintEqualToConstant:44];
     [NSLayoutConstraint activateConstraints:@[
         [self.nameButton.topAnchor constraintEqualToAnchor:safe.topAnchor constant:2],
         [self.nameButton.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:10],
@@ -214,6 +230,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
         [self.tabs.topAnchor constraintEqualToAnchor:self.status.bottomAnchor constant:6],
         [self.tabs.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:10],
         [self.tabs.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-10],
+        self.tabsHeight,
         [self.codePane.topAnchor constraintEqualToAnchor:self.tabs.bottomAnchor constant:8],
         [self.codePane.leadingAnchor constraintEqualToAnchor:safe.leadingAnchor constant:8],
         [self.codePane.trailingAnchor constraintEqualToAnchor:safe.trailingAnchor constant:-8],
@@ -252,7 +269,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
         [self.logView.bottomAnchor constraintEqualToAnchor:controls.topAnchor constant:-4],
         [controls.leadingAnchor constraintEqualToAnchor:self.nameButton.leadingAnchor],
         [controls.trailingAnchor constraintEqualToAnchor:self.nameButton.trailingAnchor],
-        [controls.heightAnchor constraintEqualToConstant:44], self.bottomConstraint
+        self.controlsHeight, self.bottomConstraint
     ]];
     [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(keyboardChanged:)
         name:UIKeyboardWillChangeFrameNotification object:nil];
@@ -305,6 +322,10 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     [super viewDidLayoutSubviews];
     BOOL compact = self.view.bounds.size.height < 450;
     BOOL keyboard = self.keyboardOverlap > 0;
+    self.tabs.hidden = compact && keyboard;
+    self.tabsHeight.constant = compact && keyboard ? 0 : 32;
+    self.controls.hidden = compact && keyboard;
+    self.controlsHeight.constant = compact && keyboard ? 0 : 44;
     self.nameButton.hidden = compact; self.status.hidden = compact;
     self.headerHeights[0].constant = compact ? 0 : 34;
     self.headerHeights[1].constant = compact ? 0 : 20;
@@ -323,6 +344,10 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
             target:self action:NSSelectorFromString(selectors[i])]];
         if (i + 1 < titles.count) [items addObject:[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil]];
     }
+    UIBarButtonItem *stop = [[UIBarButtonItem alloc] initWithTitle:@"Dừng" style:UIBarButtonItemStylePlain target:self action:@selector(stopScript)];
+    stop.tintColor = UIColor.systemRedColor;
+    [self.keyboardStops addObject:stop];
+    [items insertObject:stop atIndex:items.count - 1];
     bar.items = items;
     return bar;
 }
@@ -482,6 +507,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
 - (void)updateButtons {
     self.runButton.enabled = !self.busy && !self.running && self.connected;
     self.stopButton.enabled = !self.busy && self.running && self.connected;
+    for (UIBarButtonItem *stop in self.keyboardStops) stop.enabled = self.stopButton.enabled;
 }
 - (void)poll {
     if (self.polling || self.busy || UIApplication.sharedApplication.applicationState != UIApplicationStateActive) return;
@@ -557,8 +583,13 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     [self.view layoutIfNeeded];
 }
 - (void)copyLog {
+#ifdef PACKAGE_VERSION
+    NSString *version = [NSString stringWithUTF8String:PACKAGE_VERSION];
+#else
+    NSString *version = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"";
+#endif
     [UIPasteboard generalPasteboard].string = [NSString stringWithFormat:@"ControlIOS %@ · AutoClickJS\n%@\n%@",
-        [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"", self.status.text ?: @"", self.lastLog ?: @""];
+        version, self.status.text ?: @"", self.lastLog ?: @""];
     [self alert:@"Đã chép nhật ký" message:@"Kiểm tra và bỏ dữ liệu riêng tư trước khi gửi cho người hỗ trợ."];
 }
 - (void)clearLog {
