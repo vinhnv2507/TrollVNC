@@ -1,5 +1,6 @@
 #import "TVNCClientListController.h"
 #import <JavaScriptCore/JavaScriptCore.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static NSString *const kJSDirectory = @"/var/mobile/Media/ControlIOS/AutoClickJS";
 static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClickJS/current.js";
@@ -415,7 +416,23 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
 - (void)alert:(NSString *)title message:(NSString *)message {
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:title message:message preferredStyle:UIAlertControllerStyleAlert];
     [alert addAction:[UIAlertAction actionWithTitle:@"Đóng" style:UIAlertActionStyleCancel handler:nil]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [self presentAlert:alert];
+}
+
+- (void)presentAlert:(UIAlertController *)alert {
+    if (!self.view.window) return;
+    UIViewController *current = self.presentedViewController;
+    if ([current isKindOfClass:UIAlertController.class]) {
+        if (current.isBeingDismissed && current.transitionCoordinator) {
+            [current.transitionCoordinator animateAlongsideTransition:nil completion:^(id<UIViewControllerTransitionCoordinatorContext> context) {
+                if (self.view.window) [self presentViewController:alert animated:YES completion:nil];
+            }];
+        } else {
+            [current dismissViewControllerAnimated:YES completion:^{
+                if (self.view.window) [self presentViewController:alert animated:YES completion:nil];
+            }];
+        }
+    } else [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (BOOL)checkSyntax:(BOOL)showSuccess {
@@ -459,7 +476,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     [a addAction:[UIAlertAction actionWithTitle:@"Đi tới" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         [self goToLine:a.textFields.firstObject.text.integerValue];
     }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self presentAlert:a];
 }
 
 - (void)updateButtons {
@@ -595,7 +612,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
         [self updateEditor]; [self saveDraft]; [self loadLibrary]; [self rebuildSections];
         if (completion) dispatch_async(dispatch_get_main_queue(), completion);
     }]];
-    [self presentViewController:alert animated:YES completion:nil];
+    [self presentAlert:alert];
 }
 
 - (void)replaceCode:(NSString *)code name:(NSString *)name identifier:(NSString *)identifier {
@@ -617,7 +634,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
     [a addAction:[UIAlertAction actionWithTitle:@"Lưu trước" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
         dispatch_async(dispatch_get_main_queue(), ^{ [self saveLibraryCopy:NO completion:load]; });
     }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self presentAlert:a];
 }
 
 - (void)loadDaemonScript:(BOOL)explicit {
@@ -661,7 +678,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
 }
 - (void)importScript {
     UIDocumentPickerViewController *picker = [[UIDocumentPickerViewController alloc]
-        initWithDocumentTypes:@[@"public.javascript", @"public.plain-text", @"public.source-code"] inMode:UIDocumentPickerModeImport];
+        initForOpeningContentTypes:@[UTTypeJavaScript, UTTypePlainText, UTTypeSourceCode] asCopy:YES];
     picker.delegate = self; picker.allowsMultipleSelection = NO;
     [self presentViewController:picker animated:YES completion:nil];
 }
@@ -815,7 +832,7 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
         if ([self.scriptID isEqualToString:row[@"id"]]) { self.scriptName = name; [self updateEditor]; [self saveDraft]; }
         [self loadLibrary]; [self rebuildSections];
     }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self presentAlert:a];
 }
 - (void)deleteScript:(NSDictionary *)row {
     UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Xóa script đã lưu?" message:row[@"name"] preferredStyle:UIAlertControllerStyleAlert];
@@ -826,6 +843,6 @@ static NSString *const kJSCurrentFile = @"/var/mobile/Media/ControlIOS/AutoClick
         if ([self.scriptID isEqualToString:row[@"id"]]) { self.scriptID = nil; self.dirty = YES; [self updateEditor]; [self saveDraft]; }
         [self loadLibrary]; [self rebuildSections];
     }]];
-    [self presentViewController:a animated:YES completion:nil];
+    [self presentAlert:a];
 }
 @end

@@ -30,6 +30,7 @@ endif
 
 TrollVNCPrefs_FRAMEWORKS += UIKit
 TrollVNCPrefs_FRAMEWORKS += JavaScriptCore
+TrollVNCPrefs_FRAMEWORKS += UniformTypeIdentifiers
 TrollVNCPrefs_PRIVATE_FRAMEWORKS += Preferences
 TrollVNCPrefs_INSTALL_PATH += /Library/PreferenceBundles
 

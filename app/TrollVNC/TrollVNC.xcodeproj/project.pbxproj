@@ -57,6 +57,8 @@
 		AC4300000000000000000007 /* AutoClickJS.json in Resources */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000002; };
 		AC4300000000000000000008 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000003; };
 		AC4300000000000000000009 /* JavaScriptCore.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC4300000000000000000003; };
+		AC430000000000000000000B /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC430000000000000000000A; };
+		AC430000000000000000000C /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AC430000000000000000000A; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -110,6 +112,7 @@
 		AC4300000000000000000001 /* TVNCAutoClickController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = TVNCAutoClickController.m; sourceTree = "<group>"; };
 		AC4300000000000000000002 /* AutoClickJS.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = AutoClickJS.json; sourceTree = "<group>"; };
 		AC4300000000000000000003 /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		AC430000000000000000000A /* UniformTypeIdentifiers.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = System/Library/Frameworks/UniformTypeIdentifiers.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -117,6 +120,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC430000000000000000000B /* UniformTypeIdentifiers.framework */,
 				AC4300000000000000000008 /* JavaScriptCore.framework in Frameworks */,
 				61C756672E65B72E00B2B371 /* NetworkExtension.framework in Frameworks */,
 				CC1BF93E2F101B2F00111D96 /* SpringBoardServices.tbd in Frameworks */,
@@ -129,6 +133,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AC430000000000000000000C /* UniformTypeIdentifiers.framework */,
 				AC4300000000000000000009 /* JavaScriptCore.framework in Frameworks */,
 				615401BF2EB1180C009FDD6F /* NetworkExtension.framework in Frameworks */,
 				615401C12EB1180C009FDD6F /* Preferences.Sim.tbd in Frameworks */,
@@ -181,6 +186,7 @@
 		61C756652E65B72E00B2B371 /* Frameworks */ = {
 			isa = PBXGroup;
 			children = (
+				AC430000000000000000000A /* UniformTypeIdentifiers.framework */,
 				AC4300000000000000000003 /* JavaScriptCore.framework */,
 				615EFE9E2F1602D700187EAF /* CoreServices.framework */,
 				61C756662E65B72E00B2B371 /* NetworkExtension.framework */,
