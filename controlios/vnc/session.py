@@ -561,7 +561,7 @@ class VncSession:
                     # Manager CTLIOS dùng cùng control token làm mật khẩu RFB.
                     # Viewer VNC bên ngoài không có token nên bị từ chối ở lớp
                     # xác thực trước khi nhận framebuffer.
-                    vnc_password = self.spec.password or self.settings.control_token or None
+                    vnc_password = self.settings.control_token or self.spec.password or None
                     cm = asyncvnc.connect(
                         self.spec.host, self.spec.port, password=vnc_password
                     )
