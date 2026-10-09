@@ -6031,8 +6031,10 @@ static NSString *tvLicensePath(void) {
 
 static NSString *tvTrialPath(void) {
     NSString *installID = nil;
-    CFStringRef value = CFPreferencesCopyAppValue(CFSTR("InstallID"), CFSTR("com.controlios.app"));
-    if (value) installID = [(__bridge NSString *)value copy];
+    CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("InstallID"), CFSTR("com.controlios.app"));
+    if (value && CFGetTypeID(value) == CFStringGetTypeID())
+        installID = [(__bridge NSString *)value copy];
+    if (value) CFRelease(value);
     if (installID.length) {
         NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef-"];
         installID = [[installID componentsSeparatedByCharactersInSet:[allowed invertedSet]] componentsJoinedByString:@""];
