@@ -1,5 +1,5 @@
 {
-  "back": "swipe 0.003 0.5 0.88 0.5 0.35\nwait 0.25",
+  "back": "navigateback\nwait 0.25",
   "home": "button home\nwait 0.7",
   "switcher": "button home\nwait 0.12\nbutton home\nwait 1.0",
   "lock": "button power\nwait 0.5",

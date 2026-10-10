@@ -452,6 +452,33 @@ class VncSession:
             await asyncio.sleep(hold)
         self.mouse_up(x2, y2)
 
+    async def edge_back(self) -> None:
+        """A continuous edge gesture with a distinct touch-began event.
+
+        Starting at zero and moving a large distance in the same event-loop
+        turn can look like an ordinary page swipe to an app's edge recognizer.
+        Keep the first point inside the screen, let touch-began settle, then
+        send a finer path. Always release if Stop interrupts the gesture.
+        """
+        if not self._client:
+            return
+        width, height = self._client.video.width, self._client.video.height
+        if width < 3 or height < 2:
+            raise ConnectionError("Chưa có kích thước màn hình để quay lại")
+        start_x = min(width - 2, max(1, round(width * 0.003)))
+        end_x = min(width - 1, max(start_x + 1, round(width * 0.88)))
+        y = height // 2
+        current_x = start_x
+        self.mouse_down(start_x, y)
+        try:
+            await asyncio.sleep(0.08)
+            for index in range(1, 33):
+                current_x = round(start_x + (end_x - start_x) * index / 32)
+                self.mouse_move(current_x, y)
+                await asyncio.sleep(0.5 / 32)
+        finally:
+            self.mouse_up(current_x, y)
+
     def scroll(self, x: int, y: int, dx: int = 0, dy: int = 0) -> None:
         """Lăn chuột tại (x,y). dy > 0 là lăn lên, dx > 0 là lăn sang phải.
 

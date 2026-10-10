@@ -147,6 +147,11 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
         hold = _seconds(args[5], line_no) if len(args) == 6 else 0.0
         return Step(op, coords + (duration, hold), line_no=line_no), index
 
+    if op == "navigateback":
+        if args:
+            raise ScriptError(line_no, "cú pháp: navigateback")
+        return Step(op, line_no=line_no), index
+
     if op == "controlcenter":
         if args:
             raise ScriptError(line_no, "cú pháp: controlcenter")
@@ -269,7 +274,7 @@ def _statement(line_no: int, text: str, index: int, gestures: Dict[str, str],
         delay = _seconds(args[1], line_no) if len(args) == 2 else 1.0
         return Step(op, (int(args[0]), delay), line_no=line_no), index
 
-    known = ", ".join(["tap", "button", "swipe", "controlcenter", "text", "key", "wait", "shot",
+    known = ", ".join(["tap", "button", "swipe", "navigateback", "controlcenter", "text", "key", "wait", "shot",
                        "repeat", "retry", "brightness", "volume", "launchapp",
                        "killapp", "freeram", "killallapps", "restartapp", "openurl", "openurlin",
                        "clipboard", "savephoto", "wipeapp", "snapshot",
@@ -412,6 +417,8 @@ def describe(steps: Sequence[Step]) -> List[str]:
                     f"{indent}vuốt ({x1:.0%},{y1:.0%}) → ({x2:.0%},{y2:.0%}) "
                     f"trong {duration}s{held}"
                 )
+            elif step.op == "navigateback":
+                out.append(f"{indent}quay lại: lịch sử Safari hoặc cử chỉ mép trái trong app khác")
             elif step.op == "controlcenter":
                 out.append(f"{indent}mở Trung tâm điều khiển")
             elif step.op == "freeram":
@@ -488,7 +495,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
     """Chạy kịch bản trên một phiên. Toạ độ tỉ lệ đổi sang pixel theo máy đó.
 
     ``control`` là :class:`~controlios.control_channel.ControlChannel` của đúng
-    máy đó, chỉ cần cho các lệnh app/URL theo bundle id.
+    máy đó, dùng cho các lệnh app/URL và nhận biết app khi quay lại.
     """
 
     client = session._client
@@ -514,6 +521,17 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 await session.swipe(int(x1 * width), int(y1 * height),
                                     int(x2 * width), int(y2 * height), duration,
                                     hold=hold)
+            elif step.op == "navigateback":
+                bundle = await control.frontmost_app() if control is not None else ""
+                if cancel and cancel.is_set():
+                    raise asyncio.CancelledError()
+                if bundle == "com.apple.mobilesafari":
+                    # Send Safari's history shortcut once. Following an
+                    # uncertain swipe with a shortcut could go back twice.
+                    session.press_keys("Super", "[")
+                    await asyncio.sleep(0.05)
+                else:
+                    await session.edge_back()
             elif step.op == "controlcenter":
                 if control is None:
                     raise ConnectionError("lệnh controlcenter cần kênh điều khiển ControlIOS")

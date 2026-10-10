@@ -29,15 +29,15 @@ GESTURES_PATH = PROJECT_ROOT / "config" / "gestures.json"
 
 # Lệnh nguyên thuỷ của kịch bản — macro không được trùng tên, nếu không người
 # dùng sẽ vô tình định nghĩa đè lên `tap` rồi không hiểu vì sao kịch bản sai.
-RESERVED = frozenset({"tap", "button", "swipe", "text", "key", "wait", "shot",
+RESERVED = frozenset({"tap", "button", "swipe", "navigateback", "text", "key", "wait", "shot",
                       "repeat", "macro"})
 
 # Mỗi macro là kịch bản con; {name} là tham số truyền vào.
 DEFAULT_GESTURES: Dict[str, str] = {
-    # Standard iOS navigation gesture, starting inside the left screen edge.
-    # Apps must support edge navigation; iOS has no universal Back key.
+    # Safari uses its history shortcut; other apps use an edge gesture.
+    # iOS has no universal Back key for every app.
     "back": (
-        "swipe 0.003 0.5 0.88 0.5 0.35\n"
+        "navigateback\n"
         "wait 0.25"
     ),
     # TrollVNC map chuột phải thành nút Home, nên đây là một cú bấm nút thật —
@@ -135,6 +135,10 @@ def load_gestures(path: Path | str = GESTURES_PATH) -> Dict[str, str]:
                 raise ValueError(
                     f"{path}: {name!r} là lệnh có sẵn, không đặt tên macro trùng"
                 )
+            # Old exported defaults must not pin the broken edge gesture
+            # forever after upgrading. Other custom macros remain untouched.
+            if name.lower() == "back" and body.strip() == "swipe 0.003 0.5 0.88 0.5 0.35\nwait 0.25":
+                body = DEFAULT_GESTURES["back"]
             gestures[name.lower()] = body
     return gestures
 
