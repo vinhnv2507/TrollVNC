@@ -58,7 +58,10 @@
 #import <mach/mach_time.h>
 #import <malloc/malloc.h>
 #import <mutex>
+#import <condition_variable>
+#import <chrono>
 #import <vector>
+#import "TVNCNavigationBack.h"
 
 #import <Photos/Photos.h>
 
@@ -2132,6 +2135,38 @@ static const BOOL cParallelHashOnFlush = YES; // use parallel hashing at flush t
 #pragma mark - Frame Handlers
 
 static std::atomic<int> gRotationQuad(0); // 0=0°, 1=90°, 2=180°, 3=270° (clockwise)
+// Copy a fresh, unscaled header while its capture buffer is locked. Never
+// inspect the shared viewer buffer, which can be resized/freed on rotation.
+static std::mutex gBackCaptureMutex, gBackCommandMutex;
+static std::condition_variable gBackCaptureReady;
+static std::atomic<bool> gBackCaptureRequested{false};
+static TVNCBackHeader gBackHeader;
+static int gBackCaptureRotation = 0, gBackSourceWidth = 0, gBackSourceHeight = 0;
+
+static void tvBackCaptureHeader(const vImage_Buffer &stage, int rotation, int sourceWidth, int sourceHeight) {
+    if (!gBackCaptureRequested.load(std::memory_order_acquire)) return;
+    std::lock_guard<std::mutex> lock(gBackCaptureMutex);
+    if (!gBackCaptureRequested.load(std::memory_order_relaxed)) return;
+    TVNCBackHeader header;
+    header.screenWidth = (int)stage.width;
+    header.screenHeight = (int)stage.height;
+    int side = std::min(header.screenWidth, header.screenHeight);
+    header.width = (int)(side * .20);
+    header.height = (int)(side * .34);
+    header.rgb.resize((size_t)header.width * header.height);
+    for (int y = 0; y < header.height; ++y) {
+        const uint8_t *row = (const uint8_t *)stage.data + y * stage.rowBytes;
+        for (int x = 0; x < header.width; ++x)
+            header.rgb[y * header.width + x] = ((uint32_t)row[x * 4 + 2] << 16) |
+                ((uint32_t)row[x * 4 + 1] << 8) | row[x * 4];
+    }
+    gBackHeader = std::move(header);
+    gBackCaptureRotation = rotation;
+    gBackSourceWidth = sourceWidth;
+    gBackSourceHeight = sourceHeight;
+    gBackCaptureRequested.store(false, std::memory_order_release);
+    gBackCaptureReady.notify_one();
+}
 static void *gRotateScratch = NULL;       // rotation scratch (for 90°/270°)
 static size_t gRotateScratchSize = 0;     // bytes
 static void *gScaleTemp = NULL;           // vImage scale temp buffer
@@ -2526,6 +2561,8 @@ static void handleFramebuffer(CMSampleBufferRef sampleBuffer) {
                      (size_t)rotBuf.height);
 #endif
     }
+
+    tvBackCaptureHeader(stage, rotQ, (int)width, (int)height);
 
     // Scale stage to back buffer (tightly packed)
     vImage_Buffer dstBuf = {.data = gBackBuffer,
@@ -6546,6 +6583,53 @@ static void tvAutoTap(STHIDEventGenerator *gen, CGPoint p, NSUInteger fingers) {
     [gen liftUpAtPoints:pts touchCount:fingers];
 }
 
+static NSData *tvCtlNavigateBack(void) {
+    auto reply = [](NSString *text) { return [text dataUsingEncoding:NSUTF8StringEncoding]; };
+    std::unique_lock<std::mutex> commandLock(gBackCommandMutex, std::try_to_lock);
+    if (!commandLock.owns_lock() || gPointerActive.load() || gAutoRunning.load())
+        return reply(@"ERR BackBusy\n");
+    if (gViewOnly || tvReadAccurateLockState(NULL, NULL)) return reply(@"ERR BackLocked\n");
+    NSData *frontmost = tvCtlFrontmostApp();
+    NSString *app = [[NSString alloc] initWithData:frontmost encoding:NSUTF8StringEncoding];
+    if (![app hasPrefix:@"OK "] || [app isEqualToString:@"OK none\n"])
+        return reply(@"ERR FrontmostUnavailable\n");
+
+    TVNCBackHeader header;
+    int rotation, sourceWidth, sourceHeight;
+    {
+        std::unique_lock<std::mutex> lock(gBackCaptureMutex);
+        gBackHeader = {};
+        gBackCaptureRequested.store(true, std::memory_order_release);
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[ScreenCapturer sharedCapturer] forceNextFrameUpdate];
+        });
+        bool ready = gBackCaptureReady.wait_for(lock, std::chrono::seconds(2), [] {
+            return !gBackCaptureRequested.load(std::memory_order_acquire);
+        });
+        gBackCaptureRequested.store(false, std::memory_order_release);
+        if (!ready) return reply(@"ERR BackNoFrame\n");
+        header = std::move(gBackHeader);
+        rotation = gBackCaptureRotation;
+        sourceWidth = gBackSourceWidth; sourceHeight = gBackSourceHeight;
+    }
+    TVNCBackTarget target = TVNCFindBackArrow(header);
+    if (!target.found) return reply(@"OK none\n");
+    int currentRotation = (gOrientationSyncEnabled ? gRotationQuad.load() : 0) & 3;
+    if (currentRotation != rotation || ![frontmost isEqualToData:tvCtlFrontmostApp()] ||
+        gPointerActive.load() || gAutoRunning.load() || !tvServiceAllowed() ||
+        gViewOnly || tvReadAccurateLockState(NULL, NULL)) return reply(@"ERR BackScreenChanged\n");
+    // The snapshot is in UI orientation, before viewer scaling/rotation fixes.
+    // Invert that rotation directly to the physical capture coordinates.
+    TVNCBackTarget physical = TVNCBackPhysicalPoint(target, rotation, sourceWidth, sourceHeight);
+    if (!physical.found) return reply(@"ERR BackNoFrame\n");
+    CGPoint point = CGPointMake(physical.x, physical.y);
+    STHIDEventGenerator *gen = [STHIDEventGenerator sharedGenerator];
+    [gen touchDownAtPoints:&point touchCount:1];
+    @try { usleep(60000); }
+    @finally { [gen liftUpAtPoints:&point touchCount:1]; }
+    return reply(@"OK tapped\n");
+}
+
 static void tvAutoSwipe(STHIDEventGenerator *gen, CGPoint from, CGPoint to, double duration) {
     if (gAutoStop.load() || !tvServiceAllowed()) return;
     if (!std::isfinite(duration) || duration <= 0) duration = 0.3;
@@ -7878,6 +7962,8 @@ void tvCtlHandleConnection(int cfd, struct sockaddr_in caddr) {
         resp = tvCtlRotationLock([cmd substringFromIndex:13]);
     } else if ([cmd isEqualToString:@"frontmost"]) {
         resp = tvCtlFrontmostApp();
+    } else if ([cmd isEqualToString:@"back"]) {
+        resp = tvCtlNavigateBack();
     } else if ([cmd hasPrefix:@"touchlock "]) {
         resp = tvCtlTouchLock([cmd substringFromIndex:10]);
     } else if ([cmd hasPrefix:@"assistivetouch "]) {

@@ -105,6 +105,11 @@ jobs:
           clang++ -std=c++17 -fobjc-arc -framework Foundation -framework Security -Wall -Wextra -Werror tests/license_activation.mm -o /tmp/controlios-license-activation-test
           /tmp/controlios-license-activation-test
 
+      - name: Test native Back arrow recognition and rotation
+        run: |
+          clang++ -std=c++17 -Wall -Wextra -Werror tests/navigation_back.cpp -o /tmp/controlios-back-test
+          /tmp/controlios-back-test
+
       - name: Install dependencies
         run: |
           # Install xcbeautify for build output formatting

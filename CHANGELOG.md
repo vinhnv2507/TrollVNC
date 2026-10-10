@@ -1,5 +1,13 @@
 # Changelog
 
+## [4.34] - 2026-10-10
+
+- Add authenticated `back` navigation for Manager CTLIOS. Recognize the visible
+  leading Back arrow and tap it on the iPhone, including Shopee's account pages.
+- Inspect a fresh, unscaled capture header, independent of viewer thumbnail
+  quality. Reject missing/ambiguous arrows, busy input and changed/locked screens.
+- Add native shape rejection and physical-coordinate rotation regression tests.
+
 ## [4.33] - 2026-10-09
 
 - Accept signed license keys from Manager CTLIOS over the authenticated LAN
