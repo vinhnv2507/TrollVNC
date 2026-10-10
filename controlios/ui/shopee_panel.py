@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import re
+from decimal import Decimal, InvalidOperation
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime
 from PySide6.QtCore import Qt, QThread, Signal, QItemSelectionModel, QPoint
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QDialog, QDialogButtonBox, QFormLayout, QFrame,
     QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMessageBox, QPlainTextEdit,
     QPushButton, QSplitter, QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout,
+    QWidget, QDoubleSpinBox,
 )
 
 from ..shopee import Account, AccountStore, ShopeeClient, ShopeeError, normalize_cookie, normalize_proxy, proxy_label, proxy_assignment
@@ -112,6 +114,158 @@ class CopyTable(QTableWidget):
                 for row in rows))
 
 
+def _voucher_number(value, *, percentage=False):
+    """Read displayed values in old saved results as well as new API results."""
+    text = str(value or "").strip()
+    if percentage:
+        if not text.endswith("%"):
+            return None
+        number = text[:-1].strip().replace(",", ".")
+    else:
+        if not re.search(r"(?:đ|₫|vnd)$", text, re.I):
+            return None
+        number = re.sub(r"(?:đ|₫|vnd)$", "", text, flags=re.I).strip().replace(" ", "")
+        if not re.fullmatch(r"\d+(?:[.,]\d{3})*", number):
+            return None
+        number = number.replace(".", "").replace(",", "")
+    try:
+        result = Decimal(number)
+    except InvalidOperation:
+        return None
+    if not result.is_finite() or result < 0 or (percentage and result > 100):
+        return None
+    return result
+
+
+class VoucherList(QWidget):
+    """One filter/sort view shared by the tab and per-cookie popup."""
+    changed = Signal(int, int)
+    HEADERS = ["Mã voucher", "Tên", "Shop", "Giảm", "Tối đa", "Đơn tối thiểu", "Hết hạn"]
+    KEYS = ("code", "title", "shop", "discount", "cap", "min_spend", "expires")
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.rows = []
+        self._kind = "all"
+        self._ranges = {}
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        toolbar = QHBoxLayout()
+        toolbar.addWidget(QLabel("Loại voucher"))
+        self.kind = QComboBox()
+        for label, value in [("Tất cả", "all"), ("Giảm tiền (đ)", "amount"),
+                             ("Giảm phần trăm (%)", "percentage"), ("Khác / chưa rõ mức giảm", "other")]:
+            self.kind.addItem(label, value)
+        toolbar.addWidget(self.kind)
+        toolbar.addWidget(QLabel("Sắp xếp"))
+        self.sort = QComboBox()
+        for label, value in [("Thứ tự ban đầu", "original"),
+                             ("Giảm tiền: cao → thấp", "amount_desc"), ("Giảm tiền: thấp → cao", "amount_asc"),
+                             ("Giảm %: cao → thấp", "percentage_desc"), ("Giảm %: thấp → cao", "percentage_asc"),
+                             ("Tối đa: cao → thấp", "cap_desc"), ("Tối đa: thấp → cao", "cap_asc")]:
+            self.sort.addItem(label, value)
+        self.sort.setToolTip("Sắp xếp theo giá trị số. Voucher có giá trị tương ứng đứng trước; chưa rõ đứng sau.")
+        toolbar.addWidget(self.sort)
+        reset = QPushButton("Bỏ lọc / sắp xếp")
+        reset.clicked.connect(self.reset)
+        toolbar.addWidget(reset)
+        toolbar.addStretch()
+        layout.addLayout(toolbar)
+        bounds = QHBoxLayout()
+        bounds.addWidget(QLabel("Mức giảm từ"))
+        self.minimum = QDoubleSpinBox()
+        self.maximum = QDoubleSpinBox()
+        for box in (self.minimum, self.maximum):
+            box.setGroupSeparatorShown(True)
+            box.setMinimumWidth(140)
+            box.valueChanged.connect(self._render)
+        bounds.addWidget(self.minimum)
+        bounds.addWidget(QLabel("đến"))
+        bounds.addWidget(self.maximum)
+        self.maximum.setSpecialValueText("Không giới hạn")
+        self.minimum.setToolTip("Chọn Giảm tiền hoặc Giảm phần trăm để lọc khoảng mức giảm, bao gồm hai đầu.")
+        self.maximum.setToolTip("Để 0: không giới hạn mức giảm tối đa.")
+        self.count = QLabel()
+        self.count.setTextFormat(Qt.PlainText)
+        bounds.addWidget(self.count, 1)
+        layout.addLayout(bounds)
+        self.table = ShopeeDialog._table(self.HEADERS)
+        self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        layout.addWidget(self.table)
+        self.kind.currentIndexChanged.connect(self._kind_changed)
+        self.sort.currentIndexChanged.connect(self._render)
+        self._kind_changed()
+
+    def _kind_changed(self):
+        self._ranges[self._kind] = (self.minimum.value(), self.maximum.value())
+        self._kind = self.kind.currentData()
+        percentage = self._kind == "percentage"
+        values = self._ranges.get(self._kind, (0, 0))
+        for box, value in zip((self.minimum, self.maximum), values):
+            box.blockSignals(True)
+            box.setDecimals(2 if percentage else 0)
+            box.setRange(0, 100 if percentage else 1_000_000_000_000)
+            box.setSingleStep(1 if percentage else 1000)
+            box.setSuffix(" %" if percentage else " đ")
+            box.setValue(value)
+            box.setEnabled(self._kind in {"amount", "percentage"})
+            box.blockSignals(False)
+        self._render()
+
+    def reset(self):
+        self._ranges.clear()
+        for widget in (self.kind, self.sort, self.minimum, self.maximum):
+            widget.blockSignals(True)
+        self.kind.setCurrentIndex(0)
+        self.sort.setCurrentIndex(0)
+        self.minimum.setValue(0)
+        self.maximum.setValue(0)
+        for widget in (self.kind, self.sort, self.minimum, self.maximum):
+            widget.blockSignals(False)
+        self._kind_changed()
+
+    def load_rows(self, rows):
+        self.rows = list(rows)
+        self._render()
+
+    def _render(self):
+        visible = []
+        lower, upper = Decimal(str(self.minimum.value())), Decimal(str(self.maximum.value()))
+        invalid = self._kind in {"amount", "percentage"} and upper != 0 and upper < lower
+        for row in self.rows:
+            amount = _voucher_number(row.get("discount"))
+            percentage = _voucher_number(row.get("discount"), percentage=True)
+            kind = "percentage" if percentage is not None else "amount" if amount is not None else "other"
+            if self._kind != "all" and kind != self._kind:
+                continue
+            if self._kind in {"amount", "percentage"}:
+                number = amount if kind == "amount" else percentage
+                if invalid or number < lower or (upper != 0 and number > upper):
+                    continue
+            visible.append((row, amount, percentage, _voucher_number(row.get("cap"))))
+        mode = self.sort.currentData()
+        if mode != "original":
+            field, direction = mode.split("_")
+            index = {"amount": 1, "percentage": 2, "cap": 3}[field]
+            # Missing values always go last, even for ascending order. Equal
+            # values keep the API order; never compare percentages with VND.
+            visible.sort(key=lambda entry: (entry[index] is None,
+                (-entry[index] if direction == "desc" else entry[index]) if entry[index] is not None else Decimal(0)))
+        self.table.setRowCount(0)
+        self.table.setRowCount(len(visible))
+        for index, (row, *_numbers) in enumerate(visible):
+            for column, key in enumerate(self.KEYS):
+                value = str(row.get(key, ""))
+                item = QTableWidgetItem(value)
+                item.setToolTip(value)
+                self.table.setItem(index, column, item)
+        text = f"Hiển thị {len(visible)} / {len(self.rows)} voucher"
+        if invalid:
+            text += " · Mức từ lớn hơn mức đến"
+        self.count.setText(text)
+        self.changed.emit(len(visible), len(self.rows))
+
+
 class ProxyAssignmentDialog(QDialog):
     def __init__(self, total: int, selected: int, parent=None):
         super().__init__(parent)
@@ -185,14 +339,15 @@ class VoucherPopup(QFrame):
         self.title.setTextFormat(Qt.PlainText)
         self.title.setWordWrap(True)
         layout.addWidget(self.title)
-        self.table = ShopeeDialog._table(["Mã voucher", "Tên", "Shop", "Giảm", "Tối đa", "Đơn tối thiểu", "Hết hạn"])
+        self.voucher_list = VoucherList(self)
+        self.table = self.voucher_list.table
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.setColumnWidth(0, 150)
         self.table.setColumnWidth(1, 240)
         self.table.setColumnWidth(2, 120)
         for column in (3, 4, 5):
             self.table.setColumnWidth(column, 100)
-        layout.addWidget(self.table)
+        layout.addWidget(self.voucher_list)
         self.message = QLabel()
         self.message.setTextFormat(Qt.PlainText)
         self.message.setWordWrap(True)
@@ -213,13 +368,7 @@ class VoucherPopup(QFrame):
         vouchers = result.get("vouchers", [])
         identity = result.get("username") or account.label
         self.title.setText(f"Voucher của {identity} — {len(vouchers)} voucher")
-        self.table.setRowCount(len(vouchers))
-        for index, row in enumerate(vouchers):
-            for column, key in enumerate(("code", "title", "shop", "discount", "cap", "min_spend", "expires")):
-                value = str(row.get(key, ""))
-                item = QTableWidgetItem(value)
-                item.setToolTip(value)
-                self.table.setItem(index, column, item)
+        self.voucher_list.load_rows(vouchers)
         if result.get("voucher_error"):
             message = "Voucher: " + result["voucher_error"]
         elif "vouchers" not in result:
@@ -234,7 +383,7 @@ class VoucherPopup(QFrame):
         self.load_account(account)
         screen = QApplication.screenAt(anchor) or QApplication.primaryScreen()
         bounds = screen.availableGeometry()
-        height = min(480, max(230, 160 + 30 * min(10, self.table.rowCount())))
+        height = min(620, max(350, 260 + 30 * min(10, self.table.rowCount())))
         self.resize(min(1080, bounds.width()), min(height, bounds.height()))
         x = max(bounds.left(), min(anchor.x(), bounds.right() - self.width() + 1))
         y = anchor.y()
@@ -300,11 +449,13 @@ class ShopeeDialog(QDialog):
         splitter.addWidget(self.table)
         self.tabs = QTabWidget()
         self.orders = self._table(["Mã đơn / ID", "Mã vận đơn", "Trạng thái", "Người nhận", "Điện thoại", "Địa chỉ", "Sản phẩm", "Link"])
-        self.vouchers = self._table(["Mã voucher", "Tên", "Shop", "Giảm", "Tối đa", "Đơn tối thiểu", "Hết hạn"])
+        self.voucher_list = VoucherList(self)
+        self.vouchers = self.voucher_list.table
         self.notes = QPlainTextEdit()
         self.notes.setReadOnly(True)
         self.tabs.addTab(self.orders, "Đơn gần đây")
-        self.tabs.addTab(self.vouchers, "Voucher hiện có")
+        self.tabs.addTab(self.voucher_list, "Voucher hiện có")
+        self.voucher_list.changed.connect(self._voucher_count_changed)
         self.tabs.addTab(self.notes, "Kết quả / cảnh báo")
         splitter.addWidget(self.tabs)
         splitter.setSizes([350, 300])
@@ -582,10 +733,7 @@ class ShopeeDialog(QDialog):
                       ("tracking", "status", "receiver", "phone", "address", "products", "links")]]
             for column, value in enumerate(values):
                 self.orders.setItem(index, column, QTableWidgetItem(str(value)))
-        self.vouchers.setRowCount(len(vouchers))
-        for index, row in enumerate(vouchers):
-            for column, key in enumerate(("code", "title", "shop", "discount", "cap", "min_spend", "expires")):
-                self.vouchers.setItem(index, column, QTableWidgetItem(str(row.get(key, ""))))
+        self.voucher_list.load_rows(vouchers)
         messages = [result.get("status", "Chưa kiểm tra")]
         if result.get("username"):
             messages.append("Username: " + result["username"])
@@ -597,7 +745,10 @@ class ShopeeDialog(QDialog):
             messages.append("Không có voucher hiện có trong API trả về.")
         self.notes.setPlainText("\n\n".join(messages))
         self.tabs.setTabText(0, f"Đơn gần đây ({len(orders)})")
-        self.tabs.setTabText(1, f"Voucher hiện có ({len(vouchers)})")
+
+    def _voucher_count_changed(self, visible, total):
+        count = str(total) if visible == total else f"{visible}/{total}"
+        self.tabs.setTabText(1, f"Voucher hiện có ({count})")
 
     def _busy(self):
         return self.worker is not None and self.worker.isRunning()

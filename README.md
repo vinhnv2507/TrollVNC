@@ -14,7 +14,10 @@ Tool riêng **CTLIOS Keygen 1.0.0** tạo key theo UDID và thời hạn, có gi
 chọn khoá ký, đọc cấu hình Manager và lấy UDID qua LAN. Xem
 [hướng dẫn tạo key](docs/tao-key-ban-quyen.md).
 
-Manager CTLIOS 0.2.48 dùng icon ControlIOS trên iPhone và có nút
+Manager CTLIOS 0.2.49 thêm lọc voucher theo loại giảm tiền/giảm %, khoảng
+từ–đến và sắp xếp tăng/giảm theo giá trị số, cả trong tab và danh sách xổ xuống.
+
+Manager CTLIOS dùng icon ControlIOS trên iPhone và có nút
 **Quay lại** ở khung xem chính và cửa sổ màn hình lớn. Safari dùng
 Command + [ để về đúng một trang trước. Với Settings, Shopee và app khác, ControlIOS
 4.34 trở lên nhận mũi tên quay lại trên ảnh mới và chạm ngay trên iPhone.
