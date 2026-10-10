@@ -15,8 +15,8 @@ chọn khoá ký, đọc cấu hình Manager và lấy UDID qua LAN. Xem
 [hướng dẫn tạo key](docs/tao-key-ban-quyen.md).
 
 Manager CTLIOS 0.2.48 dùng icon ControlIOS trên iPhone và có nút
-**Quay lại** ở khung xem chính và cửa sổ màn hình lớn. Safari và Settings dùng
-Command + [ để về đúng một trang trước. Với Shopee và app khác, ControlIOS
+**Quay lại** ở khung xem chính và cửa sổ màn hình lớn. Safari dùng
+Command + [ để về đúng một trang trước. Với Settings, Shopee và app khác, ControlIOS
 4.34 trở lên nhận mũi tên quay lại trên ảnh mới và chạm ngay trên iPhone.
 Không có mũi tên hoặc nhận dạng không rõ thì không chạm. Ảnh nhận dạng dùng
 độ phân giải gốc, độc lập với chất lượng thumbnail trong Manager.

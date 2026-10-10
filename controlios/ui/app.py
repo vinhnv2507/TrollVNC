@@ -80,7 +80,7 @@ closeapp
 
 # Bảng lệnh bấm-để-chèn: (mẫu chèn vào ô soạn, mô tả ngắn).
 SCRIPT_COMMANDS = [
-    ("back", "quay lại Safari/Settings; chạm mũi tên trên iPhone với app khác (iOS 4.34+)"),
+    ("back", "quay lại lịch sử Safari; chạm mũi tên trên iPhone trong Settings/app khác (iOS 4.34+)"),
     ("tap 0.5 0.85", "chạm tại toạ độ tỉ lệ (x y, 0..1)"),
     ("swipe 0.5 0.8 0.5 0.2 0.4", "vuốt từ (x1 y1) tới (x2 y2) trong <giây>"),
     ("swipe 0.5 0.99 0.5 0.45 0.35 0.7", "vuốt rồi GIỮ 0.7s trước khi nhả (mở switcher)"),
@@ -2278,7 +2278,7 @@ class DeviceScreenPane(QWidget):
         gesture_row.setContentsMargins(2, 0, 2, 0)
         gesture_row.setSpacing(4)
         for index, (label, gesture, tip) in enumerate([
-            ("← Quay lại", "back", "Safari/Settings: về trang trước. Shopee/app khác: nhận và chạm mũi tên trên iPhone (ControlIOS 4.34+)"),
+            ("← Quay lại", "back", "Safari: về trang trước. Settings/Shopee/app khác: chạm mũi tên trên iPhone (ControlIOS 4.34+)"),
             ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
             ("⇄ App", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
             ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),
@@ -2777,7 +2777,7 @@ class MainWindow(QMainWindow):
         gesture_row.setSpacing(4)
         self.device_gesture_buttons = {}
         for index, (label, gesture, tip) in enumerate([
-            ("← Quay lại", "back", "Safari/Settings: về trang trước. Shopee/app khác: nhận và chạm mũi tên trên iPhone (ControlIOS 4.34+)"),
+            ("← Quay lại", "back", "Safari: về trang trước. Settings/Shopee/app khác: chạm mũi tên trên iPhone (ControlIOS 4.34+)"),
             ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
             ("⇄ App", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
             ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),

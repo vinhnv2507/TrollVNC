@@ -525,8 +525,8 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 bundle = await control.frontmost_app() if control is not None else ""
                 if cancel and cancel.is_set():
                     raise asyncio.CancelledError()
-                if bundle in {"com.apple.mobilesafari", "com.apple.Preferences"}:
-                    # These system apps accept one history/navigation shortcut.
+                if bundle == "com.apple.mobilesafari":
+                    # Safari accepts one history shortcut.
                     # Never follow it with another action that could go back twice.
                     session.press_keys("Super", "[")
                     await asyncio.sleep(0.05)

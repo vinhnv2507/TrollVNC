@@ -34,16 +34,17 @@ class BackGestureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.key_events, [(1, 65515), (1, 91), (0, 91), (0, 65515)])
         control.frontmost_app.assert_awaited_once()
 
-    async def test_settings_sends_one_navigation_shortcut(self):
+    async def test_settings_uses_native_arrow_without_skipping_a_level(self):
         session, server, timestamps = await self.connect(375, 667)
         control = AsyncMock()
         control.frontmost_app.return_value = "com.apple.Preferences"
+        control.navigate_back.return_value = True
         await script.run_on_session(session, script.parse("back"), lambda *args: None,
                                     control=control)
         await asyncio.sleep(.05)
         self.assertEqual(server.pointer_events, [])
-        self.assertEqual(server.key_events, [(1, 65515), (1, 91), (0, 91), (0, 65515)])
-        control.navigate_back.assert_not_awaited()
+        self.assertEqual(server.key_events, [])
+        control.navigate_back.assert_awaited_once()
 
     async def test_shopee_uses_native_back_without_a_second_action(self):
         session, server, timestamps = await self.connect(375, 667)

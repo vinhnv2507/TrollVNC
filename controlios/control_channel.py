@@ -562,7 +562,7 @@ class ControlChannel:
         try:
             reply = (await self.command("back", read_timeout=5)).strip()
         except NotPatchedError:
-            raise ControlError("Cần ControlIOS 4.34 trở lên để quay lại trong Shopee và app khác") from None
+            raise ControlError("Cần ControlIOS 4.34 trở lên để quay lại trong Settings, Shopee và app khác") from None
         except ControlError as exc:
             messages = {
                 "ERR BackBusy": "Máy đang chạm hoặc chạy AutoClickJS; thử Quay lại sau khi dừng thao tác",
