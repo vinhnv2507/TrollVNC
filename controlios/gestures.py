@@ -34,6 +34,12 @@ RESERVED = frozenset({"tap", "button", "swipe", "text", "key", "wait", "shot",
 
 # Mỗi macro là kịch bản con; {name} là tham số truyền vào.
 DEFAULT_GESTURES: Dict[str, str] = {
+    # Standard iOS navigation gesture, starting inside the left screen edge.
+    # Apps must support edge navigation; iOS has no universal Back key.
+    "back": (
+        "swipe 0.003 0.5 0.88 0.5 0.35\n"
+        "wait 0.25"
+    ),
     # TrollVNC map chuột phải thành nút Home, nên đây là một cú bấm nút thật —
     # không phụ thuộc toạ độ, chạy đúng trên mọi đời máy.
     "home": (

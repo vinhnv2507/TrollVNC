@@ -14,7 +14,14 @@ Tool riêng **CTLIOS Keygen 1.0.0** tạo key theo UDID và thời hạn, có gi
 chọn khoá ký, đọc cấu hình Manager và lấy UDID qua LAN. Xem
 [hướng dẫn tạo key](docs/tao-key-ban-quyen.md).
 
-Manager CTLIOS 0.2.45: bảng Shopee hiển thị tên máy hiện tại và `IP:port`;
+Manager CTLIOS 0.2.46 dùng icon ControlIOS trên iPhone và thêm nút
+**Quay lại** ở khung xem chính và cửa sổ màn hình lớn. Nút vuốt từ mép trái
+sang phải để về trang trước trong các app hỗ trợ cử chỉ này; không phải nút Home.
+Trong cửa sổ nhiều màn hình, nút Quay lại của từng khung chỉ điều khiển máy đó.
+Trong khung xem chính, nút dùng các máy đang chọn, giống Home. Có thể chỉnh
+cử chỉ `back` trong `config/gestures.json` hoặc dùng lệnh `back` trong kịch bản.
+
+Bảng Shopee hiển thị tên máy hiện tại và `IP:port`;
 nút **Mở màn hình lớn** mở đúng máy của dòng cookie đang chọn.
 
 Manager CTLIOS tự nhập dữ liệu từ AppData của ControlIOS PC khi mở lần

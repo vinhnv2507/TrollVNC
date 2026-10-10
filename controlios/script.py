@@ -372,6 +372,7 @@ def _macro(line_no: int, text: str, name: str, args: List[str],
 
 
 _MACRO_LABELS = {
+    "back": "quay lại trang trước (vuốt từ mép trái)",
     "home": "về màn hình chính",
     "switcher": "mở trình chuyển app",
     "spotlight": "mở tìm kiếm Spotlight",

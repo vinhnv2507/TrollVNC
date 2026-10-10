@@ -39,6 +39,7 @@ from ..scan import arp_hosts, discover_bonjour, probe_hosts
 from ..vnc.pool import DevicePool
 from ..vnc.session import BRIGHTNESS_STEPS, Frame, State, Tier
 from .apps_panel import AppsPanel
+from .branding import app_icon
 from .detail import DetailView
 from .grid import DeviceGrid
 from .quality import QualityDialog
@@ -79,6 +80,7 @@ closeapp
 
 # Bảng lệnh bấm-để-chèn: (mẫu chèn vào ô soạn, mô tả ngắn).
 SCRIPT_COMMANDS = [
+    ("back", "quay lại trang trước bằng cử chỉ vuốt từ mép trái"),
     ("tap 0.5 0.85", "chạm tại toạ độ tỉ lệ (x y, 0..1)"),
     ("swipe 0.5 0.8 0.5 0.2 0.4", "vuốt từ (x1 y1) tới (x2 y2) trong <giây>"),
     ("swipe 0.5 0.99 0.5 0.45 0.35 0.7", "vuốt rồi GIỮ 0.7s trước khi nhả (mở switcher)"),
@@ -2272,27 +2274,28 @@ class DeviceScreenPane(QWidget):
         self.view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.view, 1)
 
-        gesture_row = QHBoxLayout()
+        gesture_row = QGridLayout()
         gesture_row.setContentsMargins(2, 0, 2, 0)
         gesture_row.setSpacing(4)
-        for label, gesture, tip in [
+        for index, (label, gesture, tip) in enumerate([
+            ("← Quay lại", "back", "Vuốt từ mép trái sang phải để về trang trước trong app hỗ trợ cử chỉ quay lại"),
             ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
             ("⇄ App", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
             ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),
-        ]:
+        ]):
             btn = QPushButton(label)
             btn.setToolTip(tip)
             btn.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
             btn.setStyleSheet("padding: 2px 4px;")
             btn.clicked.connect(lambda _checked=False, g=gesture: self._run_gesture(g))
-            gesture_row.addWidget(btn)
+            gesture_row.addWidget(btn, index // 3, index % 3)
             self.buttons[gesture] = btn
 
         control_center_button = QPushButton("◫ Control Center")
         control_center_button.setToolTip(
             "Mở Trung tâm điều khiển bằng lệnh riêng của ControlIOS")
         control_center_button.clicked.connect(self._open_control_center)
-        gesture_row.addWidget(control_center_button)
+        gesture_row.addWidget(control_center_button, 1, 1)
         self.buttons["controlcenter"] = control_center_button
 
         ram_button = QPushButton("RAM")
@@ -2300,7 +2303,7 @@ class DeviceScreenPane(QWidget):
             "Đóng hết app đang chạy để giải phóng RAM (trừ ControlIOS/TrollStore/hệ thống)."
         )
         ram_button.clicked.connect(self._free_ram)
-        gesture_row.addWidget(ram_button)
+        gesture_row.addWidget(ram_button, 1, 2)
         self.buttons["freeram"] = ram_button
         layout.addLayout(gesture_row)
 
@@ -2348,7 +2351,6 @@ class DeviceScreenPane(QWidget):
                 lambda _checked=False, s=state: self._set_assistive_touch(s))
         at_button.setMenu(at_menu)
         extra_row.addWidget(at_button)
-        extra_row.addStretch(1)
         self.buttons["assistivetouch"] = at_button
         layout.addLayout(extra_row)
         for widget in self.buttons.values():
@@ -2405,7 +2407,7 @@ class DeviceScreenPane(QWidget):
     def _run_gesture(self, gesture: str) -> None:
         self._activate()
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
-                  "lock": "Khoá máy"}
+                  "lock": "Khoá máy", "back": "Quay lại"}
         try:
             steps = script_lang.parse(gesture)
         except script_lang.ScriptError as exc:
@@ -2704,6 +2706,7 @@ class MainWindow(QMainWindow):
     def __init__(self, registry_path: Path = DEFAULT_REGISTRY) -> None:
         super().__init__()
         self.setWindowTitle(f"Manager CTLIOS {__version__}")
+        self.setWindowIcon(app_icon())
         self.resize(1500, 950)
         self.registry_path = registry_path
         self.registry = Registry.load(registry_path)
@@ -2769,27 +2772,28 @@ class MainWindow(QMainWindow):
 
         # Phím thiết bị nhanh NGAY DƯỚI khung lớn: Home / Chuyển app / Khoá — luôn
         # thấy khi đang xem một máy, khỏi mở bảng Ứng dụng.
-        gesture_row = QHBoxLayout()
+        gesture_row = QGridLayout()
         gesture_row.setContentsMargins(2, 0, 2, 2)
         gesture_row.setSpacing(4)
         self.device_gesture_buttons = {}
-        for label, gesture, tip in [
+        for index, (label, gesture, tip) in enumerate([
+            ("← Quay lại", "back", "Vuốt từ mép trái sang phải để về trang trước trong app hỗ trợ cử chỉ quay lại"),
             ("⌂ Home", "home", "Về màn hình chính (nút Home)"),
             ("⇄ App", "switcher", "Mở trình chuyển app (bấm Home hai lần)"),
             ("⏻ Khoá", "lock", "Khoá máy (nút Power)"),
-        ]:
+        ]):
             btn = QPushButton(label)
             btn.setToolTip(tip)
             btn.clicked.connect(
                 lambda _checked=False, g=gesture: self._run_device_gesture(g))
-            gesture_row.addWidget(btn)
+            gesture_row.addWidget(btn, index // 3, index % 3)
             self.device_gesture_buttons[gesture] = btn
 
         control_center_button = QPushButton("◫ Control Center")
         control_center_button.setToolTip(
             "Mở Trung tâm điều khiển bằng lệnh riêng của ControlIOS")
         control_center_button.clicked.connect(self._open_control_center_selected)
-        gesture_row.addWidget(control_center_button)
+        gesture_row.addWidget(control_center_button, 1, 1)
         self.device_gesture_buttons["controlcenter"] = control_center_button
 
         ram_button = QPushButton("RAM")
@@ -2798,9 +2802,12 @@ class MainWindow(QMainWindow):
             "EarnApp và Golike cũng bị đóng."
         )
         ram_button.clicked.connect(self._free_ram_selected)
-        gesture_row.addWidget(ram_button)
+        gesture_row.addWidget(ram_button, 1, 2)
         self.device_gesture_buttons["freeram"] = ram_button
 
+        settings_row = QHBoxLayout()
+        settings_row.setContentsMargins(2, 0, 2, 2)
+        settings_row.setSpacing(4)
         rotation_button = QToolButton()
         rotation_button.setText("↻ Khóa xoay")
         rotation_button.setToolTip("Bật/tắt khóa xoay màn hình trực tiếp trên iOS")
@@ -2812,7 +2819,7 @@ class MainWindow(QMainWindow):
             action.triggered.connect(
                 lambda _checked=False, s=state: self._set_rotation_lock(s))
         rotation_button.setMenu(rotation_menu)
-        gesture_row.addWidget(rotation_button)
+        settings_row.addWidget(rotation_button)
         self.device_gesture_buttons["rotationlock"] = rotation_button
 
         touch_lock_button = QToolButton()
@@ -2832,7 +2839,7 @@ class MainWindow(QMainWindow):
         touch_lock_menu.addAction("Xóa nhật ký Home").triggered.connect(
             lambda: self._show_home_audit(True))
         touch_lock_button.setMenu(touch_lock_menu)
-        gesture_row.addWidget(touch_lock_button)
+        settings_row.addWidget(touch_lock_button)
         self.device_gesture_buttons["touchlock"] = touch_lock_button
 
         # AssistiveTouch iOS (nút tròn nổi) — bật/tắt cho máy đang xem/chọn.
@@ -2847,7 +2854,8 @@ class MainWindow(QMainWindow):
                 lambda _checked=False, s=state: self._set_assistive_touch(s))
         at_button.setMenu(at_menu)
         detail_layout.addLayout(gesture_row)
-        detail_layout.addWidget(at_button)
+        settings_row.addWidget(at_button)
+        detail_layout.addLayout(settings_row)
         quality_button = QPushButton("⚙ Chất lượng màn hình")
         quality_button.setToolTip(
             "Chỉnh tốc độ khung hình và độ nét của màn hình lớn/lưới — áp dụng ngay")
@@ -4461,14 +4469,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"Đang tắt {len(targets)} thiết bị", 5000)
 
     def _run_device_gesture(self, gesture: str) -> None:
-        """Nút Home / Chuyển app / Khoá trong bảng Ứng dụng.
+        """Cử chỉ Quay lại / Home / Chuyển app / Khoá từ thanh điều khiển.
 
         Đây là thao tác mức thiết bị nên vẫn đi bằng cử chỉ (nút cứng qua map
         nút chuột của ControlIOS), không qua kênh điều khiển.
         """
 
         labels = {"home": "Về màn hình chính", "switcher": "Trình chuyển app",
-                  "lock": "Khoá máy"}
+                  "lock": "Khoá máy", "back": "Quay lại"}
         self._run_quick_action(labels.get(gesture, gesture), gesture, False)
 
     def _free_ram_selected(self) -> None:
@@ -5386,6 +5394,7 @@ def run() -> int:
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)s %(name)s %(message)s")
     app = QApplication.instance() or QApplication([])
+    app.setWindowIcon(app_icon())
     app.setStyle("Fusion")
     window = MainWindow()
     window.show()

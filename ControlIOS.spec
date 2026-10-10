@@ -8,7 +8,7 @@ from PyInstaller.utils.hooks import collect_all
 
 import PySide6
 
-datas = []
+datas = [('controlios/assets/controlios.ico', 'controlios/assets')]
 binaries = []
 hiddenimports = ['socks', 'urllib3.contrib.socks']
 hiddenimports += collect_submodules('zeroconf')
@@ -89,6 +89,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name='Manager CTLIOS',
+    icon='controlios/assets/controlios.ico',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
