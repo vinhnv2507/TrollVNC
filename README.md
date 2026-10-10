@@ -10,6 +10,10 @@ hình vừa *bơm* được thao tác chuột/phím — không cần CTRIOS view
 Nút **Shopee** mở bảng lưu cookie và proxy riêng từng tài khoản, kiểm tra đơn
 gần đây và voucher ngay trong tool. Xem [hướng dẫn bảng Shopee](docs/shopee-pc.md).
 
+Tool riêng **CTLIOS Keygen 1.0.0** tạo key theo UDID và thời hạn, có giao diện
+chọn khoá ký, đọc cấu hình Manager và lấy UDID qua LAN. Xem
+[hướng dẫn tạo key](docs/tao-key-ban-quyen.md).
+
 Manager CTLIOS 0.2.44 tự nhập dữ liệu từ AppData của ControlIOS PC khi mở lần
 đầu: danh sách máy, nhóm, ghi chú, cấu hình, thư viện script, cookie/Shopee và
 ảnh chụp. Dữ liệu cũ được giữ nguyên; file Manager cần bổ sung có bản sao lưu
