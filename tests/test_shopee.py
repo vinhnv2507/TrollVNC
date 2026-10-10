@@ -274,6 +274,93 @@ class ApiTest(unittest.TestCase):
 
 
 class TableTest(unittest.TestCase):
+    def test_device_identity_refresh_preserves_cookie_results_and_selection(self):
+        from controlios.config import DeviceSpec
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AccountStore(Path(tmp) / "accounts.json")
+            device = DeviceSpec("172.30.2.101", name="6s101")
+            account = store.upsert("SPC_ST=synthetic", device.key, "localhost:90",
+                                   source=f"{device.key}|com.shopee")
+            account.result = {"username": "user", "vouchers": [{"code": "VOUCHER"}]}
+            store.save()
+            before = store.path.read_bytes()
+            dialog = ShopeeDialog(store, device_lookup=lambda key: device if key == device.key else None,
+                                  open_device=Mock())
+            try:
+                self.assertEqual(dialog.table.item(0, 0).text(), "6s-101 — 172.30.2.101:5901")
+                self.assertTrue(dialog.open_screen_button.isEnabled())
+                device.name = "6s-NEW"
+                dialog.refresh_devices()
+                self.assertEqual(dialog.table.item(0, 0).text(), "6s-NEW — 172.30.2.101:5901")
+                self.assertEqual(dialog._current_account(), account)
+                self.assertEqual(dialog.table.item(0, 1).text(), "user")
+                self.assertEqual(dialog.vouchers.item(0, 0).text(), "VOUCHER")
+                self.assertEqual(account.label, device.key)
+                self.assertEqual(store.path.read_bytes(), before)
+                dialog._buttons[0].setEnabled(False)
+                self.assertTrue(dialog.open_screen_button.isEnabled())
+            finally:
+                dialog.close()
+
+    def test_open_screen_uses_current_row_exact_endpoint_and_handles_missing_device(self):
+        from controlios.config import DeviceSpec
+        with tempfile.TemporaryDirectory() as tmp:
+            store = AccountStore(Path(tmp) / "accounts.json")
+            devices = [DeviceSpec("127.0.0.1", port=p, name="6s101") for p in (5901, 5902)]
+            for device in devices:
+                store.upsert(f"SPC_ST=synthetic-{device.port}", "old label", source=f"{device.key}|com.shopee")
+            store.upsert("SPC_ST=manual", "Manual")
+            legacy = store.upsert("SPC_ST=legacy", devices[0].key)
+            open_device = Mock()
+            dialog = ShopeeDialog(store, device_lookup=lambda key: next((d for d in devices if d.key == key), None),
+                                  open_device=open_device)
+            try:
+                dialog.table.setCurrentCell(1, 0)
+                dialog.table.selectAll()
+                dialog.open_screen_button.click()
+                open_device.assert_called_once_with("127.0.0.1:5902")
+                self.assertEqual(dialog.table.item(3, 0).text(), "6s-101 — 127.0.0.1:5901")
+                dialog.table.selectRow(2)
+                self.assertFalse(dialog.open_screen_button.isEnabled())
+                dialog._open_selected_device()
+                self.assertIn("chưa liên kết", dialog.status.text())
+                dialog.table.selectRow(0)
+                devices.clear()
+                dialog._open_selected_device()
+                self.assertFalse(dialog.open_screen_button.isEnabled())
+                open_device.assert_called_once()
+                dialog.table.clearSelection()
+                self.assertFalse(dialog.open_screen_button.isEnabled())
+            finally:
+                dialog.close()
+
+    def test_manager_routes_shopee_screen_and_refreshes_metadata_on_reopen(self):
+        from controlios.config import DeviceSpec
+        from controlios.ui.app import MainWindow
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with patch("controlios.ui.app.SHOPEE_STORE_PATH", root / "accounts.json"), patch("controlios.ui.app.DevicePool"):
+                window = MainWindow(root / "devices.json")
+                window.pool.updating_ios = set()
+                device = DeviceSpec("172.30.2.101", name="6s101")
+                window.registry.devices = [device]
+                window._get_shopee_store().upsert("SPC_ST=synthetic", device.key, source=f"{device.key}|com.shopee")
+                try:
+                    window._open_shopee()
+                    dialog = window.shopee_dialog
+                    with patch.object(window, "_open_multi_detail") as open_screen:
+                        dialog.open_screen_button.click()
+                        open_screen.assert_called_once_with([device.key])
+                    window._on_device_name_found(device.key, "6s202")
+                    self.assertEqual(dialog.table.item(0, 0).text(), "6s-202 — 172.30.2.101:5901")
+                    dialog.close()
+                    device.name = "6s303"
+                    window._open_shopee()
+                    self.assertEqual(dialog.table.item(0, 0).text(), "6s-303 — 172.30.2.101:5901")
+                    self.assertIsNone(dialog.parentWidget())
+                finally:
+                    window.close()
+
     def test_close_waits_for_background_scan_and_does_not_restart_it(self):
         import time
         from controlios.ui.app import MainWindow, ScanWorker

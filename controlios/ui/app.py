@@ -3778,6 +3778,9 @@ class MainWindow(QMainWindow):
         self._sync_tile_spec(device)
 
     def _sync_tile_spec(self, device: DeviceSpec) -> None:
+        shopee = getattr(self, "shopee_dialog", None)
+        if shopee is not None:
+            shopee.refresh_devices()
         tile = self.grid.tiles.get(device.key)
         if tile is not None:
             tile.spec = device
@@ -4880,7 +4883,12 @@ class MainWindow(QMainWindow):
         from .shopee_panel import ShopeeDialog
         try:
             if self.shopee_dialog is None:
-                self.shopee_dialog = ShopeeDialog(self._get_shopee_store(), self)
+                self.shopee_dialog = ShopeeDialog(
+                    self._get_shopee_store(), self,
+                    device_lookup=lambda key: next((d for d in self.registry.devices if d.key == key), None),
+                    open_device=lambda key: self._open_multi_detail([key]),
+                )
+            self.shopee_dialog.refresh_devices()
             self.shopee_dialog.setWindowState(self.shopee_dialog.windowState() & ~Qt.WindowMinimized)
             self.shopee_dialog.show()
             self.shopee_dialog.raise_()

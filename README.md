@@ -14,7 +14,10 @@ Tool riêng **CTLIOS Keygen 1.0.0** tạo key theo UDID và thời hạn, có gi
 chọn khoá ký, đọc cấu hình Manager và lấy UDID qua LAN. Xem
 [hướng dẫn tạo key](docs/tao-key-ban-quyen.md).
 
-Manager CTLIOS 0.2.44 tự nhập dữ liệu từ AppData của ControlIOS PC khi mở lần
+Manager CTLIOS 0.2.45: bảng Shopee hiển thị tên máy hiện tại và `IP:port`;
+nút **Mở màn hình lớn** mở đúng máy của dòng cookie đang chọn.
+
+Manager CTLIOS tự nhập dữ liệu từ AppData của ControlIOS PC khi mở lần
 đầu: danh sách máy, nhóm, ghi chú, cấu hình, thư viện script, cookie/Shopee và
 ảnh chụp. Dữ liệu cũ được giữ nguyên; file Manager cần bổ sung có bản sao lưu
 trong `migration-backups`. Việc nhập chỉ chạy một lần để không phục hồi lại

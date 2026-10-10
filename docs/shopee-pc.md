@@ -3,6 +3,8 @@
 Mở **Shopee** trên thanh Thao tác. Cookie lấy từ app Shopee trên iPhone tự được thêm vào bảng; cookie Shopee đã lưu từ các bản cũ được nhập một lần khi mở bảng lần đầu. Danh sách được lưu trong dữ liệu của ControlIOS PC và giữ lại khi thay bản EXE, không cần Google Sheet.
 
 - **Thêm cookie / Sửa**: đặt tên, cookie đầy đủ hoặc SPC_ST, proxy riêng của tài khoản.
+- **Tên / thiết bị** lấy tên hiện tại từ danh sách máy của Manager và kèm `IP:port`, ví dụ `6s-101 — 172.30.2.101:5901`. Tên dạng `6s101` / `7g101` được hiển thị thành `6s-101` / `7g-101` trong bảng; tên lưu trên máy không thay đổi. Khi Manager đọc được tên mới hoặc bạn đổi tên, bảng cập nhật theo.
+- Chọn dòng cookie rồi bấm **Mở màn hình lớn** để xem và điều khiển đúng iPhone của dòng đó trong cửa sổ phóng to. Khi chọn nhiều dòng, nút dùng dòng đang có con trỏ chọn. Có thể mở khi bảng đang check. Cookie nhập tay chưa liên kết với máy chỉ dùng kiểm tra tài khoản; nút mở màn hình bị vô hiệu hóa.
 - **Dán danh sách**: mỗi dòng một cookie; hoặc ba cột phân cách bằng TAB: tên, cookie, proxy. Cookie có cùng SPC_ST được cập nhật, không thêm trùng.
 - **Gán proxy**: chọn áp dụng cho toàn bảng hoặc các dòng đã chọn, luôn theo thứ tự từ trên xuống dưới. Dán mỗi dòng một proxy và chọn cách gán. Hộp thoại xem trước số cookie được gán và số cookie để trống trước khi áp dụng; proxy cũ trong phạm vi này được thay thế.
   - **Gán lần lượt; cookie dư để trống proxy**: 100 proxy cho 150 cookie sẽ gán 100 cookie đầu, xóa proxy của 50 cookie còn lại.

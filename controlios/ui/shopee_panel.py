@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime
 from PySide6.QtCore import Qt, QThread, Signal, QItemSelectionModel, QPoint
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from ..shopee import Account, AccountStore, ShopeeClient, ShopeeError, normalize_cookie, normalize_proxy, proxy_label, proxy_assignment
+from .tile import device_alias
 
 
 class CheckWorker(QThread):
@@ -247,18 +249,20 @@ class VoucherPopup(QFrame):
 class ShopeeDialog(QDialog):
     VOUCHER_COLUMN = 6
 
-    def __init__(self, store: AccountStore, parent=None):
+    def __init__(self, store: AccountStore, parent=None, *, device_lookup=None, open_device=None):
         # MainWindow retains this window and shuts it down explicitly. An
         # unowned normal window gets its own taskbar entry on Windows.
         super().__init__(None, Qt.Window | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
         self.setWindowTitle("Shopee — Cookie, đơn hàng và voucher")
         self.resize(1160, 760)
         self.store = store
+        self._device_lookup = device_lookup
+        self._open_device = open_device
         self.worker: CheckWorker | None = None
         self.voucher_popup: VoucherPopup | None = None
         self._buttons = []
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Danh sách tự lưu trong ControlIOS PC. Mỗi tài khoản dùng proxy của dòng đó khi kiểm tra."))
+        layout.addWidget(QLabel("Danh sách tự lưu trong Manager CTLIOS. Mỗi tài khoản dùng proxy của dòng đó khi kiểm tra."))
         buttons = QHBoxLayout()
         for text, slot in [("Thêm cookie", self._add), ("Dán danh sách", self._import),
                            ("Sửa", self._edit), ("Xóa", self._remove),
@@ -273,13 +277,23 @@ class ShopeeDialog(QDialog):
         self.stop_button.clicked.connect(self._stop)
         buttons.addWidget(self.stop_button)
         layout.addLayout(buttons)
+        device_bar = QHBoxLayout()
+        self.open_screen_button = QPushButton("Mở màn hình lớn")
+        self.open_screen_button.clicked.connect(self._open_selected_device)
+        device_bar.addWidget(self.open_screen_button)
+        self.selected_device_label = QLabel()
+        self.selected_device_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        device_bar.addWidget(self.selected_device_label, 1)
+        layout.addLayout(device_bar)
         splitter = QSplitter(Qt.Vertical)
         self.table = self._table(["Tên / thiết bị", "Username", "Cookie", "Proxy", "Kết quả", "Đơn", "Voucher", "Kiểm tra lúc"])
+        self.table.setColumnWidth(0, 300)
         self.table.setColumnWidth(1, 160)
         self.table.setColumnWidth(2, 160)
         self.table.setColumnWidth(3, 220)
         self.table.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.table.itemSelectionChanged.connect(self._details)
+        self.table.currentCellChanged.connect(self._update_device_controls)
         self.table.cellClicked.connect(self._cell_clicked)
         self.table.cellActivated.connect(self._cell_clicked)
         self.table.itemDoubleClicked.connect(self._double_clicked)
@@ -317,6 +331,56 @@ class ShopeeDialog(QDialog):
     def _selected(self) -> list[Account]:
         return [self.store.accounts[index.row()] for index in self.table.selectionModel().selectedRows()]
 
+    def _account_device(self, account):
+        # Captured cookies keep their original endpoint even when the display
+        # name changes. Legacy rows can carry just the endpoint in their label.
+        key = account.source.split("|", 1)[0] if account.source else account.label
+        return self._device_lookup(key) if self._device_lookup is not None else None
+
+    def _device_label(self, account):
+        device = self._account_device(account)
+        if device is None:
+            return account.label
+        name = device_alias(device)
+        match = re.fullmatch(r"(6s|7g)[\s_-]*(.+)", name, re.IGNORECASE)
+        if match:
+            name = f"{match[1].lower()}-{match[2]}"
+        return f"{name} — {device.key}" if name else device.key
+
+    def _current_account(self):
+        row = self.table.currentRow()
+        selected = {index.row() for index in self.table.selectionModel().selectedRows()}
+        if row not in selected:
+            row = min(selected) if selected else -1
+        return self.store.accounts[row] if 0 <= row < len(self.store.accounts) else None
+
+    def _update_device_controls(self, *_):
+        account = self._current_account()
+        device = self._account_device(account) if account is not None else None
+        self.open_screen_button.setEnabled(device is not None and self._open_device is not None)
+        self.selected_device_label.setText(
+            self._device_label(account) if device is not None else
+            "Cookie này chưa liên kết với máy trong Manager." if account else "Chọn một dòng cookie để mở máy.")
+
+    def _open_selected_device(self):
+        account = self._current_account()
+        device = self._account_device(account) if account is not None else None
+        if device is None or self._open_device is None:
+            self._update_device_controls()
+            self.status.setText("Cookie này chưa liên kết với máy trong Manager.")
+            return
+        self._open_device(device.key)
+
+    def refresh_devices(self):
+        """Update identity only, leaving selection and check results untouched."""
+        for row, account in enumerate(self.store.accounts):
+            item = self.table.item(row, 0)
+            if item is not None:
+                label = self._device_label(account)
+                item.setText(label)
+                item.setToolTip(label)
+        self._update_device_controls()
+
     def _refresh(self):
         selected = {a.id for a in self._selected()}
         current = self.table.currentRow()
@@ -326,7 +390,7 @@ class ShopeeDialog(QDialog):
         for index, account in enumerate(self.store.accounts):
             result = account.result
             token = account.fingerprint()[:10]
-            values = [account.label, result.get("username") or "—", "SPC_ST • " + token, proxy_label(account.proxy),
+            values = [self._device_label(account), result.get("username") or "—", "SPC_ST • " + token, proxy_label(account.proxy),
                       result.get("status", "Chưa kiểm tra"),
                       self._count(result, "orders", "order_error"),
                       self._count(result, "vouchers", "voucher_error") + " ▾", account.checked_at]
@@ -508,6 +572,7 @@ class ShopeeDialog(QDialog):
             self.status.setText(f"Đã copy {len(selected)} cookie.")
 
     def _details(self):
+        self._update_device_controls()
         selected = self._selected()
         result = selected[0].result if selected else {}
         orders, vouchers = result.get("orders", []), result.get("vouchers", [])
