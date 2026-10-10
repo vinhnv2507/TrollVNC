@@ -14,11 +14,12 @@ Tool riêng **CTLIOS Keygen 1.0.0** tạo key theo UDID và thời hạn, có gi
 chọn khoá ký, đọc cấu hình Manager và lấy UDID qua LAN. Xem
 [hướng dẫn tạo key](docs/tao-key-ban-quyen.md).
 
-Manager CTLIOS 0.2.47 dùng icon ControlIOS trên iPhone và có nút
-**Quay lại** ở khung xem chính và cửa sổ màn hình lớn. Khi Safari đang mở,
-nút gửi tổ hợp Command + [ để về đúng một trang trước trong lịch sử cùng tab.
-App khác dùng vuốt từ mép trái sang phải nếu app hỗ trợ cử chỉ này.
-Manager nhận biết app qua kênh điều khiển ControlIOS; không cần cài lại iOS.
+Manager CTLIOS 0.2.48 dùng icon ControlIOS trên iPhone và có nút
+**Quay lại** ở khung xem chính và cửa sổ màn hình lớn. Safari và Settings dùng
+Command + [ để về đúng một trang trước. Với Shopee và app khác, ControlIOS
+4.34 trở lên nhận mũi tên quay lại trên ảnh mới và chạm ngay trên iPhone.
+Không có mũi tên hoặc nhận dạng không rõ thì không chạm. Ảnh nhận dạng dùng
+độ phân giải gốc, độc lập với chất lượng thumbnail trong Manager.
 Trong cửa sổ nhiều màn hình, nút Quay lại của từng khung chỉ điều khiển máy đó.
 Trong khung xem chính, nút dùng các máy đang chọn, giống Home. Có thể chỉnh
 cử chỉ `back` trong `config/gestures.json` hoặc dùng lệnh `back` trong kịch bản.

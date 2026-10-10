@@ -525,13 +525,15 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                 bundle = await control.frontmost_app() if control is not None else ""
                 if cancel and cancel.is_set():
                     raise asyncio.CancelledError()
-                if bundle == "com.apple.mobilesafari":
-                    # Send Safari's history shortcut once. Following an
-                    # uncertain swipe with a shortcut could go back twice.
+                if bundle in {"com.apple.mobilesafari", "com.apple.Preferences"}:
+                    # These system apps accept one history/navigation shortcut.
+                    # Never follow it with another action that could go back twice.
                     session.press_keys("Super", "[")
                     await asyncio.sleep(0.05)
-                else:
+                elif bundle == "com.apple.springboard" or control is None:
                     await session.edge_back()
+                elif not await control.navigate_back():
+                    raise ConnectionError("Không tìm thấy nút quay lại trên màn hình iPhone")
             elif step.op == "controlcenter":
                 if control is None:
                     raise ConnectionError("lệnh controlcenter cần kênh điều khiển ControlIOS")

@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtWidgets import QApplication
 
 from controlios import script
+from controlios.control_channel import ControlChannel, ControlError, NotPatchedError
 from controlios.config import DeviceSpec, Registry, Settings
 from controlios.ui.app import MainWindow
 from controlios.ui.branding import app_icon
@@ -33,15 +34,51 @@ class BackGestureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.key_events, [(1, 65515), (1, 91), (0, 91), (0, 65515)])
         control.frontmost_app.assert_awaited_once()
 
-    async def test_other_app_uses_edge_gesture_without_safari_shortcut(self):
+    async def test_settings_sends_one_navigation_shortcut(self):
         session, server, timestamps = await self.connect(375, 667)
         control = AsyncMock()
         control.frontmost_app.return_value = "com.apple.Preferences"
         await script.run_on_session(session, script.parse("back"), lambda *args: None,
                                     control=control)
         await asyncio.sleep(.05)
-        self.assertGreater(len(server.pointer_events), 20)
+        self.assertEqual(server.pointer_events, [])
+        self.assertEqual(server.key_events, [(1, 65515), (1, 91), (0, 91), (0, 65515)])
+        control.navigate_back.assert_not_awaited()
+
+    async def test_shopee_uses_native_back_without_a_second_action(self):
+        session, server, timestamps = await self.connect(375, 667)
+        control = AsyncMock()
+        control.frontmost_app.return_value = "com.beeasy.shopee.vn"
+        control.navigate_back.return_value = True
+        await script.run_on_session(session, script.parse("back"), lambda *args: None, control=control)
+        control.navigate_back.assert_awaited_once()
+        self.assertEqual(server.pointer_events, [])
         self.assertEqual(server.key_events, [])
+
+    async def test_no_arrow_does_not_fall_back_to_a_guessed_tap(self):
+        session, server, timestamps = await self.connect(375, 667)
+        control = AsyncMock()
+        control.frontmost_app.return_value = "com.beeasy.shopee.vn"
+        control.navigate_back.return_value = False
+        with self.assertRaisesRegex(ConnectionError, "Không tìm thấy"):
+            await script.run_on_session(session, script.parse("back"), lambda *args: None, control=control)
+        self.assertEqual(server.pointer_events, [])
+        self.assertEqual(server.key_events, [])
+
+    async def test_native_back_requires_update_and_never_retries_a_tap(self):
+        channel = ControlChannel("127.0.0.1", 46752, "test")
+        channel.command = AsyncMock(side_effect=NotPatchedError("old"))
+        with self.assertRaisesRegex(ControlError, "4.34"):
+            await channel.navigate_back()
+        channel.command.assert_awaited_once()
+
+    async def test_native_back_response_and_busy_error(self):
+        channel = ControlChannel("127.0.0.1", 46752, "test")
+        channel.command = AsyncMock(side_effect=["OK tapped\n", "OK none\n", ControlError("ERR BackBusy")])
+        self.assertTrue(await channel.navigate_back())
+        self.assertFalse(await channel.navigate_back())
+        with self.assertRaisesRegex(ControlError, "AutoClickJS"):
+            await channel.navigate_back()
 
     async def test_cancel_during_app_query_does_not_send_back(self):
         session, server, timestamps = await self.connect(375, 667)

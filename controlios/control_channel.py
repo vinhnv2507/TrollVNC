@@ -557,6 +557,24 @@ class ControlChannel:
             return reply[3:].strip() or None
         raise ControlError(f"Không đọc được ứng dụng đang mở: {reply}")
 
+    async def navigate_back(self) -> bool:
+        """Nhận mũi tên và chạm trên iPhone; False khi không có nút quay lại."""
+        try:
+            reply = (await self.command("back", read_timeout=5)).strip()
+        except NotPatchedError:
+            raise ControlError("Cần ControlIOS 4.34 trở lên để quay lại trong Shopee và app khác") from None
+        except ControlError as exc:
+            messages = {
+                "ERR BackBusy": "Máy đang chạm hoặc chạy AutoClickJS; thử Quay lại sau khi dừng thao tác",
+                "ERR BackLocked": "Màn hình đang khóa hoặc chỉ cho xem",
+                "ERR BackNoFrame": "Chưa nhận được hình ảnh mới trên iPhone; thử Quay lại lần nữa",
+                "ERR BackScreenChanged": "Màn hình đã thay đổi; thử Quay lại lần nữa",
+            }
+            raise ControlError(messages.get(str(exc), str(exc))) from None
+        if reply in {"OK tapped", "OK none"}:
+            return reply == "OK tapped"
+        raise ControlError(f"Phản hồi Quay lại không hợp lệ: {reply}")
+
     async def type_text(self, value: str) -> None:
         """Gõ UTF-8 bằng HID ngay trên ControlIOS, không đi qua CTRIOS keysym."""
         encoded = base64.b64encode(value.encode("utf-8")).decode("ascii")
