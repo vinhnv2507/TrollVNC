@@ -55,6 +55,15 @@ class BackGestureTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(server.pointer_events, [])
         self.assertEqual(server.key_events, [])
 
+    async def test_system_screen_keeps_existing_edge_navigation(self):
+        session, server, timestamps = await self.connect(375, 667)
+        control = AsyncMock()
+        control.frontmost_app.return_value = None
+        await script.run_on_session(session, script.parse("back"), lambda *args: None, control=control)
+        self.assertGreater(len(server.pointer_events), 20)
+        self.assertEqual(server.key_events, [])
+        control.navigate_back.assert_not_awaited()
+
     async def test_no_arrow_does_not_fall_back_to_a_guessed_tap(self):
         session, server, timestamps = await self.connect(375, 667)
         control = AsyncMock()

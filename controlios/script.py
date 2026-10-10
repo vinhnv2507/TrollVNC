@@ -530,7 +530,7 @@ async def run_on_session(session, steps: Sequence[Step], on_event: ScriptEvent,
                     # Never follow it with another action that could go back twice.
                     session.press_keys("Super", "[")
                     await asyncio.sleep(0.05)
-                elif bundle == "com.apple.springboard" or control is None:
+                elif bundle in {None, "", "com.apple.springboard"} or control is None:
                     await session.edge_back()
                 elif not await control.navigate_back():
                     raise ConnectionError("Không tìm thấy nút quay lại trên màn hình iPhone")
