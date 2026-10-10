@@ -10,7 +10,13 @@ hình vừa *bơm* được thao tác chuột/phím — không cần CTRIOS view
 Nút **Shopee** mở bảng lưu cookie và proxy riêng từng tài khoản, kiểm tra đơn
 gần đây và voucher ngay trong tool. Xem [hướng dẫn bảng Shopee](docs/shopee-pc.md).
 
-Manager CTLIOS 0.2.43 có **File… → Kích hoạt bản quyền qua LAN…**, hoặc bấm
+Manager CTLIOS 0.2.44 tự nhập dữ liệu từ AppData của ControlIOS PC khi mở lần
+đầu: danh sách máy, nhóm, ghi chú, cấu hình, thư viện script, cookie/Shopee và
+ảnh chụp. Dữ liệu cũ được giữ nguyên; file Manager cần bổ sung có bản sao lưu
+trong `migration-backups`. Việc nhập chỉ chạy một lần để không phục hồi lại
+các máy đã xoá sau đó.
+
+Manager CTLIOS có **File… → Kích hoạt bản quyền qua LAN…**, hoặc bấm
 chuột phải vào máy → **Kích hoạt bản quyền qua LAN…**. Chọn máy, copy UDID để
 cấp key, dán key vào dòng tương ứng rồi bấm kích hoạt. iOS cần ControlIOS 4.33
 trở lên; máy đã hết dùng thử vẫn nhập được key mà không cần mở màn hình iPhone.
