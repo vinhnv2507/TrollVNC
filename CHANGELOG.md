@@ -1,5 +1,14 @@
 # Changelog
 
+## [4.35] - 2026-10-11
+
+- Capture secure keyboard and text canvas pixels using RenderServer Snapshot
+  with disable-update masks ignored. Preserve the app's password masking,
+  keyboard behavior, capture dimensions, orientation and stream encoding.
+- Resolve Snapshot at runtime and retain the existing RenderDisplay path as a
+  compatibility fallback if the entry point is missing or a snapshot fails.
+- Synchronize the Xcode version defaults with the package release version.
+
 ## [4.34] - 2026-10-10
 
 - Add authenticated `back` navigation for Manager CTLIOS. Recognize the visible

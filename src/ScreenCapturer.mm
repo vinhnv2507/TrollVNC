@@ -24,6 +24,7 @@
 #import <UIKit/UIImage.h>
 #import <UIKit/UIScreen.h>
 #import <mach/mach.h>
+#import <dlfcn.h>
 
 #import "Control.h"
 #import "IOKitSPI.h"
@@ -42,6 +43,11 @@ void CARenderServerRenderDisplay(kern_return_t a, CFStringRef b, IOSurfaceRef su
 #ifdef __cplusplus
 }
 #endif
+
+// CARenderServerSnapshot has the same IOSurface destination as RenderDisplay,
+// but allows capture of UI layers with disable-update masks (secure keyboards
+// and secure text canvases). Resolve it at runtime for older system builds.
+typedef bool (*TVDisplaySnapshotFunction)(mach_port_t, NSDictionary *);
 
 @implementation ScreenCapturer {
     NSDictionary *mRenderProperties;
@@ -168,11 +174,25 @@ static CFIndex sDirtyFrameCount = 0;
 
     static IOSurfaceRef srcSurface;
     static IOSurfaceAcceleratorRef accelerator;
+    static TVDisplaySnapshotFunction snapshotDisplay;
+    static NSDictionary *snapshotOptions;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         @autoreleasepool {
             srcSurface = IOSurfaceCreate((__bridge CFDictionaryRef)mRenderProperties);
             IOSurfaceAcceleratorCreate(kCFAllocatorDefault, nil, &accelerator);
+
+            snapshotDisplay = (TVDisplaySnapshotFunction)dlsym(RTLD_DEFAULT, "CARenderServerSnapshot");
+            const CFStringRef *displayMode = (const CFStringRef *)dlsym(RTLD_DEFAULT, "kCASnapshotModeDisplay");
+            if (snapshotDisplay && displayMode && *displayMode && srcSurface) {
+                snapshotOptions = @{
+                    @"mode": (__bridge NSString *)*displayMode,
+                    @"displayName": @"LCD",
+                    @"destination": (__bridge id)srcSurface,
+                    @"ignoreDisableUpdateMasks": @YES,
+                    @"enforceSecureMode": @NO,
+                };
+            }
 
             CFRunLoopSourceRef runLoopSource = IOSurfaceAcceleratorGetRunLoopSource(accelerator);
             CFRunLoopAddSource(runLoop, runLoopSource, kCFRunLoopDefaultMode);
@@ -184,8 +204,13 @@ static CFIndex sDirtyFrameCount = 0;
         return NO; // No change
     }
 
-    // Fast ~20ms, sRGB, while the image is GOOD. Recommended.
-    CARenderServerRenderDisplay(0 /* Main Display */, CFSTR("LCD"), srcSurface, 0, 0);
+    // Capture what is displayed without modifying the app's secureTextEntry,
+    // keyboard or layers. Password masking remains controlled by the app.
+    // Keep the previous renderer as a compatibility fallback when Snapshot is
+    // unavailable or fails; never send an uninitialized snapshot surface.
+    if (!snapshotOptions || !snapshotDisplay(0, snapshotOptions)) {
+        CARenderServerRenderDisplay(0 /* Main Display */, CFSTR("LCD"), srcSurface, 0, 0);
+    }
     IOSurfaceAcceleratorTransferSurface(accelerator, srcSurface, dstSurface, NULL, NULL, NULL, NULL);
 
     sDirtyFrameCount = dirtyFrameCount;
